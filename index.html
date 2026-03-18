@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agents Office</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+    canvas { display: block; }
+
+    .agent-label {
+      background: rgba(20, 20, 40, 0.85);
+      color: #e0e0ff;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11px;
+      white-space: nowrap;
+      pointer-events: none;
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      backdrop-filter: blur(4px);
+    }
+    .agent-label .name {
+      font-weight: 600;
+      font-size: 12px;
+      color: #fff;
+    }
+    .agent-label .activity {
+      color: #8888ff;
+      font-size: 10px;
+      margin-top: 1px;
+    }
+
+    #ui-panel {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      background: rgba(20, 20, 40, 0.9);
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 12px;
+      padding: 16px;
+      color: #e0e0ff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      min-width: 220px;
+      max-height: 80vh;
+      overflow-y: auto;
+      backdrop-filter: blur(8px);
+      z-index: 100;
+    }
+    #ui-panel h2 {
+      font-size: 14px;
+      margin-bottom: 12px;
+      color: #fff;
+      border-bottom: 1px solid rgba(120, 120, 255, 0.2);
+      padding-bottom: 8px;
+    }
+    .agent-card {
+      margin-bottom: 10px;
+      padding: 8px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+    }
+    .agent-card .agent-name {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    #pointer-hint {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 20, 40, 0.85);
+      color: #e0e0ff;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      pointer-events: none;
+    }
+    .agent-card select {
+      width: 100%;
+      background: rgba(40, 40, 80, 0.8);
+      color: #e0e0ff;
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 4px;
+      padding: 4px 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="pointer-hint">Click to look around &mdash; WASD to move &mdash; Space/Q up/down &mdash; Shift = fast &mdash; ESC to release</div>
+  <div id="ui-panel">
+    <h2>Agents Office</h2>
+    <div id="agent-list"></div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
