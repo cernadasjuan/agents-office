@@ -1,5 +1,5 @@
 import { AgentManager } from './AgentManager.js';
-import { AgentInfo, getMockAgents } from './AgentData.js';
+import { AgentInfo } from './AgentData.js';
 import type { Activity } from './ActivityAnimations.js';
 
 interface DetectedAgent {
@@ -18,7 +18,6 @@ export class AgentPoller {
   private intervalId: number | null = null;
   private knownIds = new Set<string>();
   private onUpdate: (() => void) | null = null;
-  private usedMockFallback = false;
 
   constructor(agentManager: AgentManager) {
     this.agentManager = agentManager;
@@ -26,7 +25,7 @@ export class AgentPoller {
 
   start(intervalMs = 3000, onUpdate?: () => void): void {
     this.onUpdate = onUpdate ?? null;
-    this.poll(); // immediate first poll
+    this.poll();
     this.intervalId = window.setInterval(() => this.poll(), intervalMs);
   }
 
@@ -43,25 +42,9 @@ export class AgentPoller {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const agents: DetectedAgent[] = await res.json();
-
-      // If real agents found, remove mock fallback if it was used
-      if (agents.length > 0 && this.usedMockFallback) {
-        this.removeMockAgents();
-        this.usedMockFallback = false;
-      }
-
-      // If no real agents and no agents at all, use mock fallback
-      if (agents.length === 0 && this.knownIds.size === 0) {
-        this.loadMockFallback();
-        return;
-      }
-
       this.reconcile(agents);
     } catch {
-      // API not available — use mock fallback if no agents
-      if (this.knownIds.size === 0) {
-        this.loadMockFallback();
-      }
+      // API not available — just keep current state
     }
   }
 
@@ -106,28 +89,6 @@ export class AgentPoller {
 
     if (changed && this.onUpdate) {
       this.onUpdate();
-    }
-  }
-
-  private loadMockFallback(): void {
-    const mocks = getMockAgents();
-    for (const mock of mocks) {
-      if (!this.knownIds.has(mock.id)) {
-        this.agentManager.addAgent(mock);
-        this.knownIds.add(mock.id);
-      }
-    }
-    this.usedMockFallback = true;
-    if (this.onUpdate) this.onUpdate();
-  }
-
-  private removeMockAgents(): void {
-    const mockIds = getMockAgents().map((m) => m.id);
-    for (const id of mockIds) {
-      if (this.knownIds.has(id)) {
-        this.agentManager.removeAgent(id);
-        this.knownIds.delete(id);
-      }
     }
   }
 }

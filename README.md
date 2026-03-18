@@ -59,4 +59,4 @@ When an agent switches tasks, it walks to the corresponding station with a walk 
 ## Requirements
 
 - Node.js 18+
-- One or more running Claude Code sessions to visualize (falls back to mock agents if none found)
+- One or more running Claude Code sessions to visualize

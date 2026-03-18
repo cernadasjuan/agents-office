@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0
+
+### Changes
+
+- Removed mock agent fallback — office stays empty when no Claude Code sessions are running
+
 ## 1.0.0
 
 ### Features
@@ -12,5 +18,4 @@
 - **Station-based layout**: 23 stations across 7 types (implementing, planning, researching, testing, reviewing, idle, meeting)
 - **Smart station assignment**: agents stay at the same desk when switching between activities that share a station type (e.g. implementing -> debugging)
 - **Free camera** with pointer lock, WASD movement, and shift for speed
-- **Mock agent fallback** when no real Claude Code sessions are detected
 - **CLI support**: run with `npx agents-office`
