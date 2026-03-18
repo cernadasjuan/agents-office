@@ -33,8 +33,8 @@ export class AgentManager {
     this.agents.set(info.id, managed);
     this.scene.add(figure.group);
 
-    // Assign to station
-    this.assignStation(managed, info.activity);
+    // Assign to station (teleport immediately, no walk animation)
+    this.assignStation(managed, info.activity, true);
 
     return figure;
   }
@@ -61,32 +61,53 @@ export class AgentManager {
     }
   }
 
+  removeAgent(agentId: string): void {
+    const managed = this.agents.get(agentId);
+    if (!managed) return;
+
+    // Release station
+    if (managed.stationKey) {
+      const station = this.stations.get(managed.stationKey);
+      if (station) station.occupied = false;
+    }
+
+    // Remove from scene
+    this.scene.remove(managed.figure.group);
+    managed.figure.dispose();
+
+    this.agents.delete(agentId);
+  }
+
   getAgents(): ManagedAgent[] {
     return Array.from(this.agents.values());
   }
 
-  private assignStation(managed: ManagedAgent, activity: Activity): void {
+  private assignStation(managed: ManagedAgent, activity: Activity, teleport = false): void {
     const stationType = ACTIVITY_STATION_MAP[activity];
+
+    const placeAt = (key: string, station: Station) => {
+      station.occupied = true;
+      managed.stationKey = key;
+      if (teleport) {
+        managed.figure.teleportTo(station.position, station.lookAt);
+      } else {
+        managed.figure.moveTo(station.position, station.lookAt);
+      }
+      managed.figure.setActivity(activity);
+    };
 
     // Find an unoccupied station of the right type
     for (const [key, station] of this.stations) {
       if (station.type === stationType && !station.occupied) {
-        station.occupied = true;
-        managed.stationKey = key;
-        managed.figure.moveTo(station.position, station.lookAt);
-        managed.figure.setActivity(activity);
+        placeAt(key, station);
         return;
       }
     }
 
-    // Fallback: find any station of similar type, or just stay
-    // Try desk as fallback for most activities
+    // Fallback: any unoccupied station
     for (const [key, station] of this.stations) {
       if (!station.occupied) {
-        station.occupied = true;
-        managed.stationKey = key;
-        managed.figure.moveTo(station.position, station.lookAt);
-        managed.figure.setActivity(activity);
+        placeAt(key, station);
         return;
       }
     }

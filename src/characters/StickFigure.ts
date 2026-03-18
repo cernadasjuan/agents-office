@@ -50,6 +50,19 @@ export class StickFigure {
     this.isMoving = true;
   }
 
+  teleportTo(position: THREE.Vector3, lookAt: THREE.Vector3): void {
+    this.joints.root.position.copy(position);
+    this.targetPosition.copy(position);
+    this.isMoving = false;
+
+    // Face look-at direction immediately
+    const lookDir = new THREE.Vector3().subVectors(lookAt, position);
+    lookDir.y = 0;
+    if (lookDir.length() > 0.01) {
+      this.joints.root.rotation.y = Math.atan2(lookDir.x, lookDir.z);
+    }
+  }
+
   update(elapsed: number, delta: number): void {
     // Handle movement
     if (this.isMoving) {
@@ -96,6 +109,22 @@ export class StickFigure {
     for (const child of obj.children) {
       this.saveCurrentPose(child);
     }
+  }
+
+  dispose(): void {
+    // Remove label DOM element
+    if (this.label.element && this.label.element.parentNode) {
+      this.label.element.parentNode.removeChild(this.label.element);
+    }
+    // Traverse and dispose geometries/materials
+    this.joints.root.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry?.dispose();
+        if (obj.material instanceof THREE.Material) {
+          obj.material.dispose();
+        }
+      }
+    });
   }
 
   private applyPose(pose: Map<THREE.Object3D, THREE.Euler>): void {

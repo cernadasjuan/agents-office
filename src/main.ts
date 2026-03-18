@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { createScene } from './scene/SceneSetup.js';
 import { createOffice } from './scene/Office.js';
 import { AgentManager } from './agents/AgentManager.js';
-import { getMockAgents, ACTIVITIES, ACTIVITY_LABELS } from './agents/AgentData.js';
+import { ACTIVITIES, ACTIVITY_LABELS } from './agents/AgentData.js';
 import { Activity } from './agents/ActivityAnimations.js';
 import { updateFreeCamera } from './scene/FreeCamera.js';
+import { AgentPoller } from './agents/AgentPoller.js';
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
@@ -14,12 +15,6 @@ const stations = createOffice(scene);
 
 // Agent manager
 const agentManager = new AgentManager(scene, stations);
-
-// Create agents from mock data
-const mockAgents = getMockAgents();
-for (const agentInfo of mockAgents) {
-  agentManager.addAgent(agentInfo);
-}
 
 // --- UI Panel ---
 function buildUI(): void {
@@ -52,7 +47,9 @@ function buildUI(): void {
   }
 }
 
-buildUI();
+// Start polling for real agents (falls back to mock if none found)
+const poller = new AgentPoller(agentManager);
+poller.start(3000, buildUI);
 
 // --- Render loop ---
 const clock = new THREE.Clock();
