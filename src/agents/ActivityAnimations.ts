@@ -64,6 +64,35 @@ function applyStandingBase(j: Joints, dt: number): void {
   j.rightLowerLeg.rotation.x = approach(j.rightLowerLeg.rotation.x, 0, dt);
 }
 
+export function animateWalking(j: Joints, elapsed: number, dt: number): void {
+  // Standing base
+  applyStandingBase(j, dt);
+
+  const walkCycle = elapsed * 6; // speed of walk cycle
+  const legSwing = Math.sin(walkCycle) * 0.5;
+  const kneeAngle = Math.max(0, Math.sin(walkCycle)) * 0.6;
+  const altKneeAngle = Math.max(0, Math.sin(walkCycle + Math.PI)) * 0.6;
+
+  // Legs swing opposite to each other
+  j.leftUpperLeg.rotation.x = approach(j.leftUpperLeg.rotation.x, legSwing, dt, 12);
+  j.leftLowerLeg.rotation.x = approach(j.leftLowerLeg.rotation.x, kneeAngle, dt, 12);
+  j.rightUpperLeg.rotation.x = approach(j.rightUpperLeg.rotation.x, -legSwing, dt, 12);
+  j.rightLowerLeg.rotation.x = approach(j.rightLowerLeg.rotation.x, altKneeAngle, dt, 12);
+
+  // Arms swing opposite to legs
+  const armSwing = Math.sin(walkCycle) * 0.4;
+  j.leftUpperArm.rotation.x = approach(j.leftUpperArm.rotation.x, -armSwing, dt, 12);
+  j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -0.3, dt, 12);
+  j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, armSwing, dt, 12);
+  j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -0.3, dt, 12);
+
+  // Subtle body bounce
+  const bounce = Math.abs(Math.sin(walkCycle)) * 0.03;
+  j.hips.position.y = approachY(j.hips.position.y, 0.9 + bounce, dt, 15);
+  j.shoulders.position.y = approachY(j.shoulders.position.y, 1.5 + bounce, dt, 15);
+  j.neck.position.y = approachY(j.neck.position.y, 1.6 + bounce, dt, 15);
+}
+
 export function animateActivity(joints: Joints, activity: Activity, elapsed: number, delta: number): void {
   switch (activity) {
     case 'idle':

@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { buildSkeleton, Joints } from './StickFigureParts.js';
 import { createLabel, updateLabel } from './Label.js';
-import { Activity, animateActivity, getRestPose } from '../agents/ActivityAnimations.js';
+import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
 
 const TRANSITION_DURATION = 0.5;
+const WALK_SPEED = 3;
 
 export class StickFigure {
   joints: Joints;
@@ -67,28 +68,38 @@ export class StickFigure {
     // Handle movement
     if (this.isMoving) {
       const currentPos = this.joints.root.position;
-      const diff = new THREE.Vector3().subVectors(this.targetPosition, currentPos);
-      const dist = diff.length();
+      const moveDir = new THREE.Vector3().subVectors(this.targetPosition, currentPos);
+      const dist = moveDir.length();
 
       if (dist < 0.05) {
         currentPos.copy(this.targetPosition);
         this.isMoving = false;
+        // Snap to face the station's lookAt direction on arrival
+        const lookDir = new THREE.Vector3().subVectors(this.targetLookAt, currentPos);
+        lookDir.y = 0;
+        if (lookDir.length() > 0.01) {
+          this.joints.root.rotation.y = Math.atan2(lookDir.x, lookDir.z);
+        }
       } else {
-        const speed = Math.min(3 * delta, dist);
-        currentPos.add(diff.normalize().multiplyScalar(speed));
+        const speed = Math.min(WALK_SPEED * delta, dist);
+        currentPos.add(moveDir.normalize().multiplyScalar(speed));
+
+        // Face movement direction while walking
+        const faceDir = moveDir.clone();
+        faceDir.y = 0;
+        if (faceDir.length() > 0.01) {
+          const angle = Math.atan2(faceDir.x, faceDir.z);
+          const currentAngle = this.joints.root.rotation.y;
+          let angleDiff = angle - currentAngle;
+          while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+          while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+          this.joints.root.rotation.y += angleDiff * Math.min(5 * delta, 1);
+        }
       }
 
-      // Face target look-at direction
-      const lookDir = new THREE.Vector3().subVectors(this.targetLookAt, currentPos);
-      lookDir.y = 0;
-      if (lookDir.length() > 0.01) {
-        const angle = Math.atan2(lookDir.x, lookDir.z);
-        const currentAngle = this.joints.root.rotation.y;
-        let diff2 = angle - currentAngle;
-        while (diff2 > Math.PI) diff2 -= Math.PI * 2;
-        while (diff2 < -Math.PI) diff2 += Math.PI * 2;
-        this.joints.root.rotation.y += diff2 * Math.min(5 * delta, 1);
-      }
+      // Walking animation overrides activity animation
+      animateWalking(this.joints, elapsed, delta);
+      return;
     }
 
     // Handle transition
@@ -100,7 +111,7 @@ export class StickFigure {
       }
     }
 
-    // Animate
+    // Animate activity
     animateActivity(this.joints, this.activity, elapsed, delta);
   }
 
