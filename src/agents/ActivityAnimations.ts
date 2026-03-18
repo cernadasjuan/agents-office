@@ -68,7 +68,7 @@ export function animateWalking(j: Joints, elapsed: number, dt: number): void {
   // Standing base
   applyStandingBase(j, dt);
 
-  const walkCycle = elapsed * 6; // speed of walk cycle
+  const walkCycle = elapsed * 9; // speed of walk cycle
   const legSwing = Math.sin(walkCycle) * 0.5;
   const kneeAngle = Math.max(0, Math.sin(walkCycle)) * 0.6;
   const altKneeAngle = Math.max(0, Math.sin(walkCycle + Math.PI)) * 0.6;

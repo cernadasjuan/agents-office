@@ -5,7 +5,7 @@ import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
 
 const TRANSITION_DURATION = 0.5;
-const WALK_SPEED = 3;
+const WALK_SPEED = 4.5;
 
 export class StickFigure {
   joints: Joints;
