@@ -43,6 +43,16 @@ export class AgentManager {
     const managed = this.agents.get(agentId);
     if (!managed) return;
 
+    const newStationType = ACTIVITY_STATION_MAP[activity];
+    const oldStationType = ACTIVITY_STATION_MAP[managed.info.activity];
+
+    // If station type is the same, stay at current station (don't move desks)
+    if (newStationType === oldStationType && managed.stationKey) {
+      managed.info.activity = activity;
+      managed.figure.setActivity(activity);
+      return;
+    }
+
     // Release current station
     if (managed.stationKey) {
       const station = this.stations.get(managed.stationKey);
