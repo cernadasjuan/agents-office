@@ -34,37 +34,56 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-// Tool names → activity mapping (language-agnostic, based on what Claude is actually doing)
-const TOOL_ACTIVITY_MAP: Record<string, string> = {
-  // Reading/exploring code
-  Read: 'researching',
-  Grep: 'researching',
-  Glob: 'researching',
-  Agent: 'researching',
-  WebSearch: 'researching',
-  WebFetch: 'researching',
+// Docs file patterns
+const DOCS_FILE_PATTERN = /\.(md|rst|txt|adoc)$|readme|changelog|license|contributing|docs\//i;
 
-  // Writing code
-  Edit: 'implementing',
-  Write: 'implementing',
-  NotebookEdit: 'implementing',
+/**
+ * Infer activity from a tool_use block (name + input).
+ * Language-agnostic: based on what Claude is actually doing, not what the user asked.
+ */
+function inferActivityFromTool(name: string, input?: Record<string, unknown>): string {
+  switch (name) {
+    // Reading/exploring
+    case 'Read':
+    case 'Grep':
+    case 'Glob':
+    case 'Agent':
+    case 'WebSearch':
+    case 'WebFetch':
+      return 'researching';
 
-  // Running commands (refined by command content)
-  Bash: 'implementing',
+    // Writing — check if it's docs or code
+    case 'Edit':
+    case 'Write': {
+      const filePath = (input?.file_path as string) ?? '';
+      return DOCS_FILE_PATTERN.test(filePath) ? 'writing_docs' : 'implementing';
+    }
+    case 'NotebookEdit':
+      return 'implementing';
 
-  // Planning
-  EnterPlanMode: 'planning',
-  ExitPlanMode: 'planning',
-  TaskCreate: 'planning',
-  TaskUpdate: 'planning',
-};
+    // Shell commands — refined by content
+    case 'Bash':
+      return inferBashActivity((input?.command as string) ?? '');
+
+    // Planning
+    case 'EnterPlanMode':
+    case 'ExitPlanMode':
+    case 'TaskCreate':
+    case 'TaskUpdate':
+      return 'planning';
+
+    default:
+      return 'implementing';
+  }
+}
 
 // Bash command patterns to refine activity
 function inferBashActivity(bashInput: string): string {
   const lower = bashInput.toLowerCase();
   if (/\b(test|spec|jest|vitest|pytest|cargo\s+test|go\s+test|npm\s+test|pnpm\s+test)\b/.test(lower)) return 'testing';
-  if (/\b(git\s+(commit|push)|deploy|docker\s+push)\b/.test(lower)) return 'deploying';
-  if (/\b(git\s+(diff|log|blame|show))\b/.test(lower)) return 'reviewing';
+  if (/\b(git\s+(commit|push)|deploy|docker\s+push|kubectl\s+apply|terraform\s+apply)\b/.test(lower)) return 'deploying';
+  if (/\b(gh\s+pr\s+(view|review|diff|checks)|git\s+(diff|log|blame|show))\b/.test(lower)) return 'reviewing';
+  if (/\b(node\s+--inspect|strace|lldb|gdb|lsof|dmesg)\b/.test(lower)) return 'debugging';
   if (/\b(npm\s+run\s+build|pnpm\s+build|cargo\s+build|make)\b/.test(lower)) return 'implementing';
   if (/\b(curl|wget|nc|ping)\b/.test(lower)) return 'debugging';
   return 'implementing';
@@ -74,36 +93,49 @@ function inferBashActivity(bashInput: string): string {
  * Reads the last N lines of a transcript JSONL to find recent tool_use calls.
  * Returns the inferred activity based on what tools the agent is actually using.
  */
-function inferActivityFromTranscript(cwd: string, sessionId: string): string {
-  // Find the transcript file: ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl
+function inferActivityFromTranscript(cwd: string, _sessionId: string): string {
+  // Find the most recently modified transcript for this project
   const encodedCwd = cwd.replace(/\//g, '-');
-  const transcriptPath = path.join(PROJECTS_DIR, encodedCwd, `${sessionId}.jsonl`);
+  const projectDir = path.join(PROJECTS_DIR, encodedCwd);
+
+  if (!fs.existsSync(projectDir)) return 'implementing';
+
+  // Pick the most recently modified .jsonl file
+  const jsonlFiles = fs.readdirSync(projectDir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .map((f) => ({ name: f, mtime: fs.statSync(path.join(projectDir, f)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+
+  if (jsonlFiles.length === 0) return 'implementing';
+  const transcriptPath = path.join(projectDir, jsonlFiles[0].name);
 
   if (!fs.existsSync(transcriptPath)) return 'implementing';
 
   try {
-    // Read last ~20KB to find recent tool calls without reading the whole file
     const stat = fs.statSync(transcriptPath);
-    const readSize = Math.min(stat.size, 20_000);
     const fd = fs.openSync(transcriptPath, 'r');
-    const buffer = Buffer.alloc(readSize);
-    fs.readSync(fd, buffer, 0, readSize, Math.max(0, stat.size - readSize));
-    fs.closeSync(fd);
 
-    const tail = buffer.toString('utf-8');
-    const lines = tail.split('\n');
-
-    // Scan backwards to find: is the agent idle (waiting for input) or actively working?
-    // If the last assistant message has no tool_use, the agent finished and is waiting → idle
+    // Read in growing chunks from the end until we find a tool_use
+    const CHUNK_SIZE = 50_000;
+    const MAX_READ = 500_000;
     let foundAssistantResponse = false;
-    const recentTools: string[] = [];
 
-    for (let i = lines.length - 1; i >= 0 && recentTools.length < 5; i--) {
-      const line = lines[i].trim();
-      if (!line) continue;
+    for (let offset = 0; offset < Math.min(stat.size, MAX_READ); offset += CHUNK_SIZE) {
+      const readSize = Math.min(CHUNK_SIZE, stat.size - offset);
+      const startPos = Math.max(0, stat.size - offset - readSize);
+      const buffer = Buffer.alloc(readSize);
+      fs.readSync(fd, buffer, 0, readSize, startPos);
 
-      try {
-        const entry = JSON.parse(line);
+      const chunk = buffer.toString('utf-8');
+      const lines = chunk.split('\n');
+
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        let entry;
+        try { entry = JSON.parse(line); } catch { continue; }
+
         const message = entry.message;
         if (!message) continue;
 
@@ -117,40 +149,26 @@ function inferActivityFromTranscript(cwd: string, sessionId: string): string {
           const hasText = content.some((b: { type: string }) => b.type === 'text');
 
           if (hasText && !hasToolUse) {
-            // Agent responded with text only → finished, waiting for user input
+            fs.closeSync(fd);
             return 'idle';
           }
         }
 
         if (message.role !== 'assistant') continue;
-
         const content = message.content;
         if (!Array.isArray(content)) continue;
 
         for (const block of content) {
           if (block.type === 'tool_use' && block.name) {
-            if (block.name === 'Bash' && block.input?.command) {
-              recentTools.push(`Bash:${block.input.command}`);
-            } else {
-              recentTools.push(block.name);
-            }
+            fs.closeSync(fd);
+            return inferActivityFromTool(block.name, block.input);
           }
         }
-      } catch {
-        // skip malformed lines
       }
     }
 
-    if (recentTools.length === 0) return 'idle';
-
-    // Use the most recent tool to determine activity
-    const latest = recentTools[0];
-
-    if (latest.startsWith('Bash:')) {
-      return inferBashActivity(latest.slice(5));
-    }
-
-    return TOOL_ACTIVITY_MAP[latest] ?? 'implementing';
+    fs.closeSync(fd);
+    return 'idle';
   } catch {
     return 'implementing';
   }

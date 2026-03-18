@@ -88,13 +88,13 @@ export function createOffice(scene: THREE.Scene): Map<string, Station> {
 
   stations.set('bookshelf_0', {
     type: 'researching',
-    position: new THREE.Vector3(-11.5, 0, -2),
+    position: new THREE.Vector3(-12.5, 0, -2),
     lookAt: new THREE.Vector3(-13.5, 1.0, -2),
     occupied: false,
   });
   stations.set('bookshelf_1', {
     type: 'researching',
-    position: new THREE.Vector3(-11.5, 0, 0.5),
+    position: new THREE.Vector3(-12.5, 0, 0.5),
     lookAt: new THREE.Vector3(-13.5, 1.0, 0.5),
     occupied: false,
   });
