@@ -11,7 +11,7 @@ export interface DetectedAgent {
   startedAt: number;
   alive: boolean;
   activity: string;
-  lastCommand?: string;
+  parentId?: string;
 }
 
 interface SessionFile {
@@ -90,32 +90,15 @@ function inferBashActivity(bashInput: string): string {
 }
 
 /**
- * Reads the last N lines of a transcript JSONL to find recent tool_use calls.
- * Returns the inferred activity based on what tools the agent is actually using.
+ * Infer activity from a transcript JSONL file by scanning recent tool_use calls.
  */
-function inferActivityFromTranscript(cwd: string, _sessionId: string): string {
-  // Find the most recently modified transcript for this project
-  const encodedCwd = cwd.replace(/\//g, '-');
-  const projectDir = path.join(PROJECTS_DIR, encodedCwd);
-
-  if (!fs.existsSync(projectDir)) return 'implementing';
-
-  // Pick the most recently modified .jsonl file
-  const jsonlFiles = fs.readdirSync(projectDir)
-    .filter((f) => f.endsWith('.jsonl'))
-    .map((f) => ({ name: f, mtime: fs.statSync(path.join(projectDir, f)).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime);
-
-  if (jsonlFiles.length === 0) return 'implementing';
-  const transcriptPath = path.join(projectDir, jsonlFiles[0].name);
-
+function inferActivityFromFile(transcriptPath: string): string {
   if (!fs.existsSync(transcriptPath)) return 'implementing';
 
   try {
     const stat = fs.statSync(transcriptPath);
     const fd = fs.openSync(transcriptPath, 'r');
 
-    // Read in growing chunks from the end until we find a tool_use
     const CHUNK_SIZE = 50_000;
     const MAX_READ = 500_000;
     let foundAssistantResponse = false;
@@ -139,7 +122,6 @@ function inferActivityFromTranscript(cwd: string, _sessionId: string): string {
         const message = entry.message;
         if (!message) continue;
 
-        // If the most recent assistant message has only text (no tool_use), agent is idle
         if (message.role === 'assistant' && !foundAssistantResponse) {
           foundAssistantResponse = true;
           const content = message.content;
@@ -174,6 +156,83 @@ function inferActivityFromTranscript(cwd: string, _sessionId: string): string {
   }
 }
 
+/**
+ * Find the most recent transcript for a project and infer activity.
+ */
+function inferActivityFromTranscript(cwd: string): string {
+  const encodedCwd = cwd.replace(/\//g, '-');
+  const projectDir = path.join(PROJECTS_DIR, encodedCwd);
+
+  if (!fs.existsSync(projectDir)) return 'implementing';
+
+  const jsonlFiles = fs.readdirSync(projectDir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .map((f) => ({ name: f, mtime: fs.statSync(path.join(projectDir, f)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+
+  if (jsonlFiles.length === 0) return 'implementing';
+  return inferActivityFromFile(path.join(projectDir, jsonlFiles[0].name));
+}
+
+/**
+ * Detect active subagents for a given project.
+ * A subagent is "active" if its transcript was modified within the last 30 seconds.
+ */
+function detectSubagents(cwd: string, parentId: string, parentPid: number): DetectedAgent[] {
+  const encodedCwd = cwd.replace(/\//g, '-');
+  const projectDir = path.join(PROJECTS_DIR, encodedCwd);
+
+  if (!fs.existsSync(projectDir)) return [];
+
+  const subagents: DetectedAgent[] = [];
+  const now = Date.now();
+  const ACTIVE_THRESHOLD = 30_000; // 30 seconds
+
+  // Scan all session dirs for subagents
+  const sessionDirs = fs.readdirSync(projectDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory());
+
+  for (const sessionDir of sessionDirs) {
+    const subagentsDir = path.join(projectDir, sessionDir.name, 'subagents');
+    if (!fs.existsSync(subagentsDir)) continue;
+
+    const metaFiles = fs.readdirSync(subagentsDir).filter((f) => f.endsWith('.meta.json'));
+
+    for (const metaFile of metaFiles) {
+      try {
+        const agentId = metaFile.replace('.meta.json', '');
+        const transcriptPath = path.join(subagentsDir, `${agentId}.jsonl`);
+
+        // Check if transcript exists and was recently modified
+        if (!fs.existsSync(transcriptPath)) continue;
+        const transcriptStat = fs.statSync(transcriptPath);
+        if (now - transcriptStat.mtimeMs > ACTIVE_THRESHOLD) continue;
+
+        // Read meta
+        const meta = JSON.parse(fs.readFileSync(path.join(subagentsDir, metaFile), 'utf-8'));
+        const description = meta.description || meta.agentType || 'subagent';
+
+        const activity = inferActivityFromFile(transcriptPath);
+
+        subagents.push({
+          id: agentId,
+          name: `${description}`,
+          pid: parentPid,
+          cwd,
+          startedAt: transcriptStat.birthtimeMs,
+          alive: true,
+          activity,
+          parentId,
+        });
+      } catch {
+        // skip malformed subagent files
+      }
+    }
+  }
+
+  return subagents;
+}
+
 export function detectAgents(): DetectedAgent[] {
   if (!fs.existsSync(SESSIONS_DIR)) return [];
 
@@ -188,7 +247,7 @@ export function detectAgents(): DetectedAgent[] {
       const alive = isPidAlive(session.pid);
       if (!alive) continue;
 
-      const activity = inferActivityFromTranscript(session.cwd, session.sessionId);
+      const activity = inferActivityFromTranscript(session.cwd);
       const name = path.basename(session.cwd);
 
       agents.push({
@@ -200,6 +259,10 @@ export function detectAgents(): DetectedAgent[] {
         alive,
         activity,
       });
+
+      // Detect active subagents
+      const subs = detectSubagents(session.cwd, session.sessionId, session.pid);
+      agents.push(...subs);
     } catch {
       // skip malformed session files
     }

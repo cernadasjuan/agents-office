@@ -10,7 +10,7 @@ interface DetectedAgent {
   startedAt: number;
   alive: boolean;
   activity: string;
-  lastCommand?: string;
+  parentId?: string;
 }
 
 export class AgentPoller {
@@ -72,9 +72,12 @@ export class AgentPoller {
     // Add new agents
     for (const agent of agents) {
       if (!this.knownIds.has(agent.id)) {
+        const displayName = agent.parentId
+          ? `>> ${agent.name}`
+          : agent.name;
         const info: AgentInfo = {
           id: agent.id,
-          name: agent.name,
+          name: displayName,
           activity: agent.activity as Activity,
         };
         this.agentManager.addAgent(info);

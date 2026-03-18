@@ -1,22 +1,40 @@
 {
   "name": "agents-office",
   "version": "1.0.0",
-  "description": "",
+  "description": "3D office visualization of running Claude Code agents",
   "type": "module",
+  "bin": {
+    "agents-office": "bin/cli.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "server",
+    "index.html",
+    "vite.config.ts",
+    "tsconfig.json"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "packageManager": "pnpm@10.32.1",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agents",
+    "3d",
+    "threejs",
+    "visualization"
+  ],
+  "author": "cernadasjuan",
+  "license": "MIT",
   "dependencies": {
     "three": "^0.183.2",
     "vite": "^8.0.0"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "@types/three": "^0.183.1",
     "typescript": "^5.9.3"
   }

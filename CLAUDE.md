@@ -23,8 +23,8 @@ No test framework is configured.
 ~/.claude/sessions/*.json → server/agentDetector.ts → GET /api/agents → AgentPoller (3s) → AgentManager → 3D Scene
 ```
 
-1. **Server** (`server/`): Vite middleware plugin reads Claude session files, validates PIDs, and infers activity from transcript `.jsonl` tool_use blocks (language-agnostic)
-2. **Polling** (`AgentPoller.ts`): Fetches `/api/agents`, reconciles with AgentManager (add/remove/update). Falls back to mock agents if API unavailable
+1. **Server** (`server/`): Vite middleware plugin reads Claude session files, validates PIDs, infers activity from transcript `.jsonl` tool_use blocks (language-agnostic), and detects active subagents
+2. **Polling** (`AgentPoller.ts`): Fetches `/api/agents`, reconciles with AgentManager (add/remove/update). Falls back to mock agents if API unavailable. Subagents get a `>> ` prefix in their name
 3. **Agent Management** (`AgentManager.ts`): Creates StickFigures, assigns them to stations based on activity type, handles lifecycle
 4. **Scene** (`Office.ts`): 23 stations across 7 types (implementing, planning, researching, testing, reviewing, idle, meeting). One agent per station
 
@@ -41,11 +41,16 @@ Activity is inferred from the **most recent tool_use** in the session transcript
 
 The detector reads the **most recently modified** `.jsonl` transcript for each project (not necessarily matching the sessionId, since Claude Code may rotate transcripts within a session).
 
+### Subagent Detection
+
+Subagents (spawned via the Agent tool) are detected from `~/.claude/projects/<encoded-cwd>/<sessionId>/subagents/`. Each subagent has a `.meta.json` (with `agentType` and `description`) and its own `.jsonl` transcript. A subagent is considered active if its transcript was modified within the last 30 seconds. Their activity is inferred from their own transcript, independently from the parent session.
+
 ### Key Patterns
 
 - **Toon shading**: All meshes use `MeshToonMaterial` with a 4-step gradient map, cached in `Materials.ts`
 - **Station occupancy**: `Station.occupied` flag prevents multiple agents at one location. On activity change, old station is released before new one is claimed
-- **Teleport vs walk**: `addAgent()` teleports to station instantly; `setActivity()` walks smoothly (3 units/sec)
+- **Teleport vs walk**: `addAgent()` teleports to station instantly; `setActivity()` triggers a walk animation (4.5 units/sec) with leg/arm swing
+- **Same-type station stickiness**: If an activity change maps to the same station type (e.g. implementing→debugging), the agent stays at its current desk
 - **Skeleton animation**: Hierarchical joints (root→body→shoulders/hips→limbs) animated per-activity with sine waves and `approach()` easing
 - **Colors**: Centralized palette in `Colors.ts` with 8 accent colors for agents
 
