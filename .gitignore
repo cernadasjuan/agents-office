@@ -1,3 +1,6 @@
 node_modules
 dist
 .vite
+.claude
+.agents
+skills-lock.json
