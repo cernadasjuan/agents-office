@@ -5,10 +5,6 @@ import type { Activity } from './ActivityAnimations.js';
 interface DetectedAgent {
   id: string;
   name: string;
-  pid: number;
-  cwd: string;
-  startedAt: number;
-  alive: boolean;
   activity: string;
   parentId?: string;
 }

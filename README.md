@@ -4,20 +4,38 @@ A 3D office visualization that shows your running [Claude Code](https://claude.a
 
 ![agents-office](assets/screenshot.png)
 
-## Quick Start
+## Test the security branch locally
+
+Use the fork's security branch. The upstream `npx agents-office` package does not
+contain these fixes.
 
 ```bash
-npx agents-office
+git clone --branch feature/security-hardening https://github.com/gabriel-amyot/agents-office.git
+cd agents-office
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm test
+pnpm typecheck
+pnpm build
 ```
 
-Or clone and run locally:
+Run the dashboard only after these security checks pass:
 
 ```bash
-git clone https://github.com/cernadasjuan/agents-office.git
-cd agents-office
-pnpm install
 pnpm dev
 ```
+
+## Local security boundary
+
+The dashboard is for local use. Both launch paths bind to `127.0.0.1`; attempts to
+use a network-wide host such as `--host 0.0.0.0` are rejected. The agent API accepts
+only loopback clients, and browser requests must come from the dashboard's own
+origin. Do not expose it through a public tunnel, reverse proxy, or port forward.
+
+The API returns only display names, activities, and opaque IDs that change when
+the server restarts. It does not return working-directory paths, PIDs, start times,
+or raw session IDs. Display names can still contain project or task context, and
+other software running on your computer can access the local dashboard without a
+login. Run it only on a trusted machine.
 
 ## How It Works
 
@@ -58,5 +76,5 @@ When an agent switches tasks, it walks to the corresponding station with a walk 
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 22.12+
 - One or more running Claude Code sessions to visualize
