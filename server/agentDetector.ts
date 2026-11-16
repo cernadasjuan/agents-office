@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
 import os from 'node:os';
 
 export interface DetectedAgent {
@@ -21,16 +20,27 @@ interface SessionFile {
   startedAt: number;
 }
 
+function isSessionFile(value: unknown): value is SessionFile {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const session = value as Record<string, unknown>;
+  return typeof session.pid === 'number'
+    && Number.isSafeInteger(session.pid) && session.pid > 0
+    && typeof session.sessionId === 'string' && session.sessionId.trim().length > 0
+    && typeof session.cwd === 'string' && path.isAbsolute(session.cwd) && !session.cwd.includes('\0')
+    && typeof session.startedAt === 'number' && Number.isFinite(session.startedAt) && session.startedAt >= 0;
+}
+
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const SESSIONS_DIR = path.join(CLAUDE_DIR, 'sessions');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 
 function isPidAlive(pid: number): boolean {
   try {
-    execSync(`kill -0 ${pid}`, { stdio: 'ignore' });
+    process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    // Permission denial still proves the process exists; no signal is sent.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 
@@ -242,7 +252,8 @@ export function detectAgents(): DetectedAgent[] {
   for (const file of files) {
     try {
       const content = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf-8');
-      const session: SessionFile = JSON.parse(content);
+      const session: unknown = JSON.parse(content);
+      if (!isSessionFile(session)) continue;
 
       const alive = isPidAlive(session.pid);
       if (!alive) continue;
