@@ -13,6 +13,7 @@ contain these fixes.
 git clone --branch feature/security-hardening https://github.com/gabriel-amyot/agents-office.git
 cd agents-office
 pnpm install --frozen-lockfile --ignore-scripts
+pnpm audit --audit-level=low
 pnpm test
 pnpm typecheck
 pnpm build
