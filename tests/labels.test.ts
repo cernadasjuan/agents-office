@@ -1,0 +1,62 @@
+import assert from 'node:assert/strict';
+import { test, type TestContext } from 'node:test';
+import { JSDOM } from 'jsdom';
+import { createLabel, updateLabel } from '../src/characters/Label.js';
+
+function installDocument(t: TestContext): void {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>');
+  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  Object.defineProperty(globalThis, 'document', {
+    value: dom.window.document,
+    configurable: true,
+    writable: true,
+  });
+  t.after(() => {
+    dom.window.close();
+    if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument);
+    else Reflect.deleteProperty(globalThis, 'document');
+  });
+}
+
+function assertPlainLabel(element: HTMLElement, name: string, activity: string): void {
+  assert.equal(element.querySelector('.name')?.textContent, name);
+  assert.equal(element.querySelector('.activity')?.textContent, activity);
+  assert.equal(element.children.length, 2);
+  assert.equal(element.querySelector('.name')?.childElementCount, 0);
+  assert.equal(element.querySelector('.activity')?.childElementCount, 0);
+  assert.equal(element.querySelector('img, svg, script, iframe'), null);
+  assert.equal(element.querySelector('[onerror], [onload], [onclick]'), null);
+}
+
+const payloads = [
+  '<img src=x onerror="window.compromised=true">',
+  '</div><svg onload="window.compromised=true"></svg><div>',
+  '<script>window.compromised=true</script>',
+];
+
+for (const payload of payloads) {
+  test(`createLabel treats markup as text: ${payload}`, (t) => {
+    installDocument(t);
+    const label = createLabel(payload, payload);
+    assertPlainLabel(label.element, payload, payload);
+    assert.equal(label.element.className, 'agent-label');
+    assert.deepEqual(label.position.toArray(), [0, 2.1, 0]);
+  });
+
+  test(`updateLabel treats markup as text: ${payload}`, (t) => {
+    installDocument(t);
+    const label = createLabel('normal agent', 'idle');
+    updateLabel(label, payload, payload);
+    assertPlainLabel(label.element, payload, payload);
+    assert.equal(label.element.className, 'agent-label');
+  });
+}
+
+test('ordinary labels retain text and update without accumulating child elements', (t) => {
+  installDocument(t);
+  const label = createLabel('API & docs <team>', 'researching');
+  assertPlainLabel(label.element, 'API & docs <team>', 'researching');
+  updateLabel(label, '>> worker "one"', 'implementing');
+  updateLabel(label, 'worker two', 'idle');
+  assertPlainLabel(label.element, 'worker two', 'idle');
+});
