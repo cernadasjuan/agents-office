@@ -13,6 +13,7 @@ const server = await createServer({
   root,
   configFile: path.join(root, 'vite.config.ts'),
   server: {
+    host: '127.0.0.1',
     port,
     open: true,
   },
