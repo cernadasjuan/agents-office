@@ -29,7 +29,7 @@ export const ACTIVITY_LABELS: Record<Activity, string> = {
   reviewing: 'Reviewing',
   writing_docs: 'Writing docs',
   deploying: 'Deploying',
-  meeting: 'In a meeting',
+  meeting: 'Waiting for you',
 };
 
 const AGENT_NAMES = [

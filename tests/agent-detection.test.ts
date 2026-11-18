@@ -121,3 +121,32 @@ test('a session whose folder uses the older encoding with the dot kept still fin
 
   assert.equal(detectAgents().find((agent) => agent.id === 'session-e')?.activity, 'researching');
 });
+
+function writeSessionWithStatus(sessionId: string, status: string | undefined, lastLine: string): void {
+  const session: Record<string, unknown> = { pid: 101, sessionId, cwd, startedAt: 1 };
+  if (status !== undefined) session.status = status;
+  fs.writeFileSync(path.join(sessions, `${sessionId}.json`), JSON.stringify(session));
+  writeTranscript(`${sessionId}.jsonl`, lastLine, new Date());
+}
+
+const textOnlyLine = JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] } });
+
+for (const [status, lastLine, expected] of [
+  ['waiting', toolUseLine('Edit', { file_path: '/x.ts' }), 'meeting'],
+  ['idle', toolUseLine('Edit', { file_path: '/x.ts' }), 'idle'],
+  ['busy', textOnlyLine, 'planning'],
+  ['busy', toolUseLine('Read', {}), 'researching'],
+  ['shell', toolUseLine('Read', {}), 'researching'],
+  [undefined, toolUseLine('Edit', { file_path: '/x.ts' }), 'implementing'],
+  [undefined, textOnlyLine, 'idle'],
+] as const) {
+  test(`session status ${status ?? 'missing'} with a ${lastLine === textOnlyLine ? 'text' : 'tool'} tail gives ${expected}`, () => {
+    writeSessionWithStatus('session-s', status, lastLine);
+    assert.equal(detectAgents()[0].activity, expected);
+  });
+}
+
+test('the API never returns the raw session status', () => {
+  writeSessionWithStatus('session-s', 'waiting', textOnlyLine);
+  assert.equal('status' in detectAgents()[0], false);
+});

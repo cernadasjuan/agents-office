@@ -254,6 +254,21 @@ function detectSubagents(cwd: string, parentId: string, parentPid: number): Dete
   return subagents;
 }
 
+/**
+ * Combine the status that Claude Code writes in the session file with the
+ * transcript activity. The status knows when a session waits for the user or
+ * thinks; the transcript knows what kind of work it does. Without a known
+ * status, the transcript decides alone.
+ */
+function combineWithSessionStatus(status: unknown, transcriptActivity: string): string {
+  switch (status) {
+    case 'waiting': return 'meeting';
+    case 'idle': return 'idle';
+    case 'busy': return transcriptActivity === 'idle' ? 'planning' : transcriptActivity;
+    default: return transcriptActivity;
+  }
+}
+
 export function detectAgents(): DetectedAgent[] {
   if (!fs.existsSync(SESSIONS_DIR)) return [];
 
@@ -269,7 +284,10 @@ export function detectAgents(): DetectedAgent[] {
       const alive = isPidAlive(session.pid);
       if (!alive) continue;
 
-      const activity = inferSessionActivity(session.cwd, session.sessionId);
+      const activity = combineWithSessionStatus(
+        (session as SessionFile & { status?: unknown }).status,
+        inferSessionActivity(session.cwd, session.sessionId),
+      );
       const name = path.basename(session.cwd);
 
       agents.push({
