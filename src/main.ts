@@ -47,7 +47,7 @@ function buildUI(): void {
   }
 }
 
-// Start polling for real agents (falls back to mock if none found)
+// Start polling for real agents (an empty office when none are found)
 const poller = new AgentPoller(agentManager);
 poller.start(3000, buildUI);
 

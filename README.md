@@ -44,16 +44,20 @@ The app detects running Claude Code sessions by reading `~/.claude/sessions/` on
 
 It also detects **subagents** (spawned via the Agent tool) and shows them alongside the parent session with a `>>` prefix in their name.
 
-| Tool being used | Activity shown |
+| Most recent tool call | Activity shown |
 |---|---|
-| Read, Grep, Glob, WebSearch | Researching (reading at bookshelf) |
-| Edit, Write (code files) | Implementing (typing at desk) |
-| Edit, Write (.md, docs/) | Writing docs (writing at desk) |
+| Read, Grep, Glob, WebSearch, WebFetch, Agent | Researching (reading at bookshelf) |
+| Edit, Write (code files), NotebookEdit | Implementing (typing at desk) |
+| Edit, Write (.md, .rst, .txt, README, docs/) | Writing docs (writing at review desk) |
 | Bash with test commands | Testing (at test station) |
-| Bash with git push/deploy | Deploying (celebrating) |
-| Bash with git diff/blame | Reviewing (at review desk) |
-| EnterPlanMode, TaskCreate | Planning (at whiteboard) |
-| No recent tool use | Idle (at coffee machine) |
+| Bash with git commit/push, deploy, terraform apply | Deploying (celebrating at desk) |
+| Bash with git diff/log/show/blame, gh pr view | Reviewing (at review desk) |
+| Bash with curl, wget, lsof, gdb and similar | Debugging (at desk) |
+| EnterPlanMode, ExitPlanMode, TaskCreate, TaskUpdate | Planning (at whiteboard) |
+| Any other tool or Bash command | Implementing (typing at desk) |
+| Last assistant message is text only | Idle (at coffee machine) |
+
+When every station of the right type is taken, the agent stands on an overflow spot on open floor.
 
 When an agent switches tasks, it walks to the corresponding station with a walk animation.
 
