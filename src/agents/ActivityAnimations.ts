@@ -39,6 +39,32 @@ function approachY(current: number, target: number, delta: number, speed = 8): n
   return current + (target - current) * Math.min(speed * delta, 1);
 }
 
+// Rotations that only some poses drive. Every other pose eases them back to rest.
+type SideAxis = 'leftUpperArm.z' | 'rightUpperArm.z' | 'neck.x' | 'neck.y';
+const SIDE_AXES: SideAxis[] = ['leftUpperArm.z', 'rightUpperArm.z', 'neck.x', 'neck.y'];
+const SIDE_AXES_DRIVEN_BY: Record<Activity | 'walking', SideAxis[]> = {
+  idle: [],
+  planning: ['rightUpperArm.z', 'neck.x'],
+  implementing: ['neck.x'],
+  researching: ['rightUpperArm.z', 'neck.x'],
+  testing: ['leftUpperArm.z', 'rightUpperArm.z', 'neck.x'],
+  debugging: ['neck.x'],
+  reviewing: ['neck.x'],
+  writing_docs: ['neck.x'],
+  deploying: ['leftUpperArm.z', 'rightUpperArm.z', 'neck.x'],
+  meeting: ['rightUpperArm.z', 'neck.x', 'neck.y'],
+  walking: [],
+};
+
+function relaxUndrivenSideAxes(j: Joints, pose: Activity | 'walking', dt: number): void {
+  const driven = SIDE_AXES_DRIVEN_BY[pose];
+  for (const sideAxis of SIDE_AXES) {
+    if (driven.includes(sideAxis)) continue;
+    const [joint, axis] = sideAxis.split('.') as ['leftUpperArm' | 'rightUpperArm' | 'neck', 'x' | 'y' | 'z'];
+    j[joint].rotation[axis] = approach(j[joint].rotation[axis], 0, dt);
+  }
+}
+
 // Seated pose: hips, shoulders, neck all drop together
 // Standing: hips=0.9, shoulders=1.5, neck=1.6
 // Seated:   hips=0.5, shoulders=1.1, neck=1.2  (all -0.4)
@@ -67,6 +93,7 @@ function applyStandingBase(j: Joints, dt: number): void {
 export function animateWalking(j: Joints, elapsed: number, dt: number): void {
   // Standing base
   applyStandingBase(j, dt);
+  relaxUndrivenSideAxes(j, 'walking', dt);
 
   const walkCycle = elapsed * 9; // speed of walk cycle
   const legSwing = Math.sin(walkCycle) * 0.5;
@@ -94,6 +121,7 @@ export function animateWalking(j: Joints, elapsed: number, dt: number): void {
 }
 
 export function animateActivity(joints: Joints, activity: Activity, elapsed: number, delta: number): void {
+  relaxUndrivenSideAxes(joints, activity, delta);
   switch (activity) {
     case 'idle':
       animateIdle(joints, elapsed, delta);

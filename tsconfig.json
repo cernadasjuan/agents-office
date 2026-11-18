@@ -11,7 +11,14 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "preserve",
-    "types": ["vite/client"]
+    "types": [
+      "vite/client"
+    ]
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "server/**/*.ts",
+    "tests/**/*.test.ts",
+    "vite.config.ts"
+  ]
 }

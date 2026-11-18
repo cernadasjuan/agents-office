@@ -3,6 +3,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { buildSkeleton, Joints } from './StickFigureParts.js';
 import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
+import { ACTIVITY_LABELS } from '../agents/AgentData.js';
 
 const TRANSITION_DURATION = 0.5;
 const WALK_SPEED = 4.5;
@@ -22,7 +23,7 @@ export class StickFigure {
   constructor(name: string, accentColor: THREE.Color) {
     this.name = name;
     this.joints = buildSkeleton(accentColor);
-    this.label = createLabel(name, 'idle');
+    this.label = createLabel(name, ACTIVITY_LABELS.idle);
     this.joints.root.add(this.label);
 
     // Apply rest pose
@@ -42,7 +43,7 @@ export class StickFigure {
 
     this.targetActivity = activity;
     this.transitionProgress = 0;
-    updateLabel(this.label, this.name, activity);
+    updateLabel(this.label, this.name, ACTIVITY_LABELS[activity] ?? activity);
   }
 
   moveTo(position: THREE.Vector3, lookAt: THREE.Vector3): void {
