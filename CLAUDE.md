@@ -8,10 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pnpm dev        # Start Vite dev server (opens browser)
 pnpm build      # Production build
 pnpm preview    # Preview built output
-npx tsc --noEmit  # Type check without emitting
+pnpm typecheck  # Type check without emitting
+pnpm test       # node:test suites in tests/ (tsx)
 ```
-
-No test framework is configured.
 
 ## Architecture
 
@@ -24,26 +23,27 @@ No test framework is configured.
 ```
 
 1. **Server** (`server/`): Vite middleware plugin reads Claude session files, validates PIDs, infers activity from transcript `.jsonl` tool_use blocks (language-agnostic), and detects active subagents
-2. **Polling** (`AgentPoller.ts`): Fetches `/api/agents`, reconciles with AgentManager (add/remove/update). Falls back to mock agents if API unavailable. Subagents get a `>> ` prefix in their name
+2. **Polling** (`AgentPoller.ts`): Fetches `/api/agents` every 3 s, one request at a time with a 5 s limit, and reconciles with AgentManager (add/remove/update). If the API fails, the current scene stays. Subagents get a `>> ` prefix in their name
 3. **Agent Management** (`AgentManager.ts`): Creates StickFigures, assigns them to stations based on activity type, handles lifecycle
-4. **Scene** (`Office.ts`): 23 stations across 7 types (implementing, planning, researching, testing, reviewing, idle, meeting). One agent per station
+4. **Scene** (`Office.ts`): 22 stations across 7 types (implementing, planning, researching, testing, reviewing, idle, meeting). One agent per station. When no station of the right type is free, AgentManager opens an overflow spot on open floor; it never uses a station of another type
 
 ### Activity Inference (server/agentDetector.ts)
 
-Activity is inferred from the **most recent tool_use** in the session transcript, not from user input text:
-- Read/Grep/Glob/Agent/WebSearch → `researching`
-- Edit/Write (code files) → `implementing`
-- Edit/Write (.md/.rst/docs/) → `writing_docs`
-- Bash with test commands → `testing`
-- Bash with git push/deploy → `deploying`
-- EnterPlanMode/TaskCreate → `planning`
+The session file `status` comes first (`combineWithSessionStatus`): `waiting` → `meeting` (label "Waiting for you"), `idle` → `idle`, `busy` with a text-only tail → `planning`. Any other status, or none, uses the transcript alone.
+
+From the transcript, activity is inferred from the **most recent tool_use**, not from user input text (`inferActivityFromTool`):
+- Read/Grep/Glob/Agent/WebSearch/WebFetch/Skill/ToolSearch → `researching`
+- MCP tools (`mcp__*`) → `researching` when the operation name holds a read word, else `implementing`
+- Edit/Write (code files) → `implementing`; Edit/Write (.md/.rst/.txt/README/docs/) → `writing_docs`
+- EnterPlanMode/ExitPlanMode/TaskCreate/TaskUpdate → `planning`; AskUserQuestion → `meeting`
+- Bash is split into simple commands and classified by program (`inferBashActivity`): test runner → `testing`, commit/push/deploy step → `deploying`, git diff/log/show/blame → `reviewing`, curl/lsof/gdb → `debugging`, only read-only programs → `researching`, else `implementing`
 - Last assistant message is text-only → `idle`
 
-The detector reads the **most recently modified** `.jsonl` transcript for each project (not necessarily matching the sessionId, since Claude Code may rotate transcripts within a session).
+The detector reads the session's own `<project-dir>/<sessionId>.jsonl`. Many sessions can share one project directory, so the newest file there may belong to another session. A session without its own transcript shows `idle`. The project directory name is the cwd with every non-alphanumeric character replaced by `-`; older Claude Code versions kept the `.`, so that name is the fallback. Lines are read newest first and joined across 50 KB chunks, up to 4 MB.
 
 ### Subagent Detection
 
-Subagents (spawned via the Agent tool) are detected from `~/.claude/projects/<encoded-cwd>/<sessionId>/subagents/`. Each subagent has a `.meta.json` (with `agentType` and `description`) and its own `.jsonl` transcript. A subagent is considered active if its transcript was modified within the last 30 seconds. Their activity is inferred from their own transcript, independently from the parent session.
+Subagents (spawned via the Agent tool) are detected only from the parent's own `~/.claude/projects/<encoded-cwd>/<sessionId>/subagents/`. Each subagent has a `.meta.json` (with `agentType` and `description`) and its own `.jsonl` transcript. A subagent is considered active if its transcript was modified within the last 30 seconds, or if its newest message is a tool call without a result (up to 10 minutes). Their activity is inferred from their own transcript, independently from the parent session.
 
 ### Key Patterns
 
@@ -52,7 +52,8 @@ Subagents (spawned via the Agent tool) are detected from `~/.claude/projects/<en
 - **Teleport vs walk**: `addAgent()` teleports to station instantly; `setActivity()` triggers a walk animation (4.5 units/sec) with leg/arm swing
 - **Same-type station stickiness**: If an activity change maps to the same station type (e.g. implementing→debugging), the agent stays at its current desk
 - **Skeleton animation**: Hierarchical joints (root→body→shoulders/hips→limbs) animated per-activity with sine waves and `approach()` easing
-- **Colors**: Centralized palette in `Colors.ts` with 8 accent colors for agents
+- **Colors**: Centralized palette in `Colors.ts` with 8 accent colors for agents; an agent's color comes from an FNV-1a hash of its ID
+- **Side panel**: `src/ui/AgentPanel.ts` updates cards in place; it rebuilds nothing on an activity change
 
 ### Office Layout
 
