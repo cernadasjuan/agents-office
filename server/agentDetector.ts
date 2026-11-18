@@ -99,70 +99,81 @@ function inferBashActivity(bashInput: string): string {
   return 'implementing';
 }
 
+const CHUNK_SIZE = 50_000;
+const MAX_READ = 4_000_000;
+const NEWLINE = 0x0a;
+
+/**
+ * Yield complete transcript lines, newest first. A line that crosses a chunk
+ * edge, or is longer than one chunk, is joined before it is yielded.
+ */
+function* completeLinesFromEnd(fd: number, size: number): Generator<string> {
+  let position = size;
+  let pending = Buffer.alloc(0);
+
+  while (position > 0 && size - position < MAX_READ) {
+    const readSize = Math.min(CHUNK_SIZE, position);
+    position -= readSize;
+    const chunk = Buffer.alloc(readSize);
+    fs.readSync(fd, chunk, 0, readSize, position);
+
+    const buffer = Buffer.concat([chunk, pending]);
+    let lineEnd = buffer.length;
+    for (let i = buffer.length - 1; i >= 0; i--) {
+      if (buffer[i] !== NEWLINE) continue;
+      const line = buffer.subarray(i + 1, lineEnd).toString('utf-8').trim();
+      if (line) yield line;
+      lineEnd = i;
+    }
+    pending = buffer.subarray(0, lineEnd);
+  }
+
+  if (position === 0) {
+    const firstLine = pending.toString('utf-8').trim();
+    if (firstLine) yield firstLine;
+  }
+}
+
 /**
  * Infer activity from a transcript JSONL file by scanning recent tool_use calls.
  */
 function inferActivityFromFile(transcriptPath: string): string {
   if (!fs.existsSync(transcriptPath)) return 'implementing';
 
+  let fd: number | undefined;
   try {
-    const stat = fs.statSync(transcriptPath);
-    const fd = fs.openSync(transcriptPath, 'r');
-
-    const CHUNK_SIZE = 50_000;
-    const MAX_READ = 500_000;
+    fd = fs.openSync(transcriptPath, 'r');
+    const size = fs.fstatSync(fd).size;
     let foundAssistantResponse = false;
 
-    for (let offset = 0; offset < Math.min(stat.size, MAX_READ); offset += CHUNK_SIZE) {
-      const readSize = Math.min(CHUNK_SIZE, stat.size - offset);
-      const startPos = Math.max(0, stat.size - offset - readSize);
-      const buffer = Buffer.alloc(readSize);
-      fs.readSync(fd, buffer, 0, readSize, startPos);
+    for (const line of completeLinesFromEnd(fd, size)) {
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
 
-      const chunk = buffer.toString('utf-8');
-      const lines = chunk.split('\n');
+      const message = entry.message;
+      if (!message || message.role !== 'assistant') continue;
+      const content = message.content;
+      if (!Array.isArray(content)) continue;
 
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i].trim();
-        if (!line) continue;
+      if (!foundAssistantResponse) {
+        foundAssistantResponse = true;
+        const hasToolUse = content.some((b: { type: string }) => b.type === 'tool_use');
+        const hasText = content.some((b: { type: string }) => b.type === 'text');
+        if (hasText && !hasToolUse) return 'idle';
+      }
 
-        let entry;
-        try { entry = JSON.parse(line); } catch { continue; }
-
-        const message = entry.message;
-        if (!message) continue;
-
-        if (message.role === 'assistant' && !foundAssistantResponse) {
-          foundAssistantResponse = true;
-          const content = message.content;
-          if (!Array.isArray(content)) continue;
-
-          const hasToolUse = content.some((b: { type: string }) => b.type === 'tool_use');
-          const hasText = content.some((b: { type: string }) => b.type === 'text');
-
-          if (hasText && !hasToolUse) {
-            fs.closeSync(fd);
-            return 'idle';
-          }
-        }
-
-        if (message.role !== 'assistant') continue;
-        const content = message.content;
-        if (!Array.isArray(content)) continue;
-
-        for (const block of content) {
-          if (block.type === 'tool_use' && block.name) {
-            fs.closeSync(fd);
-            return inferActivityFromTool(block.name, block.input);
-          }
+      for (const block of content) {
+        if (block.type === 'tool_use' && block.name) {
+          return inferActivityFromTool(block.name, block.input);
         }
       }
     }
 
-    fs.closeSync(fd);
     return 'idle';
   } catch {
     return 'implementing';
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 
@@ -172,8 +183,14 @@ function isPlainSessionId(sessionId: string): boolean {
   return PLAIN_SESSION_ID.test(sessionId);
 }
 
+/**
+ * Claude Code names a project folder after its cwd with every character that is
+ * not a letter or digit replaced by "-". Older versions kept the dot.
+ */
 function projectDirFor(cwd: string): string {
-  return path.join(PROJECTS_DIR, cwd.replace(/\//g, '-'));
+  const current = path.join(PROJECTS_DIR, cwd.replace(/[^A-Za-z0-9]/g, '-'));
+  const legacy = path.join(PROJECTS_DIR, cwd.replace(/\//g, '-'));
+  return !fs.existsSync(current) && fs.existsSync(legacy) ? legacy : current;
 }
 
 /**

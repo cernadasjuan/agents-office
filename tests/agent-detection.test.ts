@@ -78,3 +78,46 @@ test('an active subagent appears once, under the session that started it', () =>
   assert.equal(subagents.length, 1);
   assert.equal(subagents[0].parentId, 'session-a');
 });
+
+test('a tool call whose line crosses a read-chunk edge is still the newest activity', () => {
+  writeSession('a.json', 'session-a', 101);
+  const older = toolUseLine('Read', { file_path: '/x.ts' });
+  const newestToolCall = toolUseLine('Edit', { file_path: '/x.ts', new_string: 'e'.repeat(2_000) });
+  const toolResult = JSON.stringify({ message: { role: 'user', content: [{ type: 'tool_result', content: 'r'.repeat(49_000) }] } });
+  writeTranscript('session-a.jsonl', `${older}\n${newestToolCall}\n${toolResult}`, new Date());
+
+  assert.equal(detectAgents()[0].activity, 'implementing');
+});
+
+test('a newest line longer than one read chunk is still parsed', () => {
+  writeSession('a.json', 'session-a', 101);
+  const older = toolUseLine('Read', { file_path: '/x.ts' });
+  const newest = toolUseLine('Write', { file_path: '/x.ts', content: 'w'.repeat(1_200_000) });
+  writeTranscript('session-a.jsonl', `${older}\n${newest}`, new Date());
+
+  assert.equal(detectAgents()[0].activity, 'implementing');
+});
+
+test('a session in a folder with a dot in its path finds its transcript and subagents', () => {
+  const dottedCwd = '/work/my.app';
+  const dottedDir = path.join(fixture, '.claude', 'projects', '-work-my-app');
+  fs.writeFileSync(path.join(sessions, 'd.json'), JSON.stringify({ pid: 103, sessionId: 'session-d', cwd: dottedCwd, startedAt: 1 }));
+  fs.mkdirSync(path.join(dottedDir, 'session-d', 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(dottedDir, 'session-d.jsonl'), `${toolUseLine('Read', {})}\n`);
+  fs.writeFileSync(path.join(dottedDir, 'session-d', 'subagents', 'agent-9.meta.json'), JSON.stringify({ description: 'Look' }));
+  fs.writeFileSync(path.join(dottedDir, 'session-d', 'subagents', 'agent-9.jsonl'), `${toolUseLine('Grep', {})}\n`);
+
+  const agents = detectAgents();
+
+  assert.equal(agents.find((agent) => agent.id === 'session-d')?.activity, 'researching');
+  assert.equal(agents.filter((agent) => agent.parentId === 'session-d').length, 1);
+});
+
+test('a session whose folder uses the older encoding with the dot kept still finds its transcript', () => {
+  const legacyDir = path.join(fixture, '.claude', 'projects', '-work-old.app');
+  fs.writeFileSync(path.join(sessions, 'e.json'), JSON.stringify({ pid: 104, sessionId: 'session-e', cwd: '/work/old.app', startedAt: 1 }));
+  fs.mkdirSync(legacyDir, { recursive: true });
+  fs.writeFileSync(path.join(legacyDir, 'session-e.jsonl'), `${toolUseLine('Read', {})}\n`);
+
+  assert.equal(detectAgents().find((agent) => agent.id === 'session-e')?.activity, 'researching');
+});
