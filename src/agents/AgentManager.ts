@@ -25,6 +25,16 @@ function overflowStation(index: number): Station {
   };
 }
 
+// FNV-1a hash of the agent ID, so an agent keeps its color across polls and reloads
+function accentColorFor(agentId: string): THREE.Color {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < agentId.length; i++) {
+    hash ^= agentId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return Colors.accents[(hash >>> 0) % Colors.accents.length];
+}
+
 interface ManagedAgent {
   info: AgentInfo;
   figure: StickFigure;
@@ -43,8 +53,7 @@ export class AgentManager {
   }
 
   addAgent(info: AgentInfo): StickFigure {
-    const colorIndex = this.agents.size % Colors.accents.length;
-    const figure = new StickFigure(info.name, Colors.accents[colorIndex]);
+    const figure = new StickFigure(info.name, accentColorFor(info.id));
 
     const managed: ManagedAgent = {
       info,
