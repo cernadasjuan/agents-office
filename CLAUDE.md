@@ -12,6 +12,10 @@ pnpm typecheck  # Type check without emitting
 pnpm test       # node:test suites in tests/ (tsx)
 ```
 
+## Design rules and roadmap
+
+Read `docs/design-principles.md` before any feature change: it lists the design rules (P1 to P15, S1 to S8) and the rules for every change. `docs/roadmap.md` holds the tiers, the planned slices and the conflict matrix.
+
 ## Architecture
 
 3D office visualization (Three.js + Vite) that shows running Claude Code agents as animated stick figures. Each agent's activity is detected from real session data and mapped to a physical station in the office.
