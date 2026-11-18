@@ -61,6 +61,17 @@ Both are write actions. They break S7 and need a separate security design: a loc
 - Issue detection uses tool calls only (P4): `gh issue view N`, a branch name that starts with `N-`, a commit message with `#N`.
 - Tier T2 (GitHub plugin). It needs the network and a token, so it breaks P6. Mitigation: opt-in plugin, token from `gh auth token` through `execFile`, a cache, and nothing leaves the server except issue number, title and column.
 
+## 5b. Use case: mission war rooms
+
+A mission is a long goal that spans several sessions. In the office, each mission gets a war room.
+
+- **Agents:** sessions that work on the mission go to its room. Several sessions can work at the same time, or one after another.
+- **Past sessions:** a finished session leaves a trace in the room: a bed with a sleeping agent. You can count how many sessions the mission took.
+- **Walls:** the mission statement, the generated documents, the issue tracker and a kanban board of the mission's issues. Here the kanban makes sense, because the mission owns a known set of issues.
+- **Closed mission:** the room locks. No agent goes in. The room stays in the building as a locked room, so the history stays visible.
+- **Data:** the mission record and the session ledger of the user's harness. A session joins a room when the harness links it to the mission.
+- Tier T2 (harness plugin). It depends on the user's own mission and session tooling. It builds on the growing building (rooms) and the source and enricher seam.
+
 ## 6. Conflict matrix
 
 K keeps, B bends (mitigated), X breaks (opt-in, plugin or justified override). Blank: not touched.
@@ -85,6 +96,7 @@ K keeps, B bends (mitigated), X breaks (opt-in, plugin or justified override). B
 | Library room and librarian trips | K | | K | K | K | X | X | | K | | Add-on, configurable agent types | T3 |
 | CEO office and waiting queue | K | | | K | K | | X | | K | | Add-on | T3 |
 | Reply from the office | | | | X | K | | | X | | X | Spike, opt-in, security review | T3 |
+| Mission war rooms, sleeping past sessions | B | | | B | K | X | X | | B | K | Harness plugin, room add-on | T2 |
 
 ## 7. Extension seam
 
@@ -132,6 +144,7 @@ Each slice is one issue and one pull request into the fork `main`. Order follows
 | 19 | CEO office and waiting queue | T3 | 3, 16 |
 | 20 | Rooms by herdr workspace | T3 | 11, 16 |
 | 21 | Reply spike, then reply from the office | T3 | 19 |
+| 22 | Harness plugin: mission war rooms with past-session beds, walls and a locked room when closed | T2 | 2, 16 |
 
 ## 9. Workflow
 
