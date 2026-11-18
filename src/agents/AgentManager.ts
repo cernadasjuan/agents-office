@@ -5,6 +5,36 @@ import { Activity } from './ActivityAnimations.js';
 import { Station } from '../scene/Office.js';
 import { Colors } from '../utils/Colors.js';
 
+// Open floor rows (aisle between desk rows, lounge front, space behind the desks).
+const OVERFLOW_ROWS_Z = [0.8, 1.9, 6.4, 7.5, -8, -9.2];
+const OVERFLOW_FIRST_X = -9;
+const OVERFLOW_SPACING = 1.2;
+const OVERFLOW_COLUMNS = 16;
+
+function overflowStation(index: number): Station {
+  const slotsPerLayer = OVERFLOW_ROWS_Z.length * OVERFLOW_COLUMNS;
+  const layerOffset = Math.floor(index / slotsPerLayer) * (OVERFLOW_SPACING / 3);
+  const slot = index % slotsPerLayer;
+  const x = OVERFLOW_FIRST_X + (slot % OVERFLOW_COLUMNS) * OVERFLOW_SPACING + layerOffset;
+  const z = OVERFLOW_ROWS_Z[Math.floor(slot / OVERFLOW_COLUMNS)] + layerOffset;
+  return {
+    type: 'overflow',
+    position: new THREE.Vector3(x, 0, z),
+    lookAt: new THREE.Vector3(x, 1.2, z + 1),
+    occupied: false,
+  };
+}
+
+// FNV-1a hash of the agent ID, so an agent keeps its color across polls and reloads
+function accentColorFor(agentId: string): THREE.Color {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < agentId.length; i++) {
+    hash ^= agentId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return Colors.accents[(hash >>> 0) % Colors.accents.length];
+}
+
 interface ManagedAgent {
   info: AgentInfo;
   figure: StickFigure;
@@ -15,6 +45,7 @@ export class AgentManager {
   private agents = new Map<string, ManagedAgent>();
   private stations: Map<string, Station>;
   private scene: THREE.Scene;
+  private overflowCount = 0;
 
   constructor(scene: THREE.Scene, stations: Map<string, Station>) {
     this.scene = scene;
@@ -22,8 +53,7 @@ export class AgentManager {
   }
 
   addAgent(info: AgentInfo): StickFigure {
-    const colorIndex = this.agents.size % Colors.accents.length;
-    const figure = new StickFigure(info.name, Colors.accents[colorIndex]);
+    const figure = new StickFigure(info.name, accentColorFor(info.id));
 
     const managed: ManagedAgent = {
       info,
@@ -114,12 +144,19 @@ export class AgentManager {
       }
     }
 
-    // Fallback: any unoccupied station
+    // Fallback: a free overflow spot. A seat of another type would show the wrong status.
     for (const [key, station] of this.stations) {
-      if (!station.occupied) {
+      if (station.type === 'overflow' && !station.occupied) {
         placeAt(key, station);
         return;
       }
     }
+
+    // Every spot is taken: open a new overflow spot so no two agents overlap
+    const overflowIndex = this.overflowCount++;
+    const key = `overflow_${overflowIndex}`;
+    const station = overflowStation(overflowIndex);
+    this.stations.set(key, station);
+    placeAt(key, station);
   }
 }
