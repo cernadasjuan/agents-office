@@ -5,6 +5,26 @@ import { Activity } from './ActivityAnimations.js';
 import { Station } from '../scene/Office.js';
 import { Colors } from '../utils/Colors.js';
 
+// Open floor rows (aisle between desk rows, lounge front, space behind the desks).
+const OVERFLOW_ROWS_Z = [0.8, 1.9, 6.4, 7.5, -8, -9.2];
+const OVERFLOW_FIRST_X = -9;
+const OVERFLOW_SPACING = 1.2;
+const OVERFLOW_COLUMNS = 16;
+
+function overflowStation(index: number): Station {
+  const slotsPerLayer = OVERFLOW_ROWS_Z.length * OVERFLOW_COLUMNS;
+  const layerOffset = Math.floor(index / slotsPerLayer) * (OVERFLOW_SPACING / 3);
+  const slot = index % slotsPerLayer;
+  const x = OVERFLOW_FIRST_X + (slot % OVERFLOW_COLUMNS) * OVERFLOW_SPACING + layerOffset;
+  const z = OVERFLOW_ROWS_Z[Math.floor(slot / OVERFLOW_COLUMNS)] + layerOffset;
+  return {
+    type: 'overflow',
+    position: new THREE.Vector3(x, 0, z),
+    lookAt: new THREE.Vector3(x, 1.2, z + 1),
+    occupied: false,
+  };
+}
+
 interface ManagedAgent {
   info: AgentInfo;
   figure: StickFigure;
@@ -15,6 +35,7 @@ export class AgentManager {
   private agents = new Map<string, ManagedAgent>();
   private stations: Map<string, Station>;
   private scene: THREE.Scene;
+  private overflowCount = 0;
 
   constructor(scene: THREE.Scene, stations: Map<string, Station>) {
     this.scene = scene;
@@ -114,12 +135,19 @@ export class AgentManager {
       }
     }
 
-    // Fallback: any unoccupied station
+    // Fallback: any unoccupied station (fixed stations first, then overflow spots)
     for (const [key, station] of this.stations) {
       if (!station.occupied) {
         placeAt(key, station);
         return;
       }
     }
+
+    // Every spot is taken: open a new overflow spot so no two agents overlap
+    const overflowIndex = this.overflowCount++;
+    const key = `overflow_${overflowIndex}`;
+    const station = overflowStation(overflowIndex);
+    this.stations.set(key, station);
+    placeAt(key, station);
   }
 }
