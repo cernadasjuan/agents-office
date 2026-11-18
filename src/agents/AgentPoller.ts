@@ -9,11 +9,14 @@ interface DetectedAgent {
   parentId?: string;
 }
 
+const POLL_TIMEOUT_MS = 5000;
+
 export class AgentPoller {
   private agentManager: AgentManager;
   private intervalId: number | null = null;
   private knownIds = new Set<string>();
   private onUpdate: (() => void) | null = null;
+  private pollInFlight = false;
 
   constructor(agentManager: AgentManager) {
     this.agentManager = agentManager;
@@ -33,14 +36,18 @@ export class AgentPoller {
   }
 
   private async poll(): Promise<void> {
+    if (this.pollInFlight) return;
+    this.pollInFlight = true;
     try {
-      const res = await fetch('/api/agents');
+      const res = await fetch('/api/agents', { signal: AbortSignal.timeout(POLL_TIMEOUT_MS) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const agents: DetectedAgent[] = await res.json();
       this.reconcile(agents);
     } catch {
-      // API not available — just keep current state
+      // API not available or too slow: keep the current state
+    } finally {
+      this.pollInFlight = false;
     }
   }
 
