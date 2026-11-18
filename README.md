@@ -4,24 +4,21 @@ A 3D office visualization that shows your running [Claude Code](https://claude.a
 
 ![agents-office](assets/screenshot.png)
 
-## Test the security branch locally
-
-Use the fork's security branch. The upstream `npx agents-office` package does not
-contain these fixes.
+## Quick start
 
 ```bash
-git clone --branch feature/security-hardening https://github.com/gabriel-amyot/agents-office.git
-cd agents-office
+npx agents-office          # opens http://127.0.0.1:5173
+npx agents-office 5180     # another port
+```
+
+From source, run the checks first:
+
+```bash
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm audit --audit-level=low
 pnpm test
 pnpm typecheck
 pnpm build
-```
-
-Run the dashboard only after these security checks pass:
-
-```bash
 pnpm dev
 ```
 
@@ -40,26 +37,89 @@ login. Run it only on a trusted machine.
 
 ## How It Works
 
-The app detects running Claude Code sessions by reading `~/.claude/sessions/` on your machine. For each live session, it reads the conversation transcript to determine what the agent is currently doing based on the tools it's using — completely language-agnostic.
+The app reads the Claude Code session files in `~/.claude/sessions/` on your machine. For each live session it reads that session's own transcript and the status that Claude Code writes in the session file. From those it computes one value, the **activity**. Everything you see derives from it: where the agent stands, how it moves, and what its label says.
 
-It also detects **subagents** (spawned via the Agent tool) and shows them alongside the parent session with a `>>` prefix in their name.
+```
+~/.claude/sessions/*.json   one file per running session (pid, sessionId, cwd, status)
+        │  server: keep valid sessions whose process is alive
+        ▼
+  activity = session status + newest tool call in the session's own transcript
+        │  + subagents of that session (active in the last 30 s, or in a long tool call)
+        ▼  GET /api/agents  →  [{ id, name, activity, parentId? }]
+  browser, every 3 s: add, update or remove figures
+        ▼
+  activity → station type → free seat of that type (or an overflow spot) → walk there → pose
+```
 
-| Most recent tool call | Activity shown |
+### Status: how the activity is computed
+
+The session status comes first. The transcript tells what kind of work the agent does.
+
+| Session status | Activity |
 |---|---|
-| Read, Grep, Glob, WebSearch, WebFetch, Agent | Researching (reading at bookshelf) |
-| Edit, Write (code files), NotebookEdit | Implementing (typing at desk) |
-| Edit, Write (.md, .rst, .txt, README, docs/) | Writing docs (writing at review desk) |
-| Bash with test commands | Testing (at test station) |
-| Bash with git commit/push, deploy, terraform apply | Deploying (celebrating at desk) |
-| Bash with git diff/log/show/blame, gh pr view | Reviewing (at review desk) |
-| Bash with curl, wget, lsof, gdb and similar | Debugging (at desk) |
-| EnterPlanMode, ExitPlanMode, TaskCreate, TaskUpdate | Planning (at whiteboard) |
-| Any other tool or Bash command | Implementing (typing at desk) |
-| Last assistant message is text only | Idle (at coffee machine) |
+| waiting (for a permission or an answer) | Waiting for you (meeting table) |
+| idle | Taking a break (coffee machine) |
+| busy, and the newest message is text | Planning (whiteboard): the agent is thinking |
+| busy with a tool call, or no status in the file | From the newest tool call, below |
 
-When every station of the right type is taken, the agent stands on an overflow spot on open floor.
+| Newest tool call | Activity |
+|---|---|
+| Read, Grep, Glob, WebSearch, WebFetch, Agent, Skill, ToolSearch | Researching (bookshelf) |
+| MCP tool whose name holds get, list, search, read, fetch, query, find, view, lookup or describe | Researching (bookshelf) |
+| Edit or Write on `.md`, `.rst`, `.txt`, README or `docs/` | Writing docs (review desk) |
+| Edit, Write, NotebookEdit on other files, other MCP tools | Implementing (desk) |
+| EnterPlanMode, ExitPlanMode, TaskCreate, TaskUpdate | Planning (whiteboard) |
+| AskUserQuestion | Waiting for you (meeting table) |
+| Bash, see below | depends on the programs it runs |
+| Text only, no tool call | Taking a break (coffee machine) |
 
-When an agent switches tasks, it walks to the corresponding station with a walk animation.
+Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule that matches any of them wins:
+
+| Programs | Activity |
+|---|---|
+| Test runners: `pnpm test`, `npm test`, `jest`, `vitest`, `pytest`, `cargo test`, `go test`, `node --test` | Testing (test station) |
+| `git commit`, `git push`, `docker push`, `kubectl apply`, `terraform apply`, `npm run deploy`, `deploy.sh` | Deploying (celebrating) |
+| `git diff`, `git log`, `git show`, `git blame`, `gh pr view` | Reviewing (review desk) |
+| `curl`, `wget`, `lsof`, `gdb`, `lldb`, `strace`, `node --inspect` | Debugging (desk) |
+| Only read-only programs: `ls`, `cat`, `rg`, `grep`, `find`, `git status`... | Researching (bookshelf) |
+| Anything else | Implementing (desk) |
+
+### Location: stations
+
+| Station | Where | Seats | Activities |
+|---|---|---|---|
+| Coding desks | Two rows in the center | 8 | Implementing, Debugging, Deploying |
+| Review desks | Front row | 3 | Reviewing, Writing docs |
+| Whiteboards | Back wall | 2 | Planning |
+| Bookshelves | Left wall | 2 | Researching |
+| Test stations | Right side | 2 | Testing |
+| Coffee machine | Front left | 2 | Taking a break |
+| Meeting table | Front right | 3 | Waiting for you |
+
+- A new agent appears directly at its seat. When its activity changes, it walks to a seat of the new type.
+- If the new activity uses the same station type (implementing to debugging), the agent stays where it is and only changes its pose.
+- One agent per seat. When no seat of the right type is free, the agent stands on an overflow spot on open floor. It never takes a seat of another type, so the place always matches the activity.
+
+### Position: poses
+
+| Activity | Pose |
+|---|---|
+| Implementing | Seated, typing |
+| Debugging | Seated, scratching the head |
+| Reviewing | Seated, hand on chin |
+| Writing docs | Seated, writing on paper |
+| Planning | Standing, writing on the whiteboard |
+| Researching | Standing, reaching for a book |
+| Testing | Standing, arms crossed |
+| Waiting for you | Standing, gesturing |
+| Taking a break | Standing, holding a coffee cup |
+| Deploying | Jumping, both hands up |
+
+### Identity: name, color, label
+
+- **Name:** the folder name of the session. Subagents show `>>` followed by their task description.
+- **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads.
+- **Label:** the name and the activity text float over each figure. The side panel lists the same agents. Its menu lets you preview another activity until the next update.
 
 ## Controls
 
@@ -76,7 +136,7 @@ When an agent switches tasks, it walks to the corresponding station with a walk 
 ~/.claude/sessions/*.json → Vite middleware → GET /api/agents → Browser polls every 3s → 3D scene updates
 ```
 
-- **Server**: Vite plugin reads Claude session files, validates PIDs, infers activity from transcript tool calls, detects active subagents
+- **Server**: Vite plugin reads Claude session files, validates PIDs, combines the session status with the newest tool call of the session's own transcript, and detects that session's active subagents
 - **Client**: Three.js scene with toon-shaded stick figures, station-based layout, walking animations, and per-activity poses
 
 ## Requirements
