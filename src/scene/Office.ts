@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Posture } from '../layout/LayoutStrategy.js';
 import { createFloor } from '../furniture/Floor.js';
 import { createDesk } from '../furniture/Desk.js';
 import { createWhiteboard } from '../furniture/Whiteboard.js';
@@ -17,6 +18,8 @@ export interface Station {
   position: THREE.Vector3;
   lookAt: THREE.Vector3;
   occupied: boolean;
+  /** Force a posture at this station (a sofa seats, an open spot stands). */
+  posture?: Posture;
 }
 
 export function createOffice(scene: THREE.Scene): Map<string, Station> {

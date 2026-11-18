@@ -28,7 +28,7 @@ Read `docs/design-principles.md` before any feature change: it lists the design 
 
 1. **Server** (`server/`): Vite middleware plugin reads Claude session files, validates PIDs, infers activity from transcript `.jsonl` tool_use blocks (language-agnostic), and detects active subagents
 2. **Polling** (`AgentPoller.ts`): Fetches `/api/agents` every 3 s, one request at a time with a 5 s limit, and reconciles with AgentManager (add/remove/update). If the API fails, the current scene stays. Subagents get a `>> ` prefix in their name
-3. **Agent Management** (`AgentManager.ts`): Creates StickFigures, assigns them to stations based on activity type, handles lifecycle
+3. **Agent Management** (`AgentManager.ts`): Creates StickFigures and handles their lifecycle. Where a figure goes is the layout's decision (`src/layout/`): `LayoutStrategy.seatFor(agent, previousActivity)` returns a `Seat` (position, look-at, optional forced posture) or null to stay. `ActivityLayout` is the original behavior. `registry.ts` picks the layout from `?layout=`, then browser storage, then the default; key L cycles layouts. Optional fork add-ons in `src/addons/*.ts` register more layouts
 4. **Scene** (`Office.ts`): 22 stations across 7 types (implementing, planning, researching, testing, reviewing, idle, meeting). One agent per station. When no station of the right type is free, AgentManager opens an overflow spot on open floor; it never uses a station of another type
 
 ### Activity Inference (server/agentDetector.ts)

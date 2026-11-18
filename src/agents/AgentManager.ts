@@ -1,29 +1,11 @@
 import * as THREE from 'three';
 import { StickFigure } from '../characters/StickFigure.js';
-import { AgentInfo, ACTIVITY_STATION_MAP } from './AgentData.js';
+import { AgentInfo } from './AgentData.js';
 import { Activity } from './ActivityAnimations.js';
 import { Station } from '../scene/Office.js';
 import { Colors } from '../utils/Colors.js';
-
-// Open floor rows (aisle between desk rows, lounge front, space behind the desks).
-const OVERFLOW_ROWS_Z = [0.8, 1.9, 6.4, 7.5, -8, -9.2];
-const OVERFLOW_FIRST_X = -9;
-const OVERFLOW_SPACING = 1.2;
-const OVERFLOW_COLUMNS = 16;
-
-function overflowStation(index: number): Station {
-  const slotsPerLayer = OVERFLOW_ROWS_Z.length * OVERFLOW_COLUMNS;
-  const layerOffset = Math.floor(index / slotsPerLayer) * (OVERFLOW_SPACING / 3);
-  const slot = index % slotsPerLayer;
-  const x = OVERFLOW_FIRST_X + (slot % OVERFLOW_COLUMNS) * OVERFLOW_SPACING + layerOffset;
-  const z = OVERFLOW_ROWS_Z[Math.floor(slot / OVERFLOW_COLUMNS)] + layerOffset;
-  return {
-    type: 'overflow',
-    position: new THREE.Vector3(x, 0, z),
-    lookAt: new THREE.Vector3(x, 1.2, z + 1),
-    occupied: false,
-  };
-}
+import { ActivityLayout } from '../layout/ActivityLayout.js';
+import type { LayoutStrategy, Seat } from '../layout/LayoutStrategy.js';
 
 // FNV-1a hash of the agent ID, so an agent keeps its color across polls and reloads
 function accentColorFor(agentId: string): THREE.Color {
@@ -38,34 +20,32 @@ function accentColorFor(agentId: string): THREE.Color {
 interface ManagedAgent {
   info: AgentInfo;
   figure: StickFigure;
-  stationKey: string | null;
+  seat: Seat | null;
 }
 
+/**
+ * Owns the figures. Where each figure goes is the layout's decision: the
+ * manager asks the layout for a seat and moves the figure there.
+ */
 export class AgentManager {
   private agents = new Map<string, ManagedAgent>();
-  private stations: Map<string, Station>;
   private scene: THREE.Scene;
-  private overflowCount = 0;
+  readonly layout: LayoutStrategy;
 
-  constructor(scene: THREE.Scene, stations: Map<string, Station>) {
+  constructor(scene: THREE.Scene, layout: LayoutStrategy | Map<string, Station>) {
     this.scene = scene;
-    this.stations = stations;
+    this.layout = layout instanceof Map ? new ActivityLayout(layout) : layout;
   }
 
   addAgent(info: AgentInfo): StickFigure {
     const figure = new StickFigure(info.name, accentColorFor(info.id));
-
-    const managed: ManagedAgent = {
-      info,
-      figure,
-      stationKey: null,
-    };
+    const managed: ManagedAgent = { info, figure, seat: null };
     this.agents.set(info.id, managed);
     this.scene.add(figure.group);
 
-    // Assign to station (teleport immediately, no walk animation)
-    this.assignStation(managed, info.activity, true);
-
+    // A new agent appears at its seat (no walk from the origin)
+    this.goToSeat(managed, this.layout.seatFor(info, null), true);
+    figure.setActivity(info.activity);
     return figure;
   }
 
@@ -73,29 +53,15 @@ export class AgentManager {
     const managed = this.agents.get(agentId);
     if (!managed) return;
 
-    const newStationType = ACTIVITY_STATION_MAP[activity];
-    const oldStationType = ACTIVITY_STATION_MAP[managed.info.activity];
-
-    // If station type is the same, stay at current station (don't move desks)
-    if (newStationType === oldStationType && managed.stationKey) {
-      managed.info.activity = activity;
-      managed.figure.setActivity(activity);
-      return;
-    }
-
-    // Release current station
-    if (managed.stationKey) {
-      const station = this.stations.get(managed.stationKey);
-      if (station) station.occupied = false;
-      managed.stationKey = null;
-    }
-
+    const previous = managed.info.activity;
     managed.info.activity = activity;
+    const seat = this.layout.seatFor(managed.info, previous);
+    if (seat) this.goToSeat(managed, seat, false);
     managed.figure.setActivity(activity);
-    this.assignStation(managed, activity);
   }
 
   update(elapsed: number, delta: number): void {
+    this.layout.update?.(elapsed, delta);
     for (const managed of this.agents.values()) {
       managed.figure.update(elapsed, delta);
     }
@@ -105,16 +71,9 @@ export class AgentManager {
     const managed = this.agents.get(agentId);
     if (!managed) return;
 
-    // Release station
-    if (managed.stationKey) {
-      const station = this.stations.get(managed.stationKey);
-      if (station) station.occupied = false;
-    }
-
-    // Remove from scene
+    this.layout.release(agentId);
     this.scene.remove(managed.figure.group);
     managed.figure.dispose();
-
     this.agents.delete(agentId);
   }
 
@@ -122,41 +81,11 @@ export class AgentManager {
     return Array.from(this.agents.values());
   }
 
-  private assignStation(managed: ManagedAgent, activity: Activity, teleport = false): void {
-    const stationType = ACTIVITY_STATION_MAP[activity];
-
-    const placeAt = (key: string, station: Station) => {
-      station.occupied = true;
-      managed.stationKey = key;
-      if (teleport) {
-        managed.figure.teleportTo(station.position, station.lookAt);
-      } else {
-        managed.figure.moveTo(station.position, station.lookAt);
-      }
-      managed.figure.setActivity(activity);
-    };
-
-    // Find an unoccupied station of the right type
-    for (const [key, station] of this.stations) {
-      if (station.type === stationType && !station.occupied) {
-        placeAt(key, station);
-        return;
-      }
-    }
-
-    // Fallback: a free overflow spot. A seat of another type would show the wrong status.
-    for (const [key, station] of this.stations) {
-      if (station.type === 'overflow' && !station.occupied) {
-        placeAt(key, station);
-        return;
-      }
-    }
-
-    // Every spot is taken: open a new overflow spot so no two agents overlap
-    const overflowIndex = this.overflowCount++;
-    const key = `overflow_${overflowIndex}`;
-    const station = overflowStation(overflowIndex);
-    this.stations.set(key, station);
-    placeAt(key, station);
+  private goToSeat(managed: ManagedAgent, seat: Seat | null, teleport: boolean): void {
+    if (!seat) return;
+    managed.seat = seat;
+    managed.figure.setPosture(seat.posture);
+    if (teleport) managed.figure.teleportTo(seat.position, seat.lookAt);
+    else managed.figure.moveTo(seat.position, seat.lookAt);
   }
 }
