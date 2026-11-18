@@ -135,9 +135,9 @@ export class AgentManager {
       }
     }
 
-    // Fallback: any unoccupied station (fixed stations first, then overflow spots)
+    // Fallback: a free overflow spot. A seat of another type would show the wrong status.
     for (const [key, station] of this.stations) {
-      if (!station.occupied) {
+      if (station.type === 'overflow' && !station.occupied) {
         placeAt(key, station);
         return;
       }

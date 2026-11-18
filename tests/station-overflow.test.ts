@@ -52,3 +52,12 @@ test('an overflow position is released and reused when its agent leaves', () => 
   const newcomer = manager.getAgents().find((agent) => agent.info.id === 'agent-3')!;
   assert.equal(positionKey(newcomer.figure.group.position), overflowPosition);
 });
+
+test('an agent never takes a free seat of another activity type', () => {
+  const manager = new AgentManager(new THREE.Scene(), twoDesks());
+
+  manager.addAgent({ id: 'idle-agent', name: 'Idle', activity: 'idle' });
+
+  const position = positionKey(manager.getAgents()[0].figure.group.position);
+  assert.ok(!['5.00,0.00', '8.00,0.00'].includes(position), `idle agent sat at desk ${position}`);
+});
