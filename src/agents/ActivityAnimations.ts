@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Joints } from '../characters/StickFigureParts.js';
+import type { Posture } from '../layout/LayoutStrategy.js';
 
 export type Activity =
   | 'idle'
@@ -65,10 +66,23 @@ function relaxUndrivenSideAxes(j: Joints, pose: Activity | 'walking', dt: number
   }
 }
 
+// The seat can force a posture (a sofa, an open-floor spot). Otherwise each pose uses its own.
+let postureOverride: Posture | undefined;
+
+function applySittingBase(j: Joints, dt: number): void {
+  if (postureOverride === 'standing') applyUprightBase(j, dt);
+  else applySeatedBase(j, dt);
+}
+
+function applyStandingBase(j: Joints, dt: number): void {
+  if (postureOverride === 'seated') applySeatedBase(j, dt);
+  else applyUprightBase(j, dt);
+}
+
 // Seated pose: hips, shoulders, neck all drop together
 // Standing: hips=0.9, shoulders=1.5, neck=1.6
 // Seated:   hips=0.5, shoulders=1.1, neck=1.2  (all -0.4)
-function applySittingBase(j: Joints, dt: number): void {
+function applySeatedBase(j: Joints, dt: number): void {
   j.hips.position.y = approachY(j.hips.position.y, 0.5, dt);
   j.shoulders.position.y = approachY(j.shoulders.position.y, 1.1, dt);
   j.neck.position.y = approachY(j.neck.position.y, 1.2, dt);
@@ -79,7 +93,7 @@ function applySittingBase(j: Joints, dt: number): void {
   j.rightLowerLeg.rotation.x = approach(j.rightLowerLeg.rotation.x, 1.5, dt);
 }
 
-function applyStandingBase(j: Joints, dt: number): void {
+function applyUprightBase(j: Joints, dt: number): void {
   j.hips.position.y = approachY(j.hips.position.y, 0.9, dt);
   j.shoulders.position.y = approachY(j.shoulders.position.y, 1.5, dt);
   j.neck.position.y = approachY(j.neck.position.y, 1.6, dt);
@@ -92,7 +106,7 @@ function applyStandingBase(j: Joints, dt: number): void {
 
 export function animateWalking(j: Joints, elapsed: number, dt: number): void {
   // Standing base
-  applyStandingBase(j, dt);
+  applyUprightBase(j, dt);
   relaxUndrivenSideAxes(j, 'walking', dt);
 
   const walkCycle = elapsed * 9; // speed of walk cycle
@@ -120,7 +134,10 @@ export function animateWalking(j: Joints, elapsed: number, dt: number): void {
   j.neck.position.y = approachY(j.neck.position.y, 1.6 + bounce, dt, 15);
 }
 
-export function animateActivity(joints: Joints, activity: Activity, elapsed: number, delta: number): void {
+export function animateActivity(
+  joints: Joints, activity: Activity, elapsed: number, delta: number, posture?: Posture,
+): void {
+  postureOverride = posture;
   relaxUndrivenSideAxes(joints, activity, delta);
   switch (activity) {
     case 'idle':

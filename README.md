@@ -129,6 +129,7 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 - **Shift** to move faster
 - **Mouse** to look around
 - **Esc** to release camera
+- **L** to switch the layout, when more than one is installed (also `?layout=<id>` in the URL)
 
 ## Architecture
 

@@ -4,6 +4,7 @@ import { buildSkeleton, Joints } from './StickFigureParts.js';
 import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
 import { ACTIVITY_LABELS } from '../agents/AgentData.js';
+import type { Posture } from '../layout/LayoutStrategy.js';
 
 const TRANSITION_DURATION = 0.5;
 const WALK_SPEED = 4.5;
@@ -19,6 +20,7 @@ export class StickFigure {
   private targetPosition = new THREE.Vector3();
   private targetLookAt = new THREE.Vector3();
   private isMoving = false;
+  private posture: Posture | undefined;
 
   constructor(name: string, accentColor: THREE.Color) {
     this.name = name;
@@ -44,6 +46,11 @@ export class StickFigure {
     this.targetActivity = activity;
     this.transitionProgress = 0;
     updateLabel(this.label, this.name, ACTIVITY_LABELS[activity] ?? activity);
+  }
+
+  /** Force a posture for the current seat, or undefined to let the activity decide. */
+  setPosture(posture: Posture | undefined): void {
+    this.posture = posture;
   }
 
   moveTo(position: THREE.Vector3, lookAt: THREE.Vector3): void {
@@ -113,7 +120,7 @@ export class StickFigure {
     }
 
     // Animate activity
-    animateActivity(this.joints, this.activity, elapsed, delta);
+    animateActivity(this.joints, this.activity, elapsed, delta, this.posture);
   }
 
   private saveCurrentPose(obj: THREE.Object3D): void {
