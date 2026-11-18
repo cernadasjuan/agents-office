@@ -166,77 +166,71 @@ function inferActivityFromFile(transcriptPath: string): string {
   }
 }
 
-/**
- * Find the most recent transcript for a project and infer activity.
- */
-function inferActivityFromTranscript(cwd: string): string {
-  const encodedCwd = cwd.replace(/\//g, '-');
-  const projectDir = path.join(PROJECTS_DIR, encodedCwd);
+const PLAIN_SESSION_ID = /^[A-Za-z0-9_-]+$/;
 
-  if (!fs.existsSync(projectDir)) return 'implementing';
+function isPlainSessionId(sessionId: string): boolean {
+  return PLAIN_SESSION_ID.test(sessionId);
+}
 
-  const jsonlFiles = fs.readdirSync(projectDir)
-    .filter((f) => f.endsWith('.jsonl'))
-    .map((f) => ({ name: f, mtime: fs.statSync(path.join(projectDir, f)).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime);
-
-  if (jsonlFiles.length === 0) return 'implementing';
-  return inferActivityFromFile(path.join(projectDir, jsonlFiles[0].name));
+function projectDirFor(cwd: string): string {
+  return path.join(PROJECTS_DIR, cwd.replace(/\//g, '-'));
 }
 
 /**
- * Detect active subagents for a given project.
+ * Infer activity from the session's own transcript. Sessions that share a
+ * folder share a project directory, so the newest file there may belong to
+ * another session.
+ */
+function inferSessionActivity(cwd: string, sessionId: string): string {
+  if (!isPlainSessionId(sessionId)) return 'idle';
+  const transcriptPath = path.join(projectDirFor(cwd), `${sessionId}.jsonl`);
+  if (!fs.existsSync(transcriptPath)) return 'idle';
+  return inferActivityFromFile(transcriptPath);
+}
+
+/**
+ * Detect active subagents started by one session.
  * A subagent is "active" if its transcript was modified within the last 30 seconds.
  */
 function detectSubagents(cwd: string, parentId: string, parentPid: number): DetectedAgent[] {
-  const encodedCwd = cwd.replace(/\//g, '-');
-  const projectDir = path.join(PROJECTS_DIR, encodedCwd);
-
-  if (!fs.existsSync(projectDir)) return [];
+  if (!isPlainSessionId(parentId)) return [];
+  const subagentsDir = path.join(projectDirFor(cwd), parentId, 'subagents');
+  if (!fs.existsSync(subagentsDir)) return [];
 
   const subagents: DetectedAgent[] = [];
   const now = Date.now();
   const ACTIVE_THRESHOLD = 30_000; // 30 seconds
 
-  // Scan all session dirs for subagents
-  const sessionDirs = fs.readdirSync(projectDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory());
+  const metaFiles = fs.readdirSync(subagentsDir).filter((f) => f.endsWith('.meta.json'));
 
-  for (const sessionDir of sessionDirs) {
-    const subagentsDir = path.join(projectDir, sessionDir.name, 'subagents');
-    if (!fs.existsSync(subagentsDir)) continue;
+  for (const metaFile of metaFiles) {
+    try {
+      const agentId = metaFile.replace('.meta.json', '');
+      const transcriptPath = path.join(subagentsDir, `${agentId}.jsonl`);
 
-    const metaFiles = fs.readdirSync(subagentsDir).filter((f) => f.endsWith('.meta.json'));
+      // Check if transcript exists and was recently modified
+      if (!fs.existsSync(transcriptPath)) continue;
+      const transcriptStat = fs.statSync(transcriptPath);
+      if (now - transcriptStat.mtimeMs > ACTIVE_THRESHOLD) continue;
 
-    for (const metaFile of metaFiles) {
-      try {
-        const agentId = metaFile.replace('.meta.json', '');
-        const transcriptPath = path.join(subagentsDir, `${agentId}.jsonl`);
+      // Read meta
+      const meta = JSON.parse(fs.readFileSync(path.join(subagentsDir, metaFile), 'utf-8'));
+      const description = meta.description || meta.agentType || 'subagent';
 
-        // Check if transcript exists and was recently modified
-        if (!fs.existsSync(transcriptPath)) continue;
-        const transcriptStat = fs.statSync(transcriptPath);
-        if (now - transcriptStat.mtimeMs > ACTIVE_THRESHOLD) continue;
+      const activity = inferActivityFromFile(transcriptPath);
 
-        // Read meta
-        const meta = JSON.parse(fs.readFileSync(path.join(subagentsDir, metaFile), 'utf-8'));
-        const description = meta.description || meta.agentType || 'subagent';
-
-        const activity = inferActivityFromFile(transcriptPath);
-
-        subagents.push({
-          id: agentId,
-          name: `${description}`,
-          pid: parentPid,
-          cwd,
-          startedAt: transcriptStat.birthtimeMs,
-          alive: true,
-          activity,
-          parentId,
-        });
-      } catch {
-        // skip malformed subagent files
-      }
+      subagents.push({
+        id: agentId,
+        name: `${description}`,
+        pid: parentPid,
+        cwd,
+        startedAt: transcriptStat.birthtimeMs,
+        alive: true,
+        activity,
+        parentId,
+      });
+    } catch {
+      // skip malformed subagent files
     }
   }
 
@@ -258,7 +252,7 @@ export function detectAgents(): DetectedAgent[] {
       const alive = isPidAlive(session.pid);
       if (!alive) continue;
 
-      const activity = inferActivityFromTranscript(session.cwd);
+      const activity = inferSessionActivity(session.cwd, session.sessionId);
       const name = path.basename(session.cwd);
 
       agents.push({
