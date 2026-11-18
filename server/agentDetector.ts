@@ -260,6 +260,30 @@ function inferActivityFromFile(transcriptPath: string): string {
   }
 }
 
+const PENDING_TOOL_CALL_LIMIT = 10 * 60_000;
+
+/** True when the newest message in a transcript is a tool call that has no result yet. */
+function endsWithPendingToolCall(transcriptPath: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(transcriptPath, 'r');
+    for (const line of completeLinesFromEnd(fd, fs.fstatSync(fd).size)) {
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+      const message = entry.message;
+      if (!message) continue;
+      return message.role === 'assistant'
+        && Array.isArray(message.content)
+        && message.content.some((block: { type: string }) => block.type === 'tool_use');
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
 const PLAIN_SESSION_ID = /^[A-Za-z0-9_-]+$/;
 
 function isPlainSessionId(sessionId: string): boolean {
@@ -311,7 +335,9 @@ function detectSubagents(cwd: string, parentId: string, parentPid: number): Dete
       // Check if transcript exists and was recently modified
       if (!fs.existsSync(transcriptPath)) continue;
       const transcriptStat = fs.statSync(transcriptPath);
-      if (now - transcriptStat.mtimeMs > ACTIVE_THRESHOLD) continue;
+      const quietFor = now - transcriptStat.mtimeMs;
+      const inLongToolCall = quietFor <= PENDING_TOOL_CALL_LIMIT && endsWithPendingToolCall(transcriptPath);
+      if (quietFor > ACTIVE_THRESHOLD && !inLongToolCall) continue;
 
       // Read meta
       const meta = JSON.parse(fs.readFileSync(path.join(subagentsDir, metaFile), 'utf-8'));

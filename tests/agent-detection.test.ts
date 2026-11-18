@@ -180,3 +180,28 @@ for (const [name, input, expected] of [
     assert.equal(detectAgents()[0].activity, expected);
   });
 }
+
+function writeSubagent(lastLine: string, ageMs: number): void {
+  writeSession('a.json', 'session-a', 101);
+  const subagentsDir = path.join(projectDir, 'session-a', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(subagentsDir, 'agent-1.meta.json'), JSON.stringify({ description: 'Long task' }));
+  writeTranscript(path.join('session-a', 'subagents', 'agent-1.jsonl'), lastLine, new Date(Date.now() - ageMs));
+}
+
+const toolResultLine = JSON.stringify({ message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } });
+
+test('a subagent stays visible during a long tool call', () => {
+  writeSubagent(toolUseLine('Bash', { command: 'pnpm test' }), 2 * 60_000);
+  assert.equal(detectAgents().filter((agent) => agent.parentId).length, 1);
+});
+
+test('a subagent with a pending tool call disappears after the 10 minute limit', () => {
+  writeSubagent(toolUseLine('Bash', { command: 'pnpm test' }), 11 * 60_000);
+  assert.equal(detectAgents().filter((agent) => agent.parentId).length, 0);
+});
+
+test('a quiet subagent whose last tool call has a result disappears after 30 seconds', () => {
+  writeSubagent(toolResultLine, 2 * 60_000);
+  assert.equal(detectAgents().filter((agent) => agent.parentId).length, 0);
+});
