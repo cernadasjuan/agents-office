@@ -2,10 +2,9 @@ import * as THREE from 'three';
 import { createScene } from './scene/SceneSetup.js';
 import { createOffice } from './scene/Office.js';
 import { AgentManager } from './agents/AgentManager.js';
-import { ACTIVITIES, ACTIVITY_LABELS } from './agents/AgentData.js';
-import { Activity } from './agents/ActivityAnimations.js';
 import { updateFreeCamera } from './scene/FreeCamera.js';
 import { AgentPoller } from './agents/AgentPoller.js';
+import { AgentPanel } from './ui/AgentPanel.js';
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
@@ -17,34 +16,13 @@ const stations = createOffice(scene);
 const agentManager = new AgentManager(scene, stations);
 
 // --- UI Panel ---
+const panel = new AgentPanel(
+  document.getElementById('agent-list')!,
+  (agentId, activity) => agentManager.setActivity(agentId, activity),
+);
+
 function buildUI(): void {
-  const listEl = document.getElementById('agent-list')!;
-  listEl.innerHTML = '';
-
-  for (const managed of agentManager.getAgents()) {
-    const card = document.createElement('div');
-    card.className = 'agent-card';
-
-    const nameEl = document.createElement('div');
-    nameEl.className = 'agent-name';
-    nameEl.textContent = managed.info.name;
-    card.appendChild(nameEl);
-
-    const select = document.createElement('select');
-    for (const act of ACTIVITIES) {
-      const option = document.createElement('option');
-      option.value = act;
-      option.textContent = ACTIVITY_LABELS[act];
-      if (act === managed.info.activity) option.selected = true;
-      select.appendChild(option);
-    }
-    select.addEventListener('change', () => {
-      agentManager.setActivity(managed.info.id, select.value as Activity);
-    });
-    card.appendChild(select);
-
-    listEl.appendChild(card);
-  }
+  panel.render(agentManager.getAgents().map((managed) => managed.info));
 }
 
 // Start polling for real agents (an empty office when none are found)
