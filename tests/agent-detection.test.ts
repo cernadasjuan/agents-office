@@ -150,3 +150,33 @@ test('the API never returns the raw session status', () => {
   writeSessionWithStatus('session-s', 'waiting', textOnlyLine);
   assert.equal('status' in detectAgents()[0], false);
 });
+
+for (const [name, input, expected] of [
+  ['AskUserQuestion', {}, 'meeting'],
+  ['Skill', { skill: 'x' }, 'researching'],
+  ['ToolSearch', { query: 'x' }, 'researching'],
+  ['mcp__docs__search_pages', {}, 'researching'],
+  ['mcp__tracker__get_issue', {}, 'researching'],
+  ['mcp__tracker__create_issue', {}, 'implementing'],
+  ['Bash', { command: 'ls -la src' }, 'researching'],
+  ['Bash', { command: 'cat README.md | head -5' }, 'researching'],
+  ['Bash', { command: 'rg TODO src' }, 'researching'],
+  ['Bash', { command: 'git status --short' }, 'researching'],
+  ['Bash', { command: 'grep -rn spec src' }, 'researching'],
+  ['Bash', { command: 'ls deploy/' }, 'researching'],
+  ['Bash', { command: 'pnpm test' }, 'testing'],
+  ['Bash', { command: 'npx vitest run' }, 'testing'],
+  ['Bash', { command: 'cd app && pytest -q' }, 'testing'],
+  ['Bash', { command: 'node --test tests/a.test.ts' }, 'testing'],
+  ['Bash', { command: 'git push origin main' }, 'deploying'],
+  ['Bash', { command: 'npm run deploy' }, 'deploying'],
+  ['Bash', { command: './scripts/deploy.sh prod' }, 'deploying'],
+  ['Bash', { command: 'git diff HEAD~1' }, 'reviewing'],
+  ['Bash', { command: 'mkdir -p out && node build.js' }, 'implementing'],
+] as const) {
+  test(`${name} ${'command' in input ? `"${input.command}" ` : ''}maps to ${expected}`, () => {
+    writeSession('a.json', 'session-a', 101);
+    writeTranscript('session-a.jsonl', toolUseLine(name, input), new Date());
+    assert.equal(detectAgents()[0].activity, expected);
+  });
+}

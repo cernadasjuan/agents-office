@@ -82,20 +82,103 @@ function inferActivityFromTool(name: string, input?: Record<string, unknown>): s
     case 'TaskUpdate':
       return 'planning';
 
+    // Asking the user a question: the agent waits in a meeting with the user
+    case 'AskUserQuestion':
+      return 'meeting';
+
+    // Loading instructions or tool definitions is reading
+    case 'Skill':
+    case 'ToolSearch':
+      return 'researching';
+
     default:
-      return 'implementing';
+      return name.startsWith('mcp__') ? inferMcpActivity(name) : 'implementing';
   }
 }
 
-// Bash command patterns to refine activity
-function inferBashActivity(bashInput: string): string {
-  const lower = bashInput.toLowerCase();
-  if (/\b(test|spec|jest|vitest|pytest|cargo\s+test|go\s+test|npm\s+test|pnpm\s+test)\b/.test(lower)) return 'testing';
-  if (/\b(git\s+(commit|push)|deploy|docker\s+push|kubectl\s+apply|terraform\s+apply)\b/.test(lower)) return 'deploying';
-  if (/\b(gh\s+pr\s+(view|review|diff|checks)|git\s+(diff|log|blame|show))\b/.test(lower)) return 'reviewing';
-  if (/\b(node\s+--inspect|strace|lldb|gdb|lsof|dmesg)\b/.test(lower)) return 'debugging';
-  if (/\b(npm\s+run\s+build|pnpm\s+build|cargo\s+build|make)\b/.test(lower)) return 'implementing';
-  if (/\b(curl|wget|nc|ping)\b/.test(lower)) return 'debugging';
+const MCP_READ_WORDS = /(^|_)(get|list|search|read|fetch|query|find|view|lookup|describe)(_|$)/;
+
+function inferMcpActivity(name: string): string {
+  const operation = name.split('__').pop() ?? '';
+  return MCP_READ_WORDS.test(operation.toLowerCase()) ? 'researching' : 'implementing';
+}
+
+const READ_ONLY_PROGRAMS = new Set([
+  'cd', 'ls', 'cat', 'head', 'tail', 'less', 'wc', 'rg', 'grep', 'find', 'fd', 'tree',
+  'file', 'stat', 'which', 'pwd', 'echo', 'jq', 'du', 'df', 'sort', 'uniq', 'cut', 'diff',
+]);
+const READ_ONLY_GIT = new Set(['status', 'branch', 'remote', 'rev-parse', 'ls-files', 'config']);
+const TEST_RUNNERS = new Set(['pytest', 'jest', 'vitest', 'mocha', 'phpunit', 'rspec']);
+const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+const DEBUG_PROGRAMS = new Set(['lsof', 'gdb', 'lldb', 'strace', 'dmesg', 'curl', 'wget', 'nc', 'ping']);
+
+/** Split a shell command into its simple commands, each as words without leading env assignments or npx/sudo. */
+function commandSegments(command: string): string[][] {
+  return command
+    .split(/&&|\|\||;|\||\n/)
+    .map((segment) => segment.trim().split(/\s+/).filter(Boolean))
+    .map((words) => {
+      while (words.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words.shift();
+      if (['npx', 'sudo', 'exec', 'time'].includes(words[0])) words.shift();
+      return words;
+    })
+    .filter((words) => words.length > 0);
+}
+
+function programName(words: string[]): string {
+  return words[0].split('/').pop() ?? words[0];
+}
+
+function runsPackageScript(words: string[], script: string): boolean {
+  if (!PACKAGE_MANAGERS.has(programName(words))) return false;
+  const scriptName = words[1] === 'run' ? words[2] : words[1];
+  return scriptName !== undefined && scriptName.startsWith(script);
+}
+
+function isTestRun(words: string[]): boolean {
+  const program = programName(words);
+  return TEST_RUNNERS.has(program)
+    || runsPackageScript(words, 'test')
+    || (['cargo', 'go'].includes(program) && words[1] === 'test')
+    || (['mvn', 'gradle', 'gradlew'].includes(program) && words.includes('test'))
+    || (['node', 'tsx'].includes(program) && words.includes('--test'))
+    || (program === 'playwright' && words[1] === 'test');
+}
+
+function isDeployStep(words: string[]): boolean {
+  const program = programName(words);
+  return (program === 'git' && ['commit', 'push'].includes(words[1]))
+    || (program === 'docker' && words[1] === 'push')
+    || (program === 'kubectl' && words[1] === 'apply')
+    || (program === 'terraform' && words[1] === 'apply')
+    || runsPackageScript(words, 'deploy')
+    || /^deploy(\.sh)?$/.test(program);
+}
+
+function isReviewStep(words: string[]): boolean {
+  const program = programName(words);
+  return (program === 'git' && ['diff', 'log', 'show', 'blame'].includes(words[1]))
+    || (program === 'gh' && words[1] === 'pr' && ['view', 'review', 'diff', 'checks'].includes(words[2]));
+}
+
+function isDebugStep(words: string[]): boolean {
+  const program = programName(words);
+  return DEBUG_PROGRAMS.has(program) || (program === 'node' && words.some((w) => w.startsWith('--inspect')));
+}
+
+function isReadOnlyStep(words: string[]): boolean {
+  const program = programName(words);
+  return READ_ONLY_PROGRAMS.has(program) || (program === 'git' && READ_ONLY_GIT.has(words[1]));
+}
+
+// Classify a shell command by the programs it runs, not by words in its arguments
+function inferBashActivity(command: string): string {
+  const segments = commandSegments(command);
+  if (segments.some(isTestRun)) return 'testing';
+  if (segments.some(isDeployStep)) return 'deploying';
+  if (segments.some(isReviewStep)) return 'reviewing';
+  if (segments.some(isDebugStep)) return 'debugging';
+  if (segments.length > 0 && segments.every(isReadOnlyStep)) return 'researching';
   return 'implementing';
 }
 
