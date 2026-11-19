@@ -166,6 +166,14 @@ export class AgentCard {
     parent.appendChild(this.root);
 
     this.selection.onChange(() => this.refresh());
+    // The panel grows, shrinks or collapses between polls: follow it at once.
+    const Observer = doc.defaultView?.ResizeObserver;
+    if (Observer) new Observer(() => this.redock()).observe(options.anchor);
+  }
+
+  /** Dock the open card again next to the panel. */
+  redock(): void {
+    if (!this.root.hidden) this.dock();
   }
 
   /** Call after each poll. The open card updates in place. */
@@ -287,7 +295,8 @@ export class AgentCard {
 
   private issueItem(issue: CardIssue): HTMLElement {
     const item = this.text('li', '');
-    const label = issue.title ? `#${issue.number} ${issue.title}` : `#${issue.number}`;
+    const id = `${issue.repo ?? ''}#${issue.number}`;
+    const label = issue.title ? `${id} ${issue.title}` : id;
     const url = issueUrl(issue);
     if (!url) {
       item.textContent = label;

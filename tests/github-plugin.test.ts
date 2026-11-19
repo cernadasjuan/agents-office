@@ -214,11 +214,37 @@ test('the enricher sets issues from tool calls, most recent first, and ignores p
   await enrich(p, observations);
 
   assert.deepEqual(observations[0].display.issues, [
-    { number: 1, title: 'Issue 1', column: 'To do' },
+    { number: 1, title: 'Issue 1', column: 'To do', repo: 'agents-office' },
     { number: 404, title: '' },
-    { number: 38, title: 'GitHub plugin: kanban board and issue cards', column: 'In progress' },
+    { number: 38, title: 'GitHub plugin: kanban board and issue cards', column: 'In progress', repo: 'agents-office' },
   ]);
   assert.equal(observations[1].display.issues, undefined);
+});
+
+test('a card names its repository only when the issue belongs to a configured one', async () => {
+  const p = createGithubPlugin({ repos: 'o/alpha,o/beta', now: () => NOW,
+    run: async (_file, args) => JSON.stringify(args.includes('o/alpha') ? [ghIssue(1)] : [ghIssue(2)]) });
+  await world(p);
+  const file = writeTranscript([
+    bash('gh issue view 2'),
+    bash('gh issue view 9'),
+    bash('gh issue view 4 -R o/beta'),
+    bash('gh issue view 5 -R x/gamma'),
+  ]);
+  const observations = [observation(file)];
+  await enrich(p, observations);
+
+  const single = createGithubPlugin({ repos: 'o/alpha', now: () => NOW, run: async () => JSON.stringify([ghIssue(1)]) });
+  const bare = [observation(writeTranscript([bash('gh issue view 783')], 'bare.jsonl'))];
+  await enrich(single, bare);
+  assert.deepEqual(bare[0].display.issues, [{ number: 783, title: '' }], 'a bare unknown number names no repository');
+
+  assert.deepEqual(observations[0].display.issues, [
+    { number: 5, title: '' },
+    { number: 4, title: '', repo: 'beta' },
+    { number: 9, title: '' },
+    { number: 2, title: 'Issue 2', column: 'To do', repo: 'beta' },
+  ]);
 });
 
 test('the enricher keeps the 5 most recent issues and the projection never sends more than 5', async () => {
@@ -252,4 +278,48 @@ test('the enricher reads only transcripts under ~/.claude/projects and caches by
   await enrich(p, observations);
   readSpy.mock.restore();
   assert.equal(observations[0].display.issues![0].number, 6);
+});
+
+test('a card border takes the wayfinder label color, else the first label color, else none', async () => {
+  const labeled = [
+    ghIssue(1, { labels: [{ name: 'bug', color: 'D73A4A' }, { name: 'wayfinder:research', color: '0e8a16' }] }),
+    ghIssue(2, { labels: [{ name: 'enhancement', color: 'a2eeef' }, { name: 'doing', color: 'fbca04' }] }),
+    ghIssue(3),
+    ghIssue(4, { labels: [{ name: 'odd', color: 'not-a-color' }] }),
+  ];
+  const { plugin: p } = plugin('gabriel-amyot/agents-office', () => JSON.stringify(labeled));
+  await world(p);
+  const file = writeTranscript([4, 3, 2, 1].map((number) => bash(`gh issue view ${number}`)));
+  const observations = [observation(file)];
+  await enrich(p, observations);
+
+  const colors = observations[0].display.issues!.map((issue) => [issue.number, issue.color]);
+  assert.deepEqual(colors, [[1, '0e8a16'], [2, 'a2eeef'], [3, undefined], [4, undefined]]);
+  const text = JSON.stringify(projectAgents(observations, (raw) => raw)[0].issues);
+  assert.equal(text.includes('wayfinder') || text.includes('enhancement'), false, 'no label text leaves the server');
+});
+
+test('the agents call gets titles and colors without a world call first', async () => {
+  const labeled = [ghIssue(5, { labels: [{ name: 'wayfinder:implementation', color: '1D76DB' }] })];
+  const { plugin: p, calls } = plugin('gabriel-amyot/agents-office', () => JSON.stringify(labeled));
+  const observations = [observation(writeTranscript([bash('gh issue view 5')]))];
+
+  await enrich(p, observations);
+
+  assert.deepEqual(observations[0].display.issues, [{ number: 5, title: 'Issue 5', column: 'To do', repo: 'agents-office', color: '1d76db' }]);
+  assert.equal(calls.length, 1);
+  await world(p);
+  assert.equal(calls.length, 1, 'the world call reuses the cache');
+});
+
+test('a slow gh does not hold the agents call: the cards come without titles', async () => {
+  let release: () => void = () => undefined;
+  const p = createGithubPlugin({ repos: 'o/alpha', now: () => NOW,
+    run: () => new Promise((resolve) => { release = () => resolve(JSON.stringify([ghIssue(7)])); }) });
+  const observations = [observation(writeTranscript([bash('gh issue view 7')]))];
+  const started = Date.now();
+  await enrich(p, observations);
+  assert.ok(Date.now() - started < 1900, 'stays under the 2 s step limit');
+  assert.deepEqual(observations[0].display.issues, [{ number: 7, title: '' }]);
+  release();
 });

@@ -227,3 +227,38 @@ test('the card reports the shift for the camera from its docked position', (t) =
   // Card left edge: 900 - 8 - 360 = 532, free center 266, shift 640 - 266.
   assert.equal(card.cameraShiftPx(), 374);
 });
+
+test('an issue with a known repository reads repo#N; without it, #N', (t) => {
+  const { card, selection, root } = makeCard(t);
+  card.render([{ ...main, extras: { ...main.extras, issues: [{ number: 12, title: '' }, { number: 78, title: 'Agent card', repo: 'agents-office' }] } }]);
+  selection.select('main-1');
+  assert.deepEqual([...root().querySelectorAll('.inspector-issues li')].map((li) => li.textContent), ['#12', 'agents-office#78 Agent card']);
+});
+
+test('an unchanged poll keeps the action and subagent buttons, so keyboard focus survives', (t) => {
+  const { card, selection, root, document } = makeCard(t);
+  registerCardAction({ id: 'focus', label: 'Focus in herdr', available: () => true, run: async () => 'ok' });
+  card.render([main, sub]);
+  selection.select('main-1');
+  const button = root().querySelector<HTMLButtonElement>('.inspector-actions button')!;
+  const subButton = root().querySelector<HTMLButtonElement>('.inspector-subagents button')!;
+  button.focus();
+  card.render([{ ...main, extras: { ...main.extras, waitMinutes: 13 } }, { ...sub }]);
+  assert.equal(root().querySelector('.inspector-actions button'), button);
+  assert.equal(root().querySelector('.inspector-subagents button'), subButton);
+  assert.equal(document.activeElement, button);
+});
+
+test('the card docks again when the panel changes size (collapse or expand)', (t) => {
+  const { card, selection, root, document } = makeCard(t);
+  const anchor = document.getElementById('ui-panel')!;
+  let left = 900;
+  anchor.getBoundingClientRect = () => ({ left, top: 16, right: 1220, bottom: 400, width: 1220 - left, height: 384, x: left, y: 16, toJSON: () => ({}) });
+  Object.defineProperty(document.defaultView!, 'innerWidth', { value: 1236, configurable: true });
+  card.render([main]);
+  selection.select('main-1');
+  assert.equal(root().style.right, '344px');
+  left = 1150;
+  card.redock();
+  assert.equal(root().style.right, '94px');
+});

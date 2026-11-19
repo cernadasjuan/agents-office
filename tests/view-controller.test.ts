@@ -158,3 +158,17 @@ for (const hash of ['#view=overview', '']) {
     assert.ok(Math.abs(screenX(camera, target)) < 0.02, `figure at x=${screenX(camera, target)}`);
   });
 }
+
+test('first person: the card shift turns only the aim; the camera stands where the unshifted flight puts it', () => {
+  const fly = (shift?: () => number) => {
+    const { view, manager, selection, camera } = setup('', shift);
+    manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+    selection.select('a');
+    for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+    return { position: camera.position.clone(), forward: new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion) };
+  };
+  const plain = fly();
+  const shifted = fly(() => 300);
+  assert.ok(shifted.position.distanceTo(plain.position) < 1e-6, `camera moved by ${shifted.position.distanceTo(plain.position)}`);
+  assert.ok(shifted.forward.angleTo(plain.forward) > 0.05, 'the aim turns toward the screen right');
+});

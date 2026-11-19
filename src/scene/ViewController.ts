@@ -216,12 +216,11 @@ export class ViewController {
     away.normalize();
     const position = lookAt.clone().addScaledVector(away, FIRST_PERSON_FOCUS_DISTANCE);
     position.y += FIRST_PERSON_FOCUS_HEIGHT;
-    // Move the camera and its aim to the screen right, so the figure shows left of the card.
-    const right = new THREE.Vector3(away.z, 0, -away.x);
-    const shift = this.shiftOnScreen(position.distanceTo(lookAt));
-    position.addScaledVector(right, shift);
-    lookAt.addScaledVector(right, shift);
     clampToOffice(position);
+    // Turn only the aim to the screen right, so the figure shows left of the card.
+    // The camera stays where the plain flight puts it: a sideways move could end inside a wall.
+    const right = new THREE.Vector3(away.z, 0, -away.x);
+    lookAt.addScaledVector(right, this.shiftOnScreen(position.distanceTo(lookAt)));
     this.flyTo(from, { position, lookAt }, true);
   }
 
