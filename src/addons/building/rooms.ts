@@ -163,6 +163,11 @@ export function markDoorCutaway(root: THREE.Object3D): void {
 /** Low walls with gaps at the doors, so the overview can see in. */
 export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hideSides: Side[] = []): THREE.Group {
   const group = new THREE.Group();
+  // Pieces on hidden sides go in one group the overview hides. It merges in place: one draw call, hidden with it
+  const hidden = new THREE.Group();
+  hidden.name = 'overview-hidden-walls';
+  hidden.userData.overviewHidden = true;
+  markStatic(hidden);
   const material = getToonMaterial(Colors.wall);
   for (const piece of wallPieces(rect, doors)) {
     const length = piece.to - piece.from;
@@ -177,9 +182,9 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
     wall.position.set(horizontal ? middle : fixed, height / 2, horizontal ? fixed : middle);
     wall.castShadow = true;
     wall.receiveShadow = true;
-    if (hideSides.includes(piece.side)) wall.userData.overviewHidden = true;
-    group.add(wall);
+    (hideSides.includes(piece.side) ? hidden : group).add(wall);
   }
+  if (hidden.children.length > 0) group.add(hidden);
   return group;
 }
 

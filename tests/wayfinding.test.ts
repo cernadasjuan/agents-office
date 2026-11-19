@@ -347,7 +347,7 @@ function sourceWalls(scene: THREE.Scene): THREE.Mesh[] {
   const found: THREE.Mesh[] = [];
   scene.traverse((object) => {
     if (object.name !== 'room-walls' && object.name !== 'building-hall-walls' && object.name !== 'door-frame') return;
-    object.traverse((child) => { if ((child as THREE.Mesh).isMesh && child.visible && !child.userData.overviewHidden) found.push(child as THREE.Mesh); });
+    object.traverse((child) => { if ((child as THREE.Mesh).isMesh && child.visible && child.name !== 'static-merged') found.push(child as THREE.Mesh); });
   });
   return found;
 }
@@ -431,6 +431,26 @@ test('the render loop applies the cutaway in the frame of the mode switch and re
   loop.frame(1000);
   assert.equal(renders, before + 1);
   for (const top of drawnWallTops(scene)) assert.ok(top <= OVERVIEW_WALL_HEIGHT + 1e-6, `wall top ${top}`);
+});
+
+test('the hall wall pieces the overview hides draw merged in one group that the overview hides', () => {
+  const { scene } = building();
+  const statics = new StaticBatch(scene);
+  frameOf(scene, statics, false);
+  const hall = scene.getObjectByName('building-hall-walls')!;
+  const hidden = hall.getObjectByName('overview-hidden-walls')!;
+  assert.ok(hidden, 'a group of hidden pieces');
+  assert.equal(hidden.userData.overviewHidden, true);
+  const pieces = hidden.children.filter((child) => (child as THREE.Mesh).isMesh && child.name !== 'static-merged');
+  assert.ok(pieces.length >= 2, `${pieces.length} hidden pieces`);
+  for (const piece of pieces) assert.ok(piece.layers.isEnabled(STATIC_SOURCE_LAYER), 'a hidden piece draws merged');
+  const merged = hidden.children.filter((child) => child.name === 'static-merged');
+  assert.equal(merged.length, 1, 'one draw call for all hidden pieces');
+  hidden.visible = false;
+  const camera = new THREE.Layers();
+  let drawn = 0;
+  hall.traverseVisible((object) => { if ((object as THREE.Mesh).isMesh && object.layers.test(camera) && hidden.getObjectById(object.id)) drawn++; });
+  assert.equal(drawn, 0, 'hidden with its group in the overview');
 });
 
 test('in the overview door frames drop to 1.2 m, above the 0.5 m walls, so a doorway reads from above', () => {
