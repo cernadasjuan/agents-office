@@ -4,6 +4,8 @@ import { buildSkeleton, Joints } from './StickFigureParts.js';
 import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
 import { ACTIVITY_LABELS } from '../agents/AgentData.js';
+import { attentionLine } from '../ui/attention.js';
+import { getToonMaterial } from '../utils/Materials.js';
 import type { Posture } from '../layout/LayoutStrategy.js';
 
 const TRANSITION_DURATION = 0.5;
@@ -21,6 +23,9 @@ export class StickFigure {
   private targetLookAt = new THREE.Vector3();
   private isMoving = false;
   private posture: Posture | undefined;
+  private attention: string | undefined;
+  private waitMinutes: number | undefined;
+  private beacon: THREE.Mesh | null = null;
 
   constructor(name: string, accentColor: THREE.Color) {
     this.name = name;
@@ -45,7 +50,28 @@ export class StickFigure {
 
     this.targetActivity = activity;
     this.transitionProgress = 0;
-    updateLabel(this.label, this.name, ACTIVITY_LABELS[activity] ?? activity);
+    this.refreshLabel();
+  }
+
+  /** Who needs the user: 'waiting' raises a hand and shows a beacon, 'your-turn' changes the label only. */
+  setAttention(attention: string | undefined, waitMinutes: number | undefined): void {
+    this.attention = attention;
+    this.waitMinutes = waitMinutes;
+    this.refreshLabel();
+    if (attention === 'waiting' && !this.beacon) {
+      this.beacon = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), getToonMaterial(new THREE.Color(0xffb020)));
+      this.beacon.position.set(0, 2.55, 0);
+      this.joints.root.add(this.beacon);
+    }
+    if (this.beacon) this.beacon.visible = attention === 'waiting';
+  }
+
+  get isWaiting(): boolean {
+    return this.attention === 'waiting';
+  }
+
+  private refreshLabel(): void {
+    updateLabel(this.label, this.name, attentionLine(ACTIVITY_LABELS[this.targetActivity] ?? this.targetActivity, this.attention, this.waitMinutes));
   }
 
   /** Force a posture for the current seat, or undefined to let the activity decide. */
@@ -120,7 +146,11 @@ export class StickFigure {
     }
 
     // Animate activity
-    animateActivity(this.joints, this.activity, elapsed, delta, this.posture);
+    animateActivity(this.joints, this.activity, elapsed, delta, this.posture, this.isWaiting);
+    if (this.beacon?.visible) {
+      this.beacon.position.y = 2.55 + Math.sin(elapsed * 3) * 0.06;
+      this.beacon.rotation.y = elapsed * 1.5;
+    }
   }
 
   private saveCurrentPose(obj: THREE.Object3D): void {
