@@ -13,6 +13,9 @@ import { createSofa } from '../furniture/Sofa.js';
 import { createWaterCooler } from '../furniture/WaterCooler.js';
 import { createPrinter } from '../furniture/Printer.js';
 
+/** Scene name of the hall walls group. */
+export const OFFICE_WALLS = 'office-walls';
+
 export interface Station {
   type: string;
   position: THREE.Vector3;
@@ -28,8 +31,10 @@ export function createOffice(scene: THREE.Scene): Map<string, Station> {
   // Floor
   scene.add(createFloor());
 
-  // Walls + Ceiling
-  scene.add(createWalls());
+  // Walls + Ceiling (named, so a layout add-on can replace them with walls that have doorways)
+  const walls = createWalls();
+  walls.name = OFFICE_WALLS;
+  scene.add(walls);
 
   // Decorations (plants, art, clock, rugs)
   scene.add(createDecorations());
