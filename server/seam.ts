@@ -23,6 +23,8 @@ export interface DisplayExtras {
   roomKey?: string;
   /** Write actions this agent supports. Projected only when the server enabled the action. */
   actions?: ActionName[];
+  /** One role token, for example 'librarian'. */
+  role?: string;
 }
 
 /** One agent as the server sees it. `internal` never leaves the server. */
@@ -188,6 +190,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
       ...(issues ? { issues } : {}),
       ...(extras.roomKey ? { room: publicId(`room:${extras.roomKey}`) } : {}),
       ...(actions ? { actions } : {}),
+      ...(typeof extras.role === 'string' && BADGE.test(extras.role) ? { role: extras.role } : {}),
     };
   });
 }

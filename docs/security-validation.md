@@ -17,7 +17,7 @@ Environment: macOS, Node.js 26.3.0, pnpm 10.34.9, Vite 8.3.8.
 | Check | Result |
 | --- | --- |
 | Frozen lockfile installation with lifecycle scripts disabled | PASS |
-| Complete dependency audit, including development dependencies | 2026-11-16: zero advisories. 2026-11-18: 1 high, see below |
+| Complete dependency audit, including development dependencies | PASS: zero advisories (one advisory on 2026-11-18 was withdrawn the same day, see below) |
 | PID validation and shell-injection regression tests | PASS |
 | Initial and update label XSS regression tests | PASS |
 | Vite HTTP access and privacy regression tests | PASS |
@@ -28,9 +28,9 @@ The injection and label regression suites failed against the original implementa
 
 All automated tests use synthetic metadata or an injected detector. The label tests use jsdom and real Three.js label objects. They are not full browser acceptance tests.
 
-## Open advisory (2026-11-18)
+## Withdrawn advisory (2026-11-18)
 
-The audit reports [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), a regular expression denial of service in `picomatch` 4.0.7 and earlier. The path is `vite > tinyglobby > picomatch`. The advisory lists no patched version. An attacker must supply a crafted glob pattern. In this project only the Vite configuration supplies patterns, and the server accepts loopback connections only, so the local risk is low. Update the resolution when a fixed version exists.
+On 2026-11-18 the audit reported [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), a regular expression denial of service in `picomatch` 4.0.7 and earlier, through `vite > tinyglobby > picomatch`. GitHub withdrew the advisory the same day at 15:38 UTC. A later complete audit reports no known vulnerabilities, with `picomatch` 4.0.7 unchanged.
 
 ## Limits
 

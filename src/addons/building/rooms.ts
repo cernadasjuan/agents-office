@@ -135,7 +135,7 @@ function sign(text: string, position: THREE.Vector3): CSS2DObject {
 }
 
 /** Build one room: floor, low walls, furniture, a door sign and its stations. */
-export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDoors: Door[]): BuiltRoom {
+export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDoors: Door[], title?: string): BuiltRoom {
   const group = new THREE.Group();
   group.name = `room-${index}-${kind}`;
   const frame = new RoomFrame(slot.rect, slot.door);
@@ -152,7 +152,7 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
   const walls = buildWalls(slot.rect, [slot.door, ...extraDoors]);
   walls.name = 'room-walls';
   group.add(walls);
-  group.add(sign(ROOM_TITLE[kind], frame.point(0, 0.4, WALL_HEIGHT + 0.4)));
+  group.add(sign(title ?? ROOM_TITLE[kind], frame.point(0, 0.4, WALL_HEIGHT + 0.4)));
 
   const rows = (count: number, spacing: number) => Array.from({ length: count }, (_, i) => (i - (count - 1) / 2) * spacing);
 
@@ -193,9 +193,17 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
       break;
     }
     case 'library': {
+      // Shelves on the far wall and on both side walls: the knowledge base of the office
       for (const along of rows(4, 2.5)) {
         place(group, createBookshelf(), frame.point(along, ROOM_SIZE - 0.5), frame.faceDoor);
         stations.set(key(stations.size), station('researching', frame.point(along, ROOM_SIZE - 1.5), frame.point(along, ROOM_SIZE - 0.5, 1.0)));
+      }
+      for (const side of [-1, 1]) {
+        for (const depth of [3.5, 6, 8.5]) {
+          const wallAlong = side * (ROOM_SIZE / 2 - 0.5);
+          place(group, createBookshelf(), frame.point(wallAlong, depth), frame.faceDoor + side * Math.PI / 2);
+          stations.set(key(stations.size), station('researching', frame.point(wallAlong - side, depth), frame.point(wallAlong, depth, 1.0)));
+        }
       }
       break;
     }
