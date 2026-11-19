@@ -75,6 +75,10 @@ A built-in source registered in `vitePlugin.ts` with the plugin sources (not as 
 
 Subagents (spawned via the Agent tool) are detected only from the parent's own `~/.claude/projects/<encoded-cwd>/<sessionId>/subagents/`. Each subagent has a `.meta.json` (with `agentType` and `description`) and its own `.jsonl` transcript. A subagent is considered active if its transcript was modified within the last 30 seconds, or if its newest message is a tool call without a result (up to 10 minutes). Their activity is inferred from their own transcript, independently from the parent session.
 
+### Agent names (server/agentDetector.ts)
+
+`sessionName`: a main session uses the session file `name` when `nameSource` is a string other than `derived` (seen: `auto`; `derived` is an automatic `<folder>-xx` name). Otherwise, or when the name is not 1 to 80 characters after trimming, it uses `path.basename(cwd)`. `subagentName`: the meta `name` (Claude Code writes it for team agents), else `description`, else `agentType`, else `subagent`. The herdr enricher runs later and can still replace a main session name with its tab label. `projectAgents` caps the name at 60 characters.
+
 ### Key Patterns
 
 - **Toon shading**: All meshes use `MeshToonMaterial` with a 4-step gradient map, cached in `Materials.ts`

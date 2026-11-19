@@ -38,6 +38,30 @@ function isSessionFile(value: unknown): value is SessionFile {
     && typeof session.startedAt === 'number' && Number.isFinite(session.startedAt) && session.startedAt >= 0;
 }
 
+const MAX_NAME_LENGTH = 80;
+
+/** A trimmed name of 1 to 80 characters, or undefined. */
+function usableName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const name = value.trim();
+  return name.length > 0 && name.length <= MAX_NAME_LENGTH ? name : undefined;
+}
+
+/**
+ * The session file name when Claude Code did not derive it from the folder
+ * (nameSource "derived" is an automatic "<folder>-xx" name), else the folder name.
+ */
+function sessionName(session: SessionFile & { name?: unknown; nameSource?: unknown }): string {
+  const { nameSource } = session;
+  const chosen = typeof nameSource === 'string' && nameSource !== 'derived' ? usableName(session.name) : undefined;
+  return chosen ?? path.basename(session.cwd);
+}
+
+/** The meta name when Claude Code wrote one, else the task description, else the subagent type. */
+function subagentName(meta: Record<string, unknown>): string {
+  return usableName(meta.name) ?? (meta.description || meta.agentType || 'subagent') as string;
+}
+
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const SESSIONS_DIR = path.join(CLAUDE_DIR, 'sessions');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
@@ -356,13 +380,12 @@ function detectSubagents(cwd: string, parentId: string, parentPid: number): Dete
 
       // Read meta
       const meta = JSON.parse(fs.readFileSync(path.join(subagentsDir, metaFile), 'utf-8'));
-      const description = meta.description || meta.agentType || 'subagent';
 
       const activity = inferActivityFromFile(transcriptPath);
 
       subagents.push({
         id: agentId,
-        name: `${description}`,
+        name: `${subagentName(meta)}`,
         pid: parentPid,
         cwd,
         startedAt: transcriptStat.birthtimeMs,
@@ -414,7 +437,7 @@ export function detectAgents(): DetectedAgent[] {
         (session as SessionFile & { status?: unknown }).status,
         inferSessionActivity(session.cwd, session.sessionId),
       );
-      const name = path.basename(session.cwd);
+      const name = sessionName(session);
 
       const { status, statusUpdatedAt } = session as SessionFile & { status?: unknown; statusUpdatedAt?: unknown };
       const transcriptPath = sessionTranscriptPath(session.cwd, session.sessionId);
