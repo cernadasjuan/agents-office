@@ -10,6 +10,8 @@ export interface AgentExtras {
   badges?: string[];
   issues?: Array<{ number: number; title: string; column?: string }>;
   room?: string;
+  /** Opt-in write actions the server offers for this agent (today only `focus`, from the herdr plugin). */
+  actions?: Array<'focus'>;
   role?: string;
 }
 

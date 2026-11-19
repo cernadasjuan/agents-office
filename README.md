@@ -35,6 +35,9 @@ or raw session IDs. Display names can still contain project or task context, and
 other software running on your computer can access the local dashboard without a
 login. Run it only on a trusted machine.
 
+The API is read-only by default: it answers GET only. The one exception is an
+opt-in write action, see [herdr focus (write action)](#herdr-focus-write-action).
+
 ## How It Works
 
 The app reads the Claude Code session files in `~/.claude/sessions/` on your machine. For each live session it reads that session's own transcript and the status that Claude Code writes in the session file. From those it computes one value, the **activity**. Everything you see derives from it: where the agent stands, how it moves, and what its label says.
@@ -213,13 +216,40 @@ What it reads:
 - `ps eww -o pid=,command= -p <pids>` once for the session processes it has not seen yet. From that output it keeps only `HERDR_PANE_ID`, `HERDR_TAB_ID` and `HERDR_WORKSPACE_ID`. It keeps or logs no other variable.
 - `herdr tab list` and `herdr workspace list`, at most once every 10 s.
 
-All commands are read-only. They run through `execFile` with fixed arguments and a 1.5 s timeout, never through a shell. If herdr is not installed, a session is not in herdr, or a command fails, the session keeps its normal name and has no group. Raw herdr IDs stay on the server: the API sends only a hashed group ID and the cleaned labels.
+These commands are read-only. They run through `execFile` with fixed arguments and a 1.5 s timeout, never through a shell. If herdr is not installed, a session is not in herdr, or a command fails, the session keeps its normal name and has no group. Raw herdr IDs stay on the server: the API sends only a hashed group ID and the cleaned labels.
 
 Enable it:
 
 ```bash
 AGENTS_OFFICE_PLUGINS=herdr pnpm dev   # or: pnpm dev:fork
 ```
+
+### herdr focus (write action)
+
+This is the only action in the office that changes something on your machine. It is off by default.
+
+What it does: select an agent that runs in a herdr pane. A small card with a **Focus in herdr** button appears at the bottom of the screen. A click moves the herdr focus to the pane of that agent (`herdr agent focus <pane>`). If herdr does not detect an agent in that pane, it focuses the tab (`herdr tab focus <tab>`). A short text message shows the result. The action does not type text, send keys or answer a prompt. It changes the focus inside the herdr window only. It does not bring the terminal window to the front.
+
+Enable it:
+
+```bash
+AGENTS_OFFICE_PLUGINS=herdr AGENTS_OFFICE_HERDR_FOCUS=1 pnpm dev
+```
+
+Without `AGENTS_OFFICE_HERDR_FOCUS=1`, or without the herdr plugin, the server has no write route, no token and no button. The API stays GET only.
+
+Controls:
+
+- **One route:** `POST /api/actions/focus` with the body `{ "agent": "<public id>" }` and nothing else. The browser never sends a pane ID, a path or a command.
+- **Local only:** the same loopback and Host checks as the GET routes.
+- **Same origin:** the `Origin` header is required and must equal the dashboard origin. A cross-site `Sec-Fetch-Site` is refused.
+- **JSON only:** another `Content-Type` gets 415. A body over 1 KB gets 413.
+- **Token:** the server makes a new random token at each start. The page reads it from `GET /api/actions/token` (same checks as the other GET routes) and sends it in the `X-Agents-Office-Token` header. The server compares it in constant time. A missing or wrong token gets 403.
+- **Rate limit:** 10 requests per minute. More get 429.
+- **Re-check:** the server maps the public ID to the pane on the server side. Before it acts, it reads the process environment again and asks `herdr pane get`. If the process left the pane, or the pane is gone or moved to another tab, the answer is 409 and herdr is not called.
+- **No shell:** `execFile` with fixed arguments and a 1.5 s timeout. Pane and tab IDs must match a strict pattern.
+- **No framing:** with the action on, every page has `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`.
+- **Audit log:** one JSON line per attempt (time, action, public agent ID, result), in `AGENTS_OFFICE_AUDIT_LOG` or `agents-office-audit.jsonl` in the OS temp folder. The file has mode 0600. It never holds the token or a raw herdr ID.
 
 ### missions: war rooms
 

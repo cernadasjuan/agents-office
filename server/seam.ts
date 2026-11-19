@@ -8,6 +8,10 @@
 export type Attention = 'waiting' | 'your-turn';
 export type Provider = 'claude' | 'codex';
 
+/** The closed set of write actions. A plugin can offer only these, and only behind its own opt-in. */
+export const ACTION_NAMES = ['focus'] as const;
+export type ActionName = typeof ACTION_NAMES[number];
+
 /** Data an enricher may set for display. Raw keys are hashed before they leave. */
 export interface DisplayExtras {
   attention?: Attention;
@@ -17,6 +21,8 @@ export interface DisplayExtras {
   badges?: string[];
   issues?: Array<{ number: number; title: string; column?: string }>;
   roomKey?: string;
+  /** Write actions this agent supports. Projected only when the server enabled the action. */
+  actions?: ActionName[];
   /** One role token, for example 'librarian'. */
   role?: string;
 }
@@ -74,11 +80,25 @@ export interface WorldProvider {
   world(observations: Observation[]): WorldInput | Promise<WorldInput>;
 }
 
+/** What a write action reports. `gone`: the re-check found the target changed or missing. */
+export type ActionOutcome = 'done' | 'gone' | 'failed';
+
+/**
+ * An opt-in write action. The server mounts `POST /api/actions/<name>` only when
+ * a loaded plugin offers it, and calls `run` only for an agent that advertises
+ * the action. `run` must re-check its target before it acts.
+ */
+export interface OfficeAction {
+  name: ActionName;
+  run(agent: Observation): Promise<ActionOutcome>;
+}
+
 export interface OfficePlugin {
   name: string;
   sources?: AgentSource[];
   enrichers?: Enricher[];
   world?: WorldProvider[];
+  actions?: OfficeAction[];
 }
 
 const STEP_TIMEOUT_MS = 2000;
@@ -142,12 +162,21 @@ function issueList(issues: DisplayExtras['issues'], max: number) {
 
 export type PublicId = (raw: string) => string;
 
-export function projectAgents(observations: Observation[], publicId: PublicId) {
+const NO_ACTIONS: ReadonlySet<string> = new Set();
+
+function actionList(actions: unknown, enabled: ReadonlySet<string>): ActionName[] | undefined {
+  if (!Array.isArray(actions)) return undefined;
+  const list = ACTION_NAMES.filter((name) => enabled.has(name) && actions.includes(name));
+  return list.length > 0 ? list : undefined;
+}
+
+export function projectAgents(observations: Observation[], publicId: PublicId, enabledActions: ReadonlySet<string> = NO_ACTIONS) {
   return observations.map((agent) => {
     const extras = agent.display ?? {};
     const badges = Array.isArray(extras.badges) ? extras.badges.filter((b) => BADGE.test(b)).slice(0, 6) : [];
     const issues = issueList(extras.issues, 5);
     const waitMinutes = wholeNumber(extras.waitMinutes, 100_000);
+    const actions = actionList(extras.actions, enabledActions);
     return {
       id: publicId(agent.id),
       name: displayText(agent.name, 60),
@@ -160,6 +189,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId) {
       ...(badges.length > 0 ? { badges } : {}),
       ...(issues ? { issues } : {}),
       ...(extras.roomKey ? { room: publicId(`room:${extras.roomKey}`) } : {}),
+      ...(actions ? { actions } : {}),
       ...(typeof extras.role === 'string' && BADGE.test(extras.role) ? { role: extras.role } : {}),
     };
   });

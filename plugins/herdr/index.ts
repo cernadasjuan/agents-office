@@ -10,13 +10,23 @@
  * run through execFile with fixed arguments and a timeout. Any failure
  * leaves the observations unchanged. Raw herdr IDs stay on the server: the
  * projection hashes groupKey and names never hold an ID.
+ *
+ * Opt-in write action (AGENTS_OFFICE_HERDR_FOCUS=1): focus the herdr pane of
+ * an agent. The enricher keeps a server-side map from observation to pane and
+ * tab id and advertises `actions: ['focus']`. Before it acts, the action
+ * re-reads the process environment and `herdr pane get`, then runs
+ * `herdr agent focus <pane>` (fallback `herdr tab focus <tab>`). Nothing else:
+ * no text, no keys.
  */
 import { execFile } from 'node:child_process';
-import type { Observation, OfficePlugin } from '../../server/seam.js';
+import type { ActionOutcome, Observation, OfficeAction, OfficePlugin } from '../../server/seam.js';
 
 export type Runner = (file: string, args: string[], options: { timeout: number }) => Promise<string>;
 
 export interface HerdrEnv { paneId: string; tabId: string; workspaceId: string }
+
+/** Where the focus action points for one observation. Stays on the server. */
+interface FocusTarget { pid: number; paneId: string; tabId: string }
 
 interface HerdrNames {
   tabs: Map<string, { label: string; workspaceId: string }>;
@@ -106,14 +116,28 @@ function parseNames(tabsOutput: string, workspacesOutput: string): HerdrNames | 
   return { tabs, workspaces };
 }
 
+/** The pane from `herdr pane get` output, or null. */
+function parsePane(output: string): { paneId: string; tabId: string; hasAgent: boolean } | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(output); } catch { return null; }
+  const pane = (parsed as { result?: { pane?: Record<string, unknown> } } | null)?.result?.pane;
+  if (typeof pane !== 'object' || pane === null || !isHerdrId(pane.pane_id) || !isHerdrId(pane.tab_id)) return null;
+  return { paneId: pane.pane_id, tabId: pane.tab_id, hasAgent: typeof pane.agent === 'string' && pane.agent.length > 0 };
+}
+
 export interface HerdrPluginOptions {
   run?: Runner;
   now?: () => number;
+  /** The focus write action. Default: AGENTS_OFFICE_HERDR_FOCUS=1. */
+  focus?: boolean;
 }
 
 export function createHerdrPlugin(options: HerdrPluginOptions = {}): OfficePlugin {
   const run = options.run ?? defaultRunner;
   const now = options.now ?? Date.now;
+  const focusEnabled = options.focus ?? process.env.AGENTS_OFFICE_HERDR_FOCUS === '1';
+  /** Observation id → pane and tab, from the last enrich. Only filled when focus is on. */
+  let focusTargets = new Map<string, FocusTarget>();
   /** PID → herdr env (null: the process is not in herdr). A process environment does not change. */
   const envByPid = new Map<number, HerdrEnv | null>();
   /** PID → time of the last failed `ps`, so a failing PID is retried only after REFRESH_MS. */
@@ -176,6 +200,7 @@ export function createHerdrPlugin(options: HerdrPluginOptions = {}): OfficePlugi
     const [, herdrNames] = await Promise.all([loadEnvs([...pids]), currentNames()]);
     if (!herdrNames || now() - startedAt > APPLY_DEADLINE_MS) return;
     const envs = mains.map((agent) => envByPid.get(agent.internal.pid as number) ?? null);
+    if (focusEnabled) advertiseFocus(observations, mains, envs);
 
     const groupByParent = new Map<string, { key: string; label: string }>();
     mains.forEach((agent, index) => {
@@ -197,7 +222,59 @@ export function createHerdrPlugin(options: HerdrPluginOptions = {}): OfficePlugi
     }
   }
 
-  return { name: 'herdr', enrichers: [{ id: 'herdr-names', enrich }] };
+  function advertiseFocus(observations: Observation[], mains: Observation[], envs: Array<HerdrEnv | null>): void {
+    const targets = new Map<string, FocusTarget>();
+    mains.forEach((agent, index) => {
+      const env = envs[index];
+      if (env) targets.set(agent.id, { pid: agent.internal.pid as number, paneId: env.paneId, tabId: env.tabId });
+    });
+    // A subagent runs inside its parent's pane.
+    for (const agent of observations) {
+      const target = agent.parentId ? targets.get(agent.parentId) : undefined;
+      if (target && !targets.has(agent.id)) targets.set(agent.id, target);
+    }
+    for (const agent of observations) if (targets.has(agent.id)) agent.display.actions = ['focus'];
+    focusTargets = targets;
+  }
+
+  /** The pane of the target, if the process still runs in it and herdr still has it in the same tab. */
+  async function recheck(target: FocusTarget): Promise<{ hasAgent: boolean } | null> {
+    try {
+      const output = await run('ps', ['eww', '-o', 'pid=,command=', '-p', String(target.pid)], { timeout: COMMAND_TIMEOUT_MS });
+      const env = parseHerdrEnv(splitByPid(output, new Set([target.pid])).get(target.pid) ?? '');
+      if (!env || env.paneId !== target.paneId || env.tabId !== target.tabId) return null;
+      const pane = parsePane(await run('herdr', ['pane', 'get', target.paneId], { timeout: COMMAND_TIMEOUT_MS }));
+      if (!pane || pane.paneId !== target.paneId || pane.tabId !== target.tabId) return null;
+      return { hasAgent: pane.hasAgent };
+    } catch {
+      return null;
+    }
+  }
+
+  async function focus(agent: Observation): Promise<ActionOutcome> {
+    const target = focusTargets.get(agent.id);
+    if (!target || !Number.isInteger(target.pid) || target.pid <= 0
+      || !HERDR_ID.test(target.paneId) || !HERDR_ID.test(target.tabId)) return 'gone';
+    const pane = await recheck(target);
+    if (!pane) return 'gone';
+    if (pane.hasAgent) {
+      try {
+        await run('herdr', ['agent', 'focus', target.paneId], { timeout: COMMAND_TIMEOUT_MS });
+        return 'done';
+      } catch {
+        // herdr lost the agent detection: focus the tab instead.
+      }
+    }
+    try {
+      await run('herdr', ['tab', 'focus', target.tabId], { timeout: COMMAND_TIMEOUT_MS });
+      return 'done';
+    } catch {
+      return 'failed';
+    }
+  }
+
+  const actions: OfficeAction[] = [{ name: 'focus', run: focus }];
+  return { name: 'herdr', enrichers: [{ id: 'herdr-names', enrich }], ...(focusEnabled ? { actions } : {}) };
 }
 
 export default createHerdrPlugin();

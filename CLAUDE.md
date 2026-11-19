@@ -39,7 +39,21 @@ Plugins in this fork: `plugins/bmad/` (persona hats). Its enricher reads the too
 
 - **`plugins/github/`**: opt-in with `AGENTS_OFFICE_GITHUB_REPOS=owner/name[,owner/name]`, else it adds nothing. `gh.ts` runs `gh issue list` via `execFile` (5 s, no shell, 60 s cache) and derives the columns. `transcript.ts` finds issue numbers in Bash tool calls. `client.ts` draws wall boards (`KANBAN_BOARD_SLOTS`) and cards in hand. `pnpm dev:fork` loads the fork plugins.
 
-`plugins/herdr/` (enricher, `pnpm dev:fork`): reads only the three `HERDR_*_ID` variables from one batched `ps eww` for new session PIDs, then `herdr tab list` and `herdr workspace list` (cached 10 s, `execFile`, 1.5 s timeout); sets a main session name to its tab label and the workspace as group for the session and its subagents; any failure changes nothing. The command runner is injectable for tests.
+`plugins/herdr/` (enricher, `pnpm dev:fork`, plus the opt-in focus write action below): reads only the three `HERDR_*_ID` variables from one batched `ps eww` for new session PIDs, then `herdr tab list` and `herdr workspace list` (cached 10 s, `execFile`, 1.5 s timeout); sets a main session name to its tab label and the workspace as group for the session and its subagents; any failure changes nothing. The command runner is injectable for tests.
+
+### Write actions (server/actions.ts)
+
+S7 keeps the API read-only by default. A write action exists only when a loaded plugin offers it in `OfficePlugin.actions` behind its own opt-in. Today there is one: `focus` from `plugins/herdr/` with `AGENTS_OFFICE_HERDR_FOCUS=1`. Without an offered action, `vitePlugin.ts` mounts no POST route, serves no token and adds no header. Rules for every write action:
+
+- The action name is in the closed enum `ACTION_NAMES` (`server/seam.ts`). The route is `POST /api/actions/<name>`, the body exactly `{ "agent": "<public id>" }` (`parseActionBody`). Never a raw ID, a path, text or a command from the browser.
+- `admit(..., 'POST')`: loopback, local Host, `Origin` required and equal to the server origin, `Sec-Fetch-Site` same-origin when present. Then `WriteActions.handle`: `X-Agents-Office-Token` (random 32 bytes per server start, from `GET /api/actions/token`, SHA-256 then `timingSafeEqual`) → 403, `Content-Type: application/json` → 415, 10 per minute → 429, body over 1 KB → 413, bad shape → 400, unknown agent or agent without the action → 404.
+- The public id resolves to the observation from the last `/api/agents` answer (a server-side map). The agent must advertise the action in `display.actions`. `projectAgents` copies `actions` only for names in `ACTION_NAMES` that the server enabled.
+- `OfficeAction.run(observation)` re-checks its target right before it acts and returns `done` (200), `gone` (409) or `failed` (502). Subprocess only through `execFile` with fixed argv, a strict ID pattern and a timeout.
+- One audit line per attempt (`time`, `action`, public `agent`, `result`) to `AGENTS_OFFICE_AUDIT_LOG` or `os.tmpdir()/agents-office-audit.jsonl`, mode 0600. Never the token, a raw ID or the body.
+- With an action on, every response gets `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
+- Tests inject the command runner and the audit path (`auditLogPath` option). Never run a real write command in a test.
+
+herdr focus: the enricher keeps `focusTargets` (observation id → pid, pane id, tab id; a subagent uses its parent's pane) and sets `display.actions = ['focus']`. `run` re-reads `ps eww` for the pid and `herdr pane get <pane>` (same pane and tab), then `herdr agent focus <pane>`, else `herdr tab focus <tab>` when the pane has no detected agent or agent focus fails. `plugins/herdr/client.ts` shows a "Focus in herdr" card for the selected agent when `extras.actions` holds `focus`; `FocusClient` fetches the token (once more after a 403) and shows the result in a text toast.
 
 ### Attention (server/attention.ts, src/ui/attention.ts)
 
