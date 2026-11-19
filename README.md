@@ -295,3 +295,7 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 
 - Node.js 22.12+
 - One or more running Claude Code sessions to visualize
+
+## License
+
+MIT. See [LICENSE](LICENSE). The original Agents Office is by Juan Cernadas; this fork adds changes by Gabriel Amyot under the same license.
