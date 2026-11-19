@@ -48,7 +48,7 @@ function shadowViews(lights: ShadowLight[], cull: boolean): ShadowView[] {
 /**
  * Count the draw calls of one frame without a GPU, the way WebGLRenderer
  * decides: visible objects on a camera layer, one call per mesh and visible
- * material. With a camera the count culls like the renderer: the camera pass
+ * material, one per sprite. With a camera the count culls like the renderer: the camera pass
  * keeps the meshes in the camera frustum, and each shadow map keeps the
  * casters in its light's frustum. Without a camera nothing is culled, so the
  * count is the worst case. The caller updates the world matrices first.
@@ -68,6 +68,12 @@ export function countDrawCalls(scene: THREE.Object3D, camera?: THREE.Camera): Dr
   scene.traverseVisible((object) => {
     const light = object as ShadowLight;
     if (light.isLight && light.castShadow && light.shadow) lights.push(light);
+    // A sprite (a room label) is one camera draw call; three draws no sprite into a shadow map
+    if ((object as THREE.Sprite).isSprite && object.layers.test(cameraLayers)) {
+      const sprite = object as THREE.Sprite;
+      if (sprite.material.visible && (!cameraFrustum || !sprite.frustumCulled || cameraFrustum.intersectsSprite(sprite))) main++;
+      return;
+    }
     if (!(object as THREE.Mesh).isMesh || !object.layers.test(cameraLayers)) return;
     const calls = callsOf(object as THREE.Mesh);
     if (inFrustum(object, cameraFrustum)) main += calls;
