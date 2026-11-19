@@ -84,6 +84,16 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 | Only read-only programs: `ls`, `cat`, `rg`, `grep`, `find`, `git status`... | Researching (bookshelf) |
 | Anything else | Implementing (desk) |
 
+### Codex agents
+
+If a Codex home exists (`CODEX_HOME`, else `~/.codex`), the app also shows Codex threads. It reads only the rollout files in `sessions/YYYY/MM/DD/rollout-*.jsonl`. It does not read `auth.json`, `config.toml`, `history.jsonl` or the memory files. Without a Codex home, nothing changes.
+
+- **Presence:** a thread is shown when its rollout file changed in the last 10 minutes. This is recent activity, not proof of a running process. A long silent command, or an open thread that waits for you, can disappear. A closed thread can stay for up to 10 minutes.
+- **Activity:** from the newest record in the last 256 KB of the rollout. Shell commands use the Bash rules above. A file change is implementing, a read-only MCP call or a web search is researching, a plan or subagent step is planning, and a question for you is waiting. A completed or aborted turn, or a final assistant message, is taking a break. A wrapped script (`exec`) is implementing; the app never runs or evaluates it.
+- **Name and parent:** the folder name of the thread's working directory, else `codex`. A spawned child links to its parent only when the parent is also shown. Records that a child copies from its parent are ignored.
+- **Label:** the floating label adds `· codex` after the activity.
+- Tested against the rollout layout of Codex 0.169.0. Unknown records are skipped. Symlinks inside the sessions folder are not followed.
+
 ### Location: stations
 
 | Station | Where | Seats | Activities |

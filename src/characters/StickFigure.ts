@@ -21,6 +21,7 @@ export class StickFigure {
   private targetLookAt = new THREE.Vector3();
   private isMoving = false;
   private posture: Posture | undefined;
+  private tag: string | undefined;
 
   constructor(name: string, accentColor: THREE.Color) {
     this.name = name;
@@ -45,7 +46,18 @@ export class StickFigure {
 
     this.targetActivity = activity;
     this.transitionProgress = 0;
-    updateLabel(this.label, this.name, ACTIVITY_LABELS[activity] ?? activity);
+    this.refreshLabel(activity);
+  }
+
+  /** Optional provider mark in the floating label, for example "codex". */
+  setTag(tag: string | undefined): void {
+    if (tag === this.tag) return;
+    this.tag = tag;
+    this.refreshLabel(this.targetActivity);
+  }
+
+  private refreshLabel(activity: Activity): void {
+    updateLabel(this.label, this.name, ACTIVITY_LABELS[activity] ?? activity, this.tag);
   }
 
   /** Force a posture for the current seat, or undefined to let the activity decide. */

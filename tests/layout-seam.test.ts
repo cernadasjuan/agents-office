@@ -94,3 +94,17 @@ test('an overflow spot makes the agent stand', () => {
 
   assert.equal(manager.getAgents()[0].seat?.posture, 'standing');
 });
+
+test('a codex agent shows a codex tag in its floating label; a Claude agent shows none', () => {
+  const manager = new AgentManager(new THREE.Scene(), new RecordingLayout());
+
+  manager.addAgent({ id: 'c', name: 'billing-service', activity: 'testing', extras: { provider: 'codex' } });
+  manager.addAgent({ id: 'k', name: 'claude-agent', activity: 'testing' });
+  const activityText = (id: string) => manager.getAgents().find((agent) => agent.info.id === id)!
+    .figure.label.element.querySelector('.activity')!.textContent;
+
+  assert.match(activityText('c')!, / · codex$/);
+  assert.doesNotMatch(activityText('k')!, /codex/);
+  manager.setActivity('c', 'idle');
+  assert.match(activityText('c')!, / · codex$/);
+});
