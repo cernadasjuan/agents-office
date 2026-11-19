@@ -51,6 +51,9 @@ export function createWalls(): THREE.Group {
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.y = H;
   ceiling.receiveShadow = true;
+  ceiling.name = 'ceiling';
+  ceiling.userData.ceiling = true; // hidden above the ceiling height and in the overview
+  ceiling.userData.dynamic = true; // not merged: the hide costs no static merge rebuild
   group.add(ceiling);
 
   // Low divider walls between areas

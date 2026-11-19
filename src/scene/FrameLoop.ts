@@ -6,7 +6,7 @@ import { FrameStats, RenderScheduler, inShadowReach, renderOnScreenLabels, rende
 import type { ViewMode } from './Selection.js';
 import { sleepUnseenFigures } from './AnimationSleep.js';
 import { StaticBatch } from './StaticMerge.js';
-import { applyCutaway } from './Cutaway.js';
+import { applyCeilingCut, applyCutaway, findCeilings } from './Cutaway.js';
 
 export interface FrameLoopOptions {
   scene: THREE.Scene;
@@ -62,6 +62,7 @@ export class FrameLoop {
   private idleShadowPending = false;
   private lastShadowAt = -Infinity;
   private casters = 0;
+  private ceilings: THREE.Object3D[] | null = null;
 
   constructor(private options: FrameLoopOptions) {
     const { scene } = options;
@@ -85,6 +86,7 @@ export class FrameLoop {
   /** Call after the agents or the world changed: a frame soon, and new shadows if the casters changed. */
   sceneChanged(): void {
     this.scheduler.request();
+    this.ceilings = null;
     const signature = casterSignature(this.options.scene);
     if (signature !== this.casters) this.shadowsDirty = true;
     this.casters = signature;
@@ -109,10 +111,12 @@ export class FrameLoop {
     scene.updateMatrixWorld();
     const rebuilt = this.staticBatch.update();
     const cut = applyCutaway(scene, this.options.mode() === 'overview');
+    this.ceilings ??= findCeilings(scene);
+    const ceilingChanged = applyCeilingCut(this.ceilings, camera.position.y, this.options.mode() === 'overview');
     const figures = this.figureBatch.sync(this.options.figures());
     camera.updateMatrixWorld();
     const cameraMoved = !this.lastView.equals(camera.matrixWorld) || !this.lastProjection.equals(camera.projectionMatrix);
-    const active = rebuilt || cut || modeChanged || cameraMoved || figures.changed || figures.moved.length > 0 || Boolean(this.options.animating?.());
+    const active = rebuilt || cut || ceilingChanged || modeChanged || cameraMoved || figures.changed || figures.moved.length > 0 || Boolean(this.options.animating?.());
     if (!this.scheduler.shouldRender(now, active)) return false;
 
     const casterMoves = this.castersMoved(figures.moved);

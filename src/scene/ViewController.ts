@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
-import { clampToOffice, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
-import { OverviewController, PoseTween, overviewBounds, type CameraPose } from './OverviewCamera.js';
+import { focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
+import { OverviewController, PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
 import { SelectionMarker } from './SelectionMarker.js';
 import { isClick, officeSelection, parseViewHash, pickAgent, type ScreenPoint, type SelectionState, type ViewMode } from './Selection.js';
 
@@ -13,8 +13,8 @@ const PAN_SPEED_PER_DISTANCE = 0.9;
 const FAST_MULTIPLIER = 2.5;
 
 export const VIEW_HINTS: Record<ViewMode, string> = {
-  'first-person': 'Click to look around — WASD to move — Space/Q up/down — Shift = fast — ESC to release — Click a figure to select — O = overview',
-  overview: 'Overview — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — O = first person',
+  'first-person': 'Click to look around — WASD to move — Space/Q up/down — Shift = fast — ESC to release — Click a figure to select — O = overview — Shift+L = layout',
+  overview: 'Overview — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — O = first person — Shift+L = layout',
 };
 
 export interface ViewControllerOptions {
@@ -28,6 +28,10 @@ export interface ViewControllerOptions {
   /** The URL hash: `#view=overview`, `#focus=<agent id>`. */
   hash?: string;
   selection?: SelectionState;
+  /** The start view. Without it the hash decides (`#view=overview`), else first person. */
+  view?: ViewMode;
+  /** Called with the start mode and after each mode change (the header, the saved view). */
+  modeChanged?: (mode: ViewMode) => void;
   /** Pixels to show a selected figure left of the canvas center (the agent card covers the right). */
   figureShiftPx?: () => number;
 }
@@ -65,7 +69,8 @@ export class ViewController {
     this.listen();
     this.selection.onChange((agentId) => this.selectionChanged(agentId));
     this.setHint();
-    if (start.view === 'overview') this.setMode('overview', false);
+    if ((options.view ?? start.view) === 'overview') this.setMode('overview', false);
+    else options.modeChanged?.(this.currentMode);
   }
 
   get mode(): ViewMode {
@@ -99,6 +104,7 @@ export class ViewController {
     }
     this.setHint();
     this.flyTo(from, to, animate);
+    this.options.modeChanged?.(mode);
   }
 
   /** Call after each poll: applies `#focus` once and drops a selection whose agent left. */
@@ -214,9 +220,9 @@ export class ViewController {
     away.y = 0;
     if (away.lengthSq() < 1e-6) away.set(0, 0, 1);
     away.normalize();
-    const position = lookAt.clone().addScaledVector(away, FIRST_PERSON_FOCUS_DISTANCE);
-    position.y += FIRST_PERSON_FOCUS_HEIGHT;
-    clampToOffice(position);
+    // Inside the figure's room: the camera stays on the figure's side of every wall
+    const position = focusPosition(lookAt, away, floorUnder(this.options.scene, point), FIRST_PERSON_FOCUS_DISTANCE, FIRST_PERSON_FOCUS_HEIGHT);
+    away.set(position.x - lookAt.x, 0, position.z - lookAt.z).normalize();
     // Turn only the aim to the screen right, so the figure shows left of the card.
     // The camera stays where the plain flight puts it: a sideways move could end inside a wall.
     const right = new THREE.Vector3(away.z, 0, -away.x);

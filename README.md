@@ -171,7 +171,7 @@ Without a status in the session file, every agent is in Working or Idle. `?demo=
 
 ## Fork layout: the growing building
 
-This fork adds a second layout, `building`, and makes it the default. `?layout=activity` or key L returns to the original layout.
+This fork adds a second layout, `building`, and makes it the default. It opens in the overview when the URL and the saved view say nothing. `?layout=activity` or **Shift+L** (then Enter in the confirmation box) returns to the original layout. One L alone does nothing.
 
 - **Your office:** the first room, east of the hall. Agents with a fresh or aging wait (blocked or your turn) walk in and queue in front of your desk: fresh waits first, then aging waits, the longest wait first inside each band. A cold wait leaves the queue for the lounge. When one leaves, the line moves up.
 - **Home desks:** each session gets its own desk for its whole life. Coding, debugging and deploying happen there.
@@ -308,13 +308,16 @@ AGENTS_OFFICE_PLUGINS=peek pnpm dev
 - **Mouse** to look around
 - **Esc** to release camera
 - **L** to switch the layout, when more than one is installed (also `?layout=<id>` in the URL)
-- **O** to switch between first person (the default) and the overview, a view from above at an angle that shows the whole floor. In the overview, drag to pan, use the mouse wheel to zoom, and use W/A/S/D to pan
+- **O** to switch between first person (the default of the original layout) and the overview, a view from above at an angle that shows the whole floor. In the overview, drag to pan, use the mouse wheel to zoom, and use W/A/S/D to pan
 - **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on a row in the triage list also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
 - **Esc** clears the selection (in first person it first releases the camera)
 - **Agent card:** a selection opens a card left of the triage panel. It shows the name, the activity, the attention band and wait, the herdr workspace, the provider, the personas, the subagents (a click selects one) and up to 10 linked issues, newest first, or "No linked issues". An issue reads `<repo>#N` when the server knows its repository. With the github plugin, such an issue of a configured repository is a link to GitHub. An issue number alone never links. With the `peek` plugin, the card also shows Recent, Assets and Equipment (see the peek plugin). The card updates in place on each poll. A click on another agent changes the card content. Esc or the close button closes it. The camera puts the selected figure in the free area left of the card
 - **V** to switch the labels between `smart` (the default) and `all` full labels. `#labels=all` in the URL starts with all labels
 
 - `?dwell=<seconds>` in the URL (0 to 30, default 0) makes an agent in the original `activity` layout wait that long before it walks to a new station. A change back before the time cancels the walk. The figure shows the new activity at once.
+- The office remembers the last view (first person or overview) in the browser and opens in it after a reload. `#view=overview` or `#view=first-person` in the URL wins over the saved view. The side panel header shows the layout and the view.
+- First person has no bounding box: you can walk through every doorway into a room, and fly above the building (Space). Only the floor stops the camera. The ceiling hides when the camera is above it (6 m) and in the overview. There is no wall collision.
+- **Shift+L** switches the layout after a confirmation (the page reloads). The layout choice is saved too.
 - `#view=overview` in the URL starts in the overview. `#focus=<agent id>` selects that agent when it appears (agent IDs change when the server restarts)
 
 ## Architecture
@@ -325,7 +328,7 @@ AGENTS_OFFICE_PLUGINS=peek pnpm dev
 
 - **Server**: Vite plugin reads Claude session files, validates PIDs, combines the session status with the newest tool call of the session's own transcript, and detects that session's active subagents
 - **Client**: Three.js scene with toon-shaded stick figures, station-based layout, walking animations, and per-activity poses
-- **Rendering**: static furniture draws merged (one mesh per material), figure parts and BMAD hats draw instanced, and shadow maps redraw only when a caster changes. A figure that only sways in place redraws the shadows at most twice per second; a walk redraws them on each frame. Figures out of view or far from the camera stop their continuous sway only: they still walk, and they still show their activity pose and a raised hand at once. Frames render on demand, at most 30 per second, and once per second when nothing moves. The overview uses at most 1.5 pixels per CSS pixel and hard shadows. At 25 rooms and 40 agents (20 with hats, 10 with cards) a frame takes about 410 draw calls in first person and 430 in the overview (shadow pass and room labels included) instead of about 10,000. `pnpm measure` prints the count; `?debug=1` exposes `window.__officeStats` (renders, draw calls, render times)
+- **Rendering**: static furniture draws merged (one mesh per material), figure parts and BMAD hats draw instanced, and shadow maps redraw only when a caster changes. A figure that only sways in place redraws the shadows at most twice per second; a walk redraws them on each frame. Figures out of view or far from the camera stop their continuous sway only: they still walk, and they still show their activity pose and a raised hand at once. Frames render on demand, at most 30 per second, and once per second when nothing moves. The overview uses at most 1.5 pixels per CSS pixel and hard shadows. At 25 rooms and 40 agents (20 with hats, 10 with cards) a frame takes about 410 draw calls in first person and 430 in the overview (shadow pass and room labels included) instead of about 10,000. `pnpm measure` prints the count; `?debug=1` exposes `window.__officeStats` (renders, draw calls, render times, camera position)
 
 ## Requirements
 
