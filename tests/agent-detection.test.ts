@@ -146,9 +146,13 @@ for (const [status, lastLine, expected] of [
   });
 }
 
-test('the API never returns the raw session status', () => {
+test('the API projection never returns the raw session status', async () => {
+  const { claudeSource } = await import('../server/claudeSource.js');
+  const { projectAgents } = await import('../server/seam.js');
   writeSessionWithStatus('session-s', 'waiting', textOnlyLine);
-  assert.equal('status' in detectAgents()[0], false);
+  const [agent] = projectAgents(await claudeSource(detectAgents).scan(), (id) => `public-${id}`);
+  assert.equal(detectAgents()[0].status, 'waiting');
+  assert.deepEqual(Object.keys(agent).sort(), ['activity', 'id', 'name']);
 });
 
 for (const [name, input, expected] of [

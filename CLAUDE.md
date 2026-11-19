@@ -31,6 +31,10 @@ Read `docs/design-principles.md` before any feature change: it lists the design 
 3. **Agent Management** (`AgentManager.ts`): Creates StickFigures and handles their lifecycle. Where a figure goes is the layout's decision (`src/layout/`): `LayoutStrategy.seatFor(agent, previousActivity)` returns a `Seat` (position, look-at, optional forced posture) or null to stay. `ActivityLayout` is the original behavior. `registry.ts` picks the layout from `?layout=`, then browser storage, then the default; key L cycles layouts. Optional fork add-ons in `src/addons/*.ts` register more layouts
 4. **Scene** (`Office.ts`): 22 stations across 7 types (implementing, planning, researching, testing, reviewing, idle, meeting). One agent per station. When no station of the right type is free, AgentManager opens an overflow spot on open floor; it never uses a station of another type
 
+### Extension seam (server/seam.ts)
+
+Detection runs as a pipeline: the core `claudeSource` (wraps `detectAgents`), then plugin sources, then enrichers in order, then world providers for rooms and boards. A failing or slow plugin step (2 s limit) drops only its own output; a core failure is a 500. `projectAgents` and `projectWorld` are the only exit: they copy whitelisted, cleaned fields and hash every key with the per-run HMAC. `/api/world` uses the same request checks as `/api/agents`. Plugins live in `plugins/<name>/index.ts` (default export `OfficePlugin`) and load through `server.ssrLoadModule` from `AGENTS_OFFICE_PLUGINS=a,b` or `agents-office --plugin a`. Their browser parts live in `plugins/<name>/client.ts` and register an `OfficeExtension` (`src/extensions.ts`) with `plugin: '<name>'`, so they run only while the server plugin is active.
+
 ### Activity Inference (server/agentDetector.ts)
 
 The session file `status` comes first (`combineWithSessionStatus`): `waiting` → `meeting` (label "Waiting for you"), `idle` → `idle`, `busy` with a text-only tail → `planning`. Any other status, or none, uses the transcript alone.

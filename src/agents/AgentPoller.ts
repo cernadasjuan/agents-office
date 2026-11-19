@@ -1,12 +1,20 @@
 import { AgentManager } from './AgentManager.js';
-import { AgentInfo } from './AgentData.js';
+import { AgentExtras, AgentInfo } from './AgentData.js';
 import type { Activity } from './ActivityAnimations.js';
 
-interface DetectedAgent {
+interface DetectedAgent extends AgentExtras {
   id: string;
   name: string;
   activity: string;
-  parentId?: string;
+}
+
+const EXTRA_KEYS: Array<keyof AgentExtras> = ['parentId', 'provider', 'attention', 'waitMinutes', 'group', 'badges', 'issues', 'room'];
+
+/** The optional fields the server sent, or undefined when there are none. */
+function extrasOf(agent: DetectedAgent): AgentExtras | undefined {
+  const extras: Record<string, unknown> = {};
+  for (const key of EXTRA_KEYS) if (agent[key] !== undefined) extras[key] = agent[key];
+  return Object.keys(extras).length > 0 ? (extras as AgentExtras) : undefined;
 }
 
 const POLL_TIMEOUT_MS = 5000;
@@ -61,10 +69,12 @@ export class AgentPoller {
         const displayName = agent.parentId
           ? `>> ${agent.name}`
           : agent.name;
+        const extras = extrasOf(agent);
         const info: AgentInfo = {
           id: agent.id,
           name: displayName,
           activity: agent.activity as Activity,
+          ...(extras ? { extras } : {}),
         };
         this.agentManager.addAgent(info);
         this.knownIds.add(agent.id);
@@ -76,6 +86,11 @@ export class AgentPoller {
           .find((a) => a.info.id === agent.id);
         if (managed && managed.info.activity !== agent.activity) {
           this.agentManager.setActivity(agent.id, agent.activity as Activity);
+          changed = true;
+        }
+        const extras = extrasOf(agent);
+        if (managed && JSON.stringify(managed.info.extras) !== JSON.stringify(extras)) {
+          this.agentManager.setExtras(agent.id, extras);
           changed = true;
         }
       }

@@ -121,6 +121,17 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 - **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads.
 - **Label:** the name and the activity text float over each figure. The side panel lists the same agents. Its menu lets you preview another activity until the next update.
 
+## Plugins
+
+Optional plugins add data from other tools. None run by default.
+
+```bash
+AGENTS_OFFICE_PLUGINS=name1,name2 pnpm dev
+npx agents-office --plugin name1 --plugin name2
+```
+
+A plugin is a folder `plugins/<name>/` with an `index.ts` (server: sources, enrichers, rooms and boards) and an optional `client.ts` (browser rendering). The server copies only whitelisted, cleaned fields to the browser.
+
 ## Controls
 
 - **Click** to engage camera

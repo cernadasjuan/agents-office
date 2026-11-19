@@ -1,9 +1,22 @@
 import { Activity } from './ActivityAnimations.js';
 
+/** Optional display data that plugins add on the server. All fields are whitelisted there. */
+export interface AgentExtras {
+  parentId?: string;
+  provider?: 'codex';
+  attention?: 'waiting' | 'your-turn';
+  waitMinutes?: number;
+  group?: { id: string; label: string };
+  badges?: string[];
+  issues?: Array<{ number: number; title: string; column?: string }>;
+  room?: string;
+}
+
 export interface AgentInfo {
   id: string;
   name: string;
   activity: Activity;
+  extras?: AgentExtras;
 }
 
 export const ACTIVITIES: Activity[] = [

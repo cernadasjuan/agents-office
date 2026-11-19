@@ -11,6 +11,10 @@ export interface DetectedAgent {
   alive: boolean;
   activity: string;
   parentId?: string;
+  /** Session file status (busy, idle, waiting, shell). Server only. */
+  status?: string;
+  /** When the session file status last changed, in ms. Server only. */
+  statusSince?: number;
 }
 
 interface SessionFile {
@@ -399,6 +403,7 @@ export function detectAgents(): DetectedAgent[] {
       );
       const name = path.basename(session.cwd);
 
+      const { status, statusUpdatedAt } = session as SessionFile & { status?: unknown; statusUpdatedAt?: unknown };
       agents.push({
         id: session.sessionId,
         name,
@@ -407,6 +412,8 @@ export function detectAgents(): DetectedAgent[] {
         startedAt: session.startedAt,
         alive,
         activity,
+        ...(typeof status === 'string' ? { status } : {}),
+        ...(typeof statusUpdatedAt === 'number' && Number.isFinite(statusUpdatedAt) ? { statusSince: statusUpdatedAt } : {}),
       });
 
       // Detect active subagents

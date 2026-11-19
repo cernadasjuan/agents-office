@@ -1,5 +1,6 @@
 import type * as THREE from 'three';
 import type { Activity } from '../agents/ActivityAnimations.js';
+import type { AgentExtras } from '../agents/AgentData.js';
 
 /** A place where one agent stands or sits, and the point it faces. */
 export interface Seat {
@@ -18,8 +19,8 @@ export type Posture = 'seated' | 'standing';
 /** What a layout knows about an agent when it chooses a seat. */
 export interface LayoutAgent {
   id: string;
-  parentId?: string;
   activity: Activity;
+  extras?: AgentExtras;
 }
 
 /**
@@ -30,7 +31,9 @@ export interface LayoutStrategy {
   readonly id: string;
   /**
    * The seat for the agent's current activity. `previous` is the activity before
-   * the change, or null for a new agent. Return null to keep the current seat.
+   * the change, or null for a new agent. When only the extras changed (attention,
+   * room, group), `previous` equals the current activity. Return null to keep the
+   * current seat.
    * A new agent always gets a seat.
    */
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null;
