@@ -8,6 +8,7 @@ import { AgentPoller } from './agents/AgentPoller.js';
 import { AgentPanel } from './ui/AgentPanel.js';
 import { chooseLayoutId, createLayout, layoutIds, rememberLayoutId } from './layout/registry.js';
 import { activeExtensions, setWorld, type World } from './extensions.js';
+import { tabTitle } from './ui/attention.js';
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
@@ -58,8 +59,11 @@ const panel = new AgentPanel(
 onSelectionChange((agentId) => panel.setSelected(agentId));
 
 function buildUI(): void {
-  panel.render(agentManager.getAgents().map((managed) => managed.info));
-  view.agentsChanged(agentManager.getAgents());
+  const agents = agentManager.getAgents();
+  panel.render(agents.map((managed) => managed.info));
+  const count = (attention: string) => agents.filter((managed) => managed.info.extras?.attention === attention).length;
+  document.title = tabTitle(count('waiting'), count('your-turn'));
+  view.agentsChanged(agents);
   for (const extension of activeExtensions(scene)) extension.agentsChanged?.(agentManager.getAgents());
 }
 
