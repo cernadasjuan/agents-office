@@ -5,6 +5,7 @@ import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, Seat } from '../../layout/LayoutStrategy.js';
 import { HALL, matchingDoor, slotFor, type Door } from './RoomPlanner.js';
 import { buildRoom, buildWalls, ROOM_STATION_TYPE, roomTitle, type RoomKind } from './rooms.js';
+import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
 import type { WorldRoom } from '../../extensions.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
@@ -104,6 +105,7 @@ export class BuildingLayout implements LayoutStrategy {
       const built = Object.assign(buildMissionRoom(room, index), { extraDoors: [] as Door[] });
       this.missionRooms.set(room.id, built);
       this.scene.add(built.group);
+      roomLabelBatchFor(this.scene).collect(built.group);
       for (const [key, station] of built.stations) this.stations.set(key, station);
       if (built.slot.ring === 0) this.rebuildHallWalls();
       else {
@@ -332,6 +334,8 @@ export class BuildingLayout implements LayoutStrategy {
     const record: RoomRecord = { kind, index, group: built.group, extraDoors: [], ...(tag ? { tag } : {}) };
     this.rooms.push(record);
     this.scene.add(built.group);
+    // Every room label of the scene draws in one call
+    roomLabelBatchFor(this.scene).collect(built.group);
     for (const [key, station] of built.stations) this.stations.set(key, station);
 
     if (slot.ring === 0) this.rebuildHallWalls();

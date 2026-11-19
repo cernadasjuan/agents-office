@@ -16,7 +16,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout } = await import('../src/addons/building/BuildingLayout.js');
 const {
-  buildRoom, roomFloorColor, roomTitle, roomLabelLines, roomLabelPose, WALL_HEIGHT, FIRST_PERSON_LABEL_Y, FIRST_PERSON_LABEL_HEIGHT,
+  buildRoom, roomFloorColor, roomTitle, roomLabelLines, compactLabelLines, roomLabelPose, roomLabelBatchFor, WALL_HEIGHT, FIRST_PERSON_LABEL_Y, FIRST_PERSON_LABEL_HEIGHT,
   OVERVIEW_DOOR_HEIGHT, OVERVIEW_LABEL_BOTTOM,
 } = await import('../src/addons/building/rooms.js');
 const { buildRealSizeOffice } = await import('./real-size-office.js');
@@ -72,13 +72,12 @@ test('each room has one label above its center; in first person a small plate hi
   const labels = labelsIn(room.group);
   assert.equal(labels.length, 1);
   const [label] = labels;
-  assert.ok(label instanceof THREE.Sprite, 'a world-space sprite scales with distance');
+  assert.equal(label.name, 'room-label', 'a handle in the world: its scale is the plate size, so it scales with distance');
   assert.equal(label.userData.roomLabel, 'Library');
   assert.ok(Math.abs(label.position.x - center(slot.rect).x) < 1e-6 && Math.abs(label.position.z - center(slot.rect).z) < 1e-6);
   assert.equal(label.position.y, FIRST_PERSON_LABEL_Y);
   assert.ok(label.scale.y <= FIRST_PERSON_LABEL_HEIGHT + 1e-6, `plate height ${label.scale.y}`);
-  const material = (label as THREE.Sprite).material;
-  assert.equal(material.depthTest, true, 'walls in front hide the label in first person');
+  assert.notEqual(label.userData.onTop, true, 'walls in front hide the label in first person (depth test)');
   assert.ok(FIRST_PERSON_LABEL_Y + label.scale.y / 2 < WALL_HEIGHT, 'the whole label is below the wall top');
   assert.ok(FIRST_PERSON_LABEL_Y - label.scale.y / 2 > 1.8, 'the plate is above head height, so it does not fill the doorway');
 });
@@ -89,8 +88,9 @@ test('label lines: short lines for the default overview, a " · " starts a new l
   assert.deepEqual(roomLabelLines('LOUNGE 2', 7), ['LOUNGE', '2']);
   assert.deepEqual(roomLabelLines('LIBRARY', 7), ['LIBRARY']);
   assert.deepEqual(roomLabelLines('MISSION ROADMAP FOR THE FORK', 7), ['MISSION', 'ROADMAP…']);
-  assert.deepEqual(roomLabelLines('MISSION ROADMAP 3', 7, 3), ['MISSION', 'ROADMAP', '3']);
-  assert.deepEqual(roomLabelLines('MISSION ROADMAP FOR THE FORK', 7, 3), ['MISSION', 'ROADMAP', 'FOR THE…']);
+  assert.deepEqual(compactLabelLines('MISSION ROADMAP 3'), ['MISSION', '…3']);
+  assert.deepEqual(compactLabelLines('MEDIA PLAN SALESFORCE PERSISTENCE'), ['MEDIA', '…PERSI…']);
+  assert.deepEqual(compactLabelLines('LOUNGE 2'), ['LOUNGE', '2']);
   assert.deepEqual(roomLabelLines('MISSION ROADMAP 3', 16), ['MISSION ROADMAP', '3']);
 });
 
@@ -107,7 +107,7 @@ test('in the overview a plate grows with the zoom distance but never gets wider 
 });
 
 /** Screen rect (px) of a sprite for a perspective camera, viewport 1600x1000. */
-function screenRect(sprite: THREE.Sprite, camera: THREE.PerspectiveCamera, size = { w: 1600, h: 1000 }) {
+function screenRect(sprite: THREE.Object3D, camera: THREE.PerspectiveCamera, size = { w: 1600, h: 1000 }) {
   const center = sprite.getWorldPosition(new THREE.Vector3());
   const view = center.clone().applyMatrix4(camera.matrixWorldInverse);
   const depth = -view.z;
@@ -134,7 +134,7 @@ test('real size, default overview at 1600x1000: every room label plate is at lea
   });
   controller.refresh();
   scene.updateMatrixWorld();
-  const labels = labelsIn(scene) as THREE.Sprite[];
+  const labels = labelsIn(scene);
   assert.equal(labels.length, 25);
   const rects = labels.map((label) => ({ text: label.userData.roomLabel as string, rect: screenRect(label, camera) }));
   console.log(`room label plates: min ${Math.min(...rects.map((r) => r.rect.height)).toFixed(1)} px at zoom ${view.zoomDistance.toFixed(1)}`);
@@ -150,7 +150,49 @@ test('real size, default overview at 1600x1000: every room label plate is at lea
   // The default overview shows the compact face; a war room title fits short lines
   const war = labels.find((label) => label.userData.roomLabel === 'Mission 3')!;
   assert.deepEqual(war.userData.labelLines, ['MISSION', '3']);
-  for (const label of labels) assert.equal(label.material.depthTest, false, 'drawn on top in the overview');
+  // Each text line is readable too, not only the plate
+  for (const { text, rect } of rects) {
+    const lines = (labels.find((label) => label.userData.roomLabel === text)!.userData.labelLines as string[]).length;
+    assert.ok(rect.height / lines >= 11, `${text}: ${(rect.height / lines).toFixed(1)} px per line`);
+  }
+  for (const label of labels) assert.equal(label.userData.onTop, true, 'drawn on top in the overview');
+});
+
+test('every room label of the scene draws in one instanced call; a hidden label gets scale 0', () => {
+  const { scene, layout } = building();
+  layout.syncWorldRooms([missionRoom('A'), missionRoom('B')]);
+  const batch = roomLabelBatchFor(scene);
+  const labels = labelsIn(scene);
+  assert.equal(batch.labels.length, labels.length);
+  assert.equal(batch.mesh.count, labels.length);
+  let batches = 0;
+  scene.traverse((object) => { if (object.name === 'room-label-batch') batches++; });
+  assert.equal(batches, 1, 'one mesh, one draw call');
+  const camera = new THREE.PerspectiveCamera(60, 1.6, 0.1, 500);
+  camera.position.set(0, 1.6, 0);
+  camera.updateMatrixWorld();
+  const controller = new LabelDetailController({
+    agents: () => [], camera, canvas: dom.window.document.createElement('canvas'), keys: dom.window, scene,
+    viewMode: () => 'first-person', zoomDistance: () => 0, pick: () => null, selected: () => null,
+  });
+  const inside = labels[0];
+  const rect = inside.userData.roomRect as Rect;
+  camera.position.set(center(rect).x, 1.6, center(rect).z);
+  camera.updateMatrixWorld();
+  controller.refresh();
+  scene.updateMatrixWorld();
+  batch.sync();
+  const matrix = new THREE.Matrix4();
+  const scale = new THREE.Vector3();
+  batch.mesh.getMatrixAt(batch.labels.indexOf(inside), matrix);
+  scale.setFromMatrixScale(matrix);
+  assert.equal(scale.x, 0, 'the room you stand in: hidden');
+  const other = batch.labels.find((label) => label !== inside)!;
+  batch.mesh.getMatrixAt(batch.labels.indexOf(other), matrix);
+  const position = new THREE.Vector3().setFromMatrixPosition(matrix);
+  assert.ok(position.distanceTo(other.getWorldPosition(new THREE.Vector3())) < 1e-6, 'an instance stands at its label');
+  assert.ok(Math.abs(new THREE.Vector3().setFromMatrixScale(matrix).y - other.scale.y) < 1e-6, 'with the plate size');
+  assert.equal((batch.mesh.material as THREE.ShaderMaterial).depthTest, true, 'walls hide labels in first person');
 });
 
 test('a room label shows its full name when zoomed in or with labels: all', () => {
@@ -168,7 +210,7 @@ test('a room label shows its full name when zoomed in or with labels: all', () =
   });
   controller.refresh();
   const [label] = labelsIn(room.group);
-  assert.deepEqual(label.userData.labelLines, ['ROADMAP', 'FOR THE', 'FORK']);
+  assert.deepEqual(label.userData.labelLines, ['ROADMAP', '…FORK']);
   assert.equal(changes, 1, 'a label change asks for a frame');
   controller.refresh();
   assert.equal(changes, 1, 'no change, no frame');
@@ -199,7 +241,7 @@ test('the sign list is collected once, and again after sceneChanged', () => {
   controller.sceneChanged();
   controller.refresh();
   assert.equal(traversals, 2);
-  assert.equal((labelsIn(late.group)[0] as THREE.Sprite).material.depthTest, false, 'the new room label gets the overview pose');
+  assert.equal(labelsIn(late.group)[0].userData.onTop, true, 'the new room label gets the overview pose');
 });
 
 test('rooms no longer carry the small door sign chip', () => {
