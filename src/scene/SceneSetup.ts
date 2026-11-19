@@ -24,7 +24,11 @@ export function createScene() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // three r183 draws PCFSoftShadowMap as PCFShadowMap (with a warning): same look, said plainly
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  // Shadows are static: the frame loop sets `needsUpdate` when a caster moves or the scene changes
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
   document.body.appendChild(renderer.domElement);
@@ -40,8 +44,21 @@ export function createScene() {
   // Free camera (pointer lock + WASD)
   initFreeCamera(camera, renderer.domElement, lookAtTarget);
 
-  // --- Lighting ---
+  addLighting(scene);
 
+  // Resize handler
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    labelRenderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  return { scene, camera, renderer, labelRenderer };
+}
+
+/** Ambient and sky light, plus 3 ceiling lamps with shadow-casting spotlights over the hall. */
+export function addLighting(scene: THREE.Scene): void {
   // Ambient light (soft fill for the whole room)
   const ambientLight = new THREE.AmbientLight(0x9999bb, 1.0);
   scene.add(ambientLight);
@@ -64,14 +81,4 @@ export function createScene() {
     scene.add(light);
     scene.add(light.target);
   }
-
-  // Resize handler
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    labelRenderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  return { scene, camera, renderer, labelRenderer };
 }

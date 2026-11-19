@@ -3,6 +3,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { createMeetingTable } from '../../furniture/MeetingTable.js';
 import { getToonMaterial } from '../../utils/Materials.js';
 import type { Station } from '../../scene/Office.js';
+import { markStatic } from '../../scene/StaticMerge.js';
 import type { WorldRoom } from '../../extensions.js';
 import { ROOM_SIZE, type RoomSlot } from './RoomPlanner.js';
 import { buildWalls, RoomFrame } from './rooms.js';
@@ -89,6 +90,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   const frame = new RoomFrame(slot.rect, slot.door);
   const group = new THREE.Group();
   group.name = `mission-room-${index}`;
+  markStatic(group, { zone: 'missions', castShadow: false });
   const stations = new Map<string, Station>();
   const key = (n: number) => `mission${index}_seat_${n}`;
   const type = `room:${room.id}`;
