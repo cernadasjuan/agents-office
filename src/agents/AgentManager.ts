@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { StickFigure } from '../characters/StickFigure.js';
-import { AgentInfo } from './AgentData.js';
+import { AgentExtras, AgentInfo } from './AgentData.js';
 import { Activity } from './ActivityAnimations.js';
 import { Station } from '../scene/Office.js';
 import { Colors } from '../utils/Colors.js';
@@ -17,7 +17,7 @@ function accentColorFor(agentId: string): THREE.Color {
   return Colors.accents[(hash >>> 0) % Colors.accents.length];
 }
 
-interface ManagedAgent {
+export interface ManagedAgent {
   info: AgentInfo;
   figure: StickFigure;
   seat: Seat | null;
@@ -58,6 +58,15 @@ export class AgentManager {
     const seat = this.layout.seatFor(managed.info, previous);
     if (seat) this.goToSeat(managed, seat, false);
     managed.figure.setActivity(activity);
+  }
+
+  /** New display data from plugins. The layout may move the agent (for example to a room). */
+  setExtras(agentId: string, extras: AgentExtras | undefined): void {
+    const managed = this.agents.get(agentId);
+    if (!managed) return;
+    managed.info.extras = extras;
+    const seat = this.layout.seatFor(managed.info, managed.info.activity);
+    if (seat) this.goToSeat(managed, seat, false);
   }
 
   update(elapsed: number, delta: number): void {

@@ -6,6 +6,7 @@ import { updateFreeCamera } from './scene/FreeCamera.js';
 import { AgentPoller } from './agents/AgentPoller.js';
 import { AgentPanel } from './ui/AgentPanel.js';
 import { chooseLayoutId, createLayout, layoutIds, rememberLayoutId } from './layout/registry.js';
+import { activeExtensions, setWorld, type World } from './extensions.js';
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
@@ -13,8 +14,10 @@ const { scene, camera, renderer, labelRenderer } = createScene();
 // Build office and get stations
 const stations = createOffice(scene);
 
-// Fork add-ons register extra layouts. The folder is optional: no add-ons, no change.
+// Fork add-ons and the browser parts of server plugins register layouts and extensions.
+// Both folders are optional: without them nothing changes.
 import.meta.glob('./addons/*.ts', { eager: true });
+import.meta.glob('../plugins/*/client.ts', { eager: true });
 
 // Layout: ?layout= in the URL, then the last choice, then the default. Key L cycles layouts.
 const layoutId = chooseLayoutId(window.location.search, window.localStorage);
@@ -41,7 +44,28 @@ const panel = new AgentPanel(
 
 function buildUI(): void {
   panel.render(agentManager.getAgents().map((managed) => managed.info));
+  for (const extension of activeExtensions(scene)) extension.agentsChanged?.(agentManager.getAgents());
 }
+
+// World: rooms and boards from server plugins, every 10 s, one request at a time.
+let worldInFlight = false;
+async function pollWorld(): Promise<void> {
+  if (worldInFlight) return;
+  worldInFlight = true;
+  try {
+    const res = await fetch('/api/world', { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return;
+    const world = (await res.json()) as World;
+    setWorld(world);
+    for (const extension of activeExtensions(scene)) extension.worldChanged?.(world);
+  } catch {
+    // Keep the last world
+  } finally {
+    worldInFlight = false;
+  }
+}
+void pollWorld();
+window.setInterval(() => void pollWorld(), 10_000);
 
 // Start polling for real agents (an empty office when none are found)
 const poller = new AgentPoller(agentManager);
@@ -58,6 +82,7 @@ function animate(): void {
 
   updateFreeCamera(camera, delta);
   agentManager.update(elapsed, delta);
+  for (const extension of activeExtensions(scene)) extension.update?.(elapsed, delta);
 
   renderer.render(scene, camera);
   labelRenderer.render(scene, camera);
