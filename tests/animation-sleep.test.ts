@@ -48,9 +48,11 @@ test('an asleep figure that sits still does not animate; an awake one does; an a
   manager.setActivity('walker', 'implementing');
   manager.setExtras('walker', undefined);
 
+  // The first asleep tick settles the pose once; after that the sway stops
+  manager.update(31 / 30, 1 / 30);
   const awakeBefore = rotations(awake.figure.group);
   const asleepBefore = rotations(asleep.figure.group);
-  for (let i = 31; i <= 60; i++) manager.update(i / 30, 1 / 30);
+  for (let i = 32; i <= 60; i++) manager.update(i / 30, 1 / 30);
   assert.notDeepEqual(rotations(awake.figure.group), awakeBefore);
   assert.deepEqual(rotations(asleep.figure.group), asleepBefore);
   assert.ok(walker.figure.group.position.z > 1, `the walker moved to z=${walker.figure.group.position.z}`);
@@ -111,6 +113,63 @@ function crowd(withNearOne: boolean) {
   };
   return { manager, renderer, run };
 }
+
+/** One agent at a desk seat that sleeps from its very first tick. */
+function sleeper(activity: 'implementing' | 'idle' = 'implementing') {
+  const places = new Map([['far', seat(0, 0)]]);
+  const manager = new AgentManager(new THREE.Scene(), fixedLayout(places) as never);
+  manager.addAgent({ id: 'far', name: 'far', activity });
+  const [managed] = manager.getAgents();
+  setAnimationAsleep(managed.figure.group, true);
+  let tick = 0;
+  const run = (ticks: number) => {
+    for (let i = 0; i < ticks; i++) {
+      tick++;
+      manager.update(tick / 30, 1 / 30);
+    }
+  };
+  return { manager, managed, places, run };
+}
+
+const SEATED_HIPS = 0.5;
+const STANDING_HIPS = 0.9;
+const RAISED_ARM = -2.9;
+
+test('a figure asleep from its first frame shows its activity pose, not the rest pose', () => {
+  const { managed, run } = sleeper('implementing');
+  run(1);
+  assert.ok(Math.abs(managed.figure.joints.hips.position.y - SEATED_HIPS) < 0.01, `hips at ${managed.figure.joints.hips.position.y}`);
+  assert.ok(managed.figure.joints.leftUpperArm.rotation.x < -0.9, 'the hands reach the keyboard');
+});
+
+test('an activity or attention change on a sleeping figure shows the new pose within one tick, raised hand included', () => {
+  const { manager, managed, run } = sleeper('implementing');
+  run(5);
+  manager.setActivity('far', 'idle');
+  run(1);
+  assert.ok(Math.abs(managed.figure.joints.hips.position.y - STANDING_HIPS) < 0.01, `stands up: hips at ${managed.figure.joints.hips.position.y}`);
+
+  manager.setExtras('far', { attention: 'waiting', waitMinutes: 3 });
+  run(1);
+  assert.ok(Math.abs(managed.figure.joints.rightUpperArm.rotation.x - RAISED_ARM) < 0.05, `raises the hand: ${managed.figure.joints.rightUpperArm.rotation.x}`);
+
+  // Settled: no more sway while it sleeps
+  const settled = rotations(managed.figure.group);
+  run(30);
+  assert.deepEqual(rotations(managed.figure.group), settled);
+});
+
+test('a walk that ends while asleep finishes: the figure arrives, stops walking and faces its station', () => {
+  const { manager, managed, places, run } = sleeper('implementing');
+  run(1);
+  places.set('far', { key: 'new', position: new THREE.Vector3(4, 0, 0), lookAt: new THREE.Vector3(4, 0, 5) });
+  manager.setActivity('far', 'testing');
+  run(30 * 10);
+  assert.equal(managed.figure.walking, false);
+  assert.ok(managed.figure.group.position.distanceTo(new THREE.Vector3(4, 0, 0)) < 1e-6);
+  assert.ok(Math.abs(managed.figure.group.rotation.y - 0) < 1e-6, `faces +z: ${managed.figure.group.rotation.y}`);
+  assert.ok(Math.abs(managed.figure.joints.leftUpperLeg.rotation.x) < 0.3, `legs out of the stride: ${managed.figure.joints.leftUpperLeg.rotation.x}`);
+});
 
 test('40 agents and nothing walking: off-screen and far figures sleep, the office is idle and renders once a second', () => {
   const { manager, renderer, run } = crowd(false);

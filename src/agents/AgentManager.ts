@@ -19,8 +19,6 @@ function accentColorFor(agentId: string): THREE.Color {
 }
 
 const SUBAGENT_SCALE = 0.85;
-/** A figure this close to its seat has arrived (StickFigure snaps at 0.05). */
-const ARRIVED_SQUARED = 0.05 * 0.05;
 
 export interface ManagedAgent {
   info: AgentInfo;
@@ -34,6 +32,8 @@ export interface ManagedAgent {
  */
 export class AgentManager {
   private agents = new Map<string, ManagedAgent>();
+  /** The pose a sleeping figure last settled into. */
+  private settledPose = new WeakMap<ManagedAgent, string>();
   private scene: THREE.Scene;
   readonly layout: LayoutStrategy;
 
@@ -87,14 +87,23 @@ export class AgentManager {
       if (managed) this.goToSeat(managed, move.seat, false);
     }
     for (const managed of this.agents.values()) {
-      // Out of view or far: no idle animation, but a walk goes on
-      if (isAnimationAsleep(managed.figure.group) && !this.isWalking(managed)) continue;
-      managed.figure.update(elapsed, delta);
+      const figure = managed.figure;
+      if (!isAnimationAsleep(figure.group)) {
+        this.settledPose.delete(managed);
+        figure.update(elapsed, delta);
+        continue;
+      }
+      // Out of view or far: a walk goes on to its arrival snap and turn
+      if (figure.walking) {
+        this.settledPose.delete(managed);
+        figure.update(elapsed, delta);
+        if (figure.walking) continue;
+      }
+      // No sway, but each new pose (activity, posture, raised hand) shows at once
+      if (this.settledPose.get(managed) === figure.poseKey) continue;
+      figure.settle(elapsed);
+      this.settledPose.set(managed, figure.poseKey);
     }
-  }
-
-  private isWalking(managed: ManagedAgent): boolean {
-    return managed.seat !== null && managed.figure.group.position.distanceToSquared(managed.seat.position) > ARRIVED_SQUARED;
   }
 
   removeAgent(agentId: string): void {
