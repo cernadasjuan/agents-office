@@ -84,6 +84,14 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 | Only read-only programs: `ls`, `cat`, `rg`, `grep`, `find`, `git status`... | Researching (bookshelf) |
 | Anything else | Implementing (desk) |
 
+### Who needs you
+
+- **Blocked:** a session that waits for your permission or answer raises its right hand, shows an amber marker over its head, and its label reads "Waiting for you · 12 min".
+- **Your turn:** a session that finished its turn shows "Your turn · 5 min" in its label, with no marker.
+- **Tab title:** `(2) +5 · Agents Office` means 2 blocked and 5 waiting for your next prompt.
+
+Subagents never ask; their parent does. Without a status in the session file, nothing changes.
+
 ### Location: stations
 
 | Station | Where | Seats | Activities |

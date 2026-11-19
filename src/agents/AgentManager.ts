@@ -46,6 +46,7 @@ export class AgentManager {
     // A new agent appears at its seat (no walk from the origin)
     this.goToSeat(managed, this.layout.seatFor(info, null), true);
     figure.setActivity(info.activity);
+    figure.setAttention(info.extras?.attention, info.extras?.waitMinutes);
     return figure;
   }
 
@@ -65,6 +66,7 @@ export class AgentManager {
     const managed = this.agents.get(agentId);
     if (!managed) return;
     managed.info.extras = extras;
+    managed.figure.setAttention(extras?.attention, extras?.waitMinutes);
     const seat = this.layout.seatFor(managed.info, managed.info.activity);
     if (seat) this.goToSeat(managed, seat, false);
   }

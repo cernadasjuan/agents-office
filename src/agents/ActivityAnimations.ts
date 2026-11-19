@@ -135,10 +135,28 @@ export function animateWalking(j: Joints, elapsed: number, dt: number): void {
 }
 
 export function animateActivity(
-  joints: Joints, activity: Activity, elapsed: number, delta: number, posture?: Posture,
+  joints: Joints, activity: Activity, elapsed: number, delta: number, posture?: Posture, raiseHand = false,
 ): void {
   postureOverride = posture;
   relaxUndrivenSideAxes(joints, activity, delta);
+  // A raised hand owns the right arm: the activity pose must not pull it back down.
+  const rightArm = raiseHand ? [joints.rightUpperArm.rotation.clone(), joints.rightForearm.rotation.clone()] : null;
+  animateActivityPose(joints, activity, elapsed, delta);
+  if (rightArm) {
+    joints.rightUpperArm.rotation.copy(rightArm[0]);
+    joints.rightForearm.rotation.copy(rightArm[1]);
+    animateRaisedHand(joints, elapsed, delta);
+  }
+}
+
+// --- RAISED HAND: an agent that waits for the user raises and waves its right hand ---
+function animateRaisedHand(j: Joints, t: number, dt: number): void {
+  j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -2.9, dt);
+  j.rightUpperArm.rotation.z = approach(j.rightUpperArm.rotation.z, -0.25 + Math.sin(t * 5) * 0.15, dt);
+  j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -0.2, dt);
+}
+
+function animateActivityPose(joints: Joints, activity: Activity, elapsed: number, delta: number): void {
   switch (activity) {
     case 'idle':
       animateIdle(joints, elapsed, delta);

@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin, ViteDevServer } from 'vite';
 import type { DetectedAgent } from './agentDetector.js';
 import { claudeSource } from './claudeSource.js';
+import { attentionEnricher } from './attention.js';
 import { isOfficePlugin, pluginEntry } from './plugins.js';
 import { describeWorld, observe, projectAgents, projectWorld, type OfficePlugin } from './seam.js';
 
@@ -73,7 +74,7 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
   const pipeline = () => ({
     core: claudeSource(settings.detect),
     sources: plugins.flatMap((plugin) => plugin.sources ?? []),
-    enrichers: plugins.flatMap((plugin) => plugin.enrichers ?? []),
+    enrichers: [attentionEnricher(), ...plugins.flatMap((plugin) => plugin.enrichers ?? [])],
     world: plugins.flatMap((plugin) => plugin.world ?? []),
   });
 

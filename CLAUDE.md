@@ -35,6 +35,10 @@ Read `docs/design-principles.md` before any feature change: it lists the design 
 
 Detection runs as a pipeline: the core `claudeSource` (wraps `detectAgents`), then plugin sources, then enrichers in order, then world providers for rooms and boards. A failing or slow plugin step (2 s limit) drops only its own output; a core failure is a 500. `projectAgents` and `projectWorld` are the only exit: they copy whitelisted, cleaned fields and hash every key with the per-run HMAC. `/api/world` uses the same request checks as `/api/agents`. Plugins live in `plugins/<name>/index.ts` (default export `OfficePlugin`) and load through `server.ssrLoadModule` from `AGENTS_OFFICE_PLUGINS=a,b` or `agents-office --plugin a`. Their browser parts live in `plugins/<name>/client.ts` and register an `OfficeExtension` (`src/extensions.ts`) with `plugin: '<name>'`, so they run only while the server plugin is active.
 
+### Attention (server/attention.ts, src/ui/attention.ts)
+
+A built-in enricher sets `attention` for main sessions: status `waiting` → `waiting` (blocked), `idle` → `your-turn`, with `waitMinutes` from `statusUpdatedAt`. The figure raises its right hand (the arm overrides the activity pose; the rest stays) and shows an amber beacon while waiting. The label shows "Waiting for you · N min" or "Your turn · N min". The tab title counts both.
+
 ### Activity Inference (server/agentDetector.ts)
 
 The session file `status` comes first (`combineWithSessionStatus`): `waiting` → `meeting` (label "Waiting for you"), `idle` → `idle`, `busy` with a text-only tail → `planning`. Any other status, or none, uses the transcript alone.
