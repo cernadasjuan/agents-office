@@ -21,6 +21,7 @@
 - One poll at a time, with a 5 s limit
 - Arm and head rotations reset between poses
 - Docs match the code (22 stations, no mock fallback, test commands)
+- GitHub plugin: issue cards in an agent's hand stay upright and read `<repo>#N` in every pose
 
 ### Changes
 

@@ -19,6 +19,8 @@ export interface GithubPluginOptions {
 
 type IssueCard = NonNullable<DisplayExtras['issues']>[number];
 
+const shortName = (repo: string): string => repo.slice(repo.indexOf('/') + 1);
+
 export function createGithubPlugin(options: GithubPluginOptions = {}): OfficePlugin {
   const repos = parseRepos(options.repos);
   if (repos.length === 0) return { name: 'github' };
@@ -26,15 +28,21 @@ export function createGithubPlugin(options: GithubPluginOptions = {}): OfficePlu
   const cache = new IssueCache(options.run ?? runFile, now);
   const transcripts = new TranscriptIssues();
 
+  /**
+ * The card names a repository only when it is a configured one and the issue
+ * was found there or the call named it (`-R`, URL). A bare number from an agent
+ * in another repository gets no name: the card then reads `#N`.
+ */
   function card(ref: IssueRef): IssueCard {
     const candidates = ref.repo ? [ref.repo].filter((repo) => repos.includes(repo)) : repos;
     for (const repo of candidates) {
       const issue = cache.issues(repo)?.find((item) => item.number === ref.number);
       if (!issue) continue;
       const column = columnOf(issue, now());
-      return { number: issue.number, title: issue.title, ...(column ? { column } : {}) };
+      return { number: issue.number, title: issue.title, ...(column ? { column } : {}), repo: shortName(repo) };
     }
-    return { number: ref.number, title: '' };
+    const named = ref.repo && candidates.length === 1 ? candidates[0] : undefined;
+    return { number: ref.number, title: '', ...(named ? { repo: shortName(named) } : {}) };
   }
 
   return {

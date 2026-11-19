@@ -93,3 +93,96 @@ test('each board hangs on the wall as a framed canvas, redrawn only when its dat
   extension.worldChanged(world([]));
   assert.equal(boards().length, 0);
 });
+
+// --- Upright, readable cards (issue #77) ---
+
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const MAX_TILT_DEGREES = 15;
+
+function heldCards(managed: ReturnType<typeof agent>): THREE.Object3D[] {
+  return managed.figure.joints.rightHand.getObjectByName('github-cards')?.children ?? [];
+}
+
+function settle(extension: InstanceType<typeof GithubOfficeExtension>, managed: ReturnType<typeof agent>, seconds = 3): void {
+  for (let t = 0; t < seconds; t += 1 / 60) {
+    managed.figure.update(t, 1 / 60);
+    extension.update();
+  }
+  managed.figure.group.updateMatrixWorld(true);
+}
+
+function tiltDegrees(card: THREE.Object3D): number {
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(card.getWorldQuaternion(new THREE.Quaternion()));
+  return THREE.MathUtils.radToDeg(up.angleTo(WORLD_UP));
+}
+
+function facesAwayFromBody(card: THREE.Object3D, managed: ReturnType<typeof agent>): boolean {
+  const face = new THREE.Vector3(0, 0, 1).applyQuaternion(card.getWorldQuaternion(new THREE.Quaternion()));
+  const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(managed.figure.group.getWorldQuaternion(new THREE.Quaternion()));
+  return face.dot(forward) > 0.5;
+}
+
+type Pose = (managed: ReturnType<typeof agent>) => void;
+const POSES: Array<[string, Pose]> = [
+  ['typing', (m) => m.figure.setActivity('implementing')],
+  ['idle', (m) => m.figure.setActivity('idle')],
+  ['raised hand', (m) => { m.figure.setActivity('implementing'); m.figure.setAttention('waiting', 4); }],
+  ['walking', (m) => m.figure.moveTo(new THREE.Vector3(200, 0, 140), new THREE.Vector3(200, 0, 150))],
+];
+
+for (const [name, pose] of POSES) {
+  test(`every held card stays within 15 degrees of upright and faces out while ${name}`, () => {
+    const extension = new GithubOfficeExtension();
+    const scene = new THREE.Scene();
+    extension.start(scene);
+    const managed = agent('a', Array.from({ length: 5 }, (_, i) => ({ number: i + 1, title: '' })));
+    scene.add(managed.figure.group);
+    managed.figure.group.rotation.y = 1.3;
+    pose(managed);
+    extension.agentsChanged([managed]);
+    settle(extension, managed);
+
+    const cards = heldCards(managed);
+    assert.equal(cards.length, 5);
+    for (const card of cards) {
+      assert.ok(tiltDegrees(card) <= MAX_TILT_DEGREES, `${name}: card tilts ${tiltDegrees(card).toFixed(1)} degrees`);
+      assert.ok(facesAwayFromBody(card, managed), `${name}: card faces the body`);
+    }
+  });
+}
+
+test('a card reads the same from the back: the back face has its own unmirrored text', () => {
+  const extension = new GithubOfficeExtension();
+  extension.start(new THREE.Scene());
+  const managed = agent('a', [{ number: 9, title: '' }]);
+  extension.agentsChanged([managed]);
+  const [card] = heldCards(managed) as THREE.Mesh[];
+  const material = card.material as THREE.MeshBasicMaterial;
+  assert.equal(material.side, THREE.FrontSide, 'no mirrored back side');
+  const back = card.children.find((child) => child.name === 'github-card-back') as THREE.Mesh | undefined;
+  assert.ok(back, 'card has a back face');
+  assert.equal((back.material as THREE.MeshBasicMaterial).side, THREE.FrontSide);
+  assert.ok(Math.abs(Math.abs(back.rotation.y) - Math.PI) < 1e-6, 'back face turns to the other side');
+});
+
+test('a card reads <repo>#N when the repository is known, and #N without it', () => {
+  const extension = new GithubOfficeExtension();
+  extension.start(new THREE.Scene());
+  drawn.length = 0;
+  extension.agentsChanged([agent('a', [{ number: 77, title: '', repo: 'ao' }, { number: 12, title: '' }])]);
+  assert.ok(drawn.includes('ao#77'), `drawn: ${drawn.join(' | ')}`);
+  assert.ok(drawn.includes('#12'));
+
+  drawn.length = 0;
+  extension.agentsChanged([agent('b', [{ number: 77, title: '', repo: 'workbench1' }])]);
+  assert.ok(drawn.includes('workbench1') && drawn.includes('#77'), `long names wrap: ${drawn.join(' | ')}`);
+});
+
+test('markup in a repository name stays text on the card canvas', () => {
+  const extension = new GithubOfficeExtension();
+  extension.start(new THREE.Scene());
+  drawn.length = 0;
+  extension.agentsChanged([agent('a', [{ number: 3, title: '<b>x</b>', repo: '<img>' }])]);
+  assert.ok(drawn.some((text) => text.includes('<img>')), 'drawn as plain text through fillText');
+  assert.equal(document.body.innerHTML, '');
+});

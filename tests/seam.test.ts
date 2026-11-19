@@ -42,6 +42,24 @@ test('the agent projection copies only whitelisted, cleaned fields', () => {
   assert.equal(JSON.stringify(agent).includes('4242'), false);
 });
 
+test('an issue card keeps only a cleaned short repository token', () => {
+  const [agent] = projectAgents([observation({ display: { issues: [
+    { number: 1, title: 'a', repo: 'agents-office' },
+    { number: 2, title: 'b', repo: 'owner/inner/short.name' },
+    { number: 3, title: 'c', repo: '<img src=x>' },
+    { number: 4, title: 'd', repo: '..' },
+    { number: 5, title: 'e', repo: 'x'.repeat(41) },
+  ] } })], publicId);
+
+  assert.deepEqual(agent.issues, [
+    { number: 1, title: 'a', repo: 'agents-office' },
+    { number: 2, title: 'b', repo: 'short.name' },
+    { number: 3, title: 'c' },
+    { number: 4, title: 'd' },
+    { number: 5, title: 'e' },
+  ]);
+});
+
 test('a plain Claude agent keeps the original three fields', () => {
   assert.deepEqual(Object.keys(projectAgents([observation()], publicId)[0]).sort(), ['activity', 'id', 'name']);
 });

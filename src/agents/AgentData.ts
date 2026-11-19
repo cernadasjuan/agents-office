@@ -8,7 +8,7 @@ export interface AgentExtras {
   waitMinutes?: number;
   group?: { id: string; label: string };
   badges?: string[];
-  issues?: Array<{ number: number; title: string; column?: string }>;
+  issues?: Array<{ number: number; title: string; column?: string; repo?: string }>;
   room?: string;
   /** Opt-in write actions the server offers for this agent (today only `focus`, from the herdr plugin). */
   actions?: Array<'focus'>;

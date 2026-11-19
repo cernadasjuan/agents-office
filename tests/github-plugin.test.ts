@@ -214,11 +214,37 @@ test('the enricher sets issues from tool calls, most recent first, and ignores p
   await enrich(p, observations);
 
   assert.deepEqual(observations[0].display.issues, [
-    { number: 1, title: 'Issue 1', column: 'To do' },
+    { number: 1, title: 'Issue 1', column: 'To do', repo: 'agents-office' },
     { number: 404, title: '' },
-    { number: 38, title: 'GitHub plugin: kanban board and issue cards', column: 'In progress' },
+    { number: 38, title: 'GitHub plugin: kanban board and issue cards', column: 'In progress', repo: 'agents-office' },
   ]);
   assert.equal(observations[1].display.issues, undefined);
+});
+
+test('a card names its repository only when the issue belongs to a configured one', async () => {
+  const p = createGithubPlugin({ repos: 'o/alpha,o/beta', now: () => NOW,
+    run: async (_file, args) => JSON.stringify(args.includes('o/alpha') ? [ghIssue(1)] : [ghIssue(2)]) });
+  await world(p);
+  const file = writeTranscript([
+    bash('gh issue view 2'),
+    bash('gh issue view 9'),
+    bash('gh issue view 4 -R o/beta'),
+    bash('gh issue view 5 -R x/gamma'),
+  ]);
+  const observations = [observation(file)];
+  await enrich(p, observations);
+
+  const single = createGithubPlugin({ repos: 'o/alpha', now: () => NOW, run: async () => JSON.stringify([ghIssue(1)]) });
+  const bare = [observation(writeTranscript([bash('gh issue view 783')], 'bare.jsonl'))];
+  await enrich(single, bare);
+  assert.deepEqual(bare[0].display.issues, [{ number: 783, title: '' }], 'a bare unknown number names no repository');
+
+  assert.deepEqual(observations[0].display.issues, [
+    { number: 5, title: '' },
+    { number: 4, title: '', repo: 'beta' },
+    { number: 9, title: '' },
+    { number: 2, title: 'Issue 2', column: 'To do', repo: 'beta' },
+  ]);
 });
 
 test('the enricher keeps the 5 most recent issues and the projection never sends more than 5', async () => {
