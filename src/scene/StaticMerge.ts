@@ -36,16 +36,19 @@ export interface StaticOptions {
    * `applyCutaway` lowers the zone in the overview.
    */
   overviewLower?: number;
+  /** Zone only, with `overviewLower`: the height in the overview (default `OVERVIEW_WALL_HEIGHT`), as `userData.overviewHeight`. */
+  overviewHeight?: number;
 }
 
 interface StaticMark {
   zone: string | null;
   castShadow: boolean;
   overviewLower: number | null;
+  overviewHeight: number | null;
 }
 
 export function markStatic(root: THREE.Object3D, options: StaticOptions = {}): void {
-  root.userData[MARK] = { zone: options.zone ?? null, castShadow: options.castShadow ?? true, overviewLower: options.overviewLower ?? null } satisfies StaticMark;
+  root.userData[MARK] = { zone: options.zone ?? null, castShadow: options.castShadow ?? true, overviewLower: options.overviewLower ?? null, overviewHeight: options.overviewHeight ?? null } satisfies StaticMark;
 }
 
 interface Batch {
@@ -164,6 +167,7 @@ export class StaticBatch {
         container.name = `static-batch-${mark.zone}`;
         container.userData[MERGED] = true;
         if (mark.overviewLower !== null) container.userData.overviewLower = mark.overviewLower;
+        if (mark.overviewHeight !== null) container.userData.overviewHeight = mark.overviewHeight;
         this.scene.add(container);
       }
       batch = { container, castShadow: mark.castShadow, signature: 0, sources: [], excluded: [], merged: [], seen: false };

@@ -15,7 +15,12 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout } = await import('../src/addons/building/BuildingLayout.js');
-const { buildRoom, roomFloorColor, roomTitle, ROOM_LABEL_Y, WALL_HEIGHT } = await import('../src/addons/building/rooms.js');
+const {
+  buildRoom, roomFloorColor, roomTitle, roomLabelLines, roomLabelPose, WALL_HEIGHT, FIRST_PERSON_LABEL_Y, FIRST_PERSON_LABEL_HEIGHT,
+  OVERVIEW_DOOR_HEIGHT, OVERVIEW_LABEL_BOTTOM,
+} = await import('../src/addons/building/rooms.js');
+const { buildRealSizeOffice } = await import('./real-size-office.js');
+const { ViewController } = await import('../src/scene/ViewController.js');
 const { buildMissionRoom } = await import('../src/addons/building/missionRooms.js');
 const { applyCutaway, OVERVIEW_WALL_HEIGHT } = await import('../src/scene/Cutaway.js');
 const { StaticBatch, STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
@@ -61,7 +66,7 @@ const missionRoom = (title = 'Office roadmap', sleepers = 3) => ({
 
 // --- AC1: room labels ---
 
-test('each room has one label above its center, in the world, below the wall top', () => {
+test('each room has one label above its center; in first person a small plate high in the room, below the wall top', () => {
   const slot = slotFor(1);
   const room = buildRoom('library', slot, 1, []);
   const labels = labelsIn(room.group);
@@ -70,11 +75,129 @@ test('each room has one label above its center, in the world, below the wall top
   assert.ok(label instanceof THREE.Sprite, 'a world-space sprite scales with distance');
   assert.equal(label.userData.roomLabel, 'Library');
   assert.ok(Math.abs(label.position.x - center(slot.rect).x) < 1e-6 && Math.abs(label.position.z - center(slot.rect).z) < 1e-6);
-  assert.equal(label.position.y, ROOM_LABEL_Y);
+  assert.equal(label.position.y, FIRST_PERSON_LABEL_Y);
+  assert.ok(label.scale.y <= FIRST_PERSON_LABEL_HEIGHT + 1e-6, `plate height ${label.scale.y}`);
   const material = (label as THREE.Sprite).material;
   assert.equal(material.depthTest, true, 'walls in front hide the label in first person');
-  assert.ok(ROOM_LABEL_Y + label.scale.y / 2 <= WALL_HEIGHT, 'the whole label is below the wall top');
-  assert.ok(ROOM_LABEL_Y - label.scale.y / 2 > OVERVIEW_WALL_HEIGHT, 'the label stays above the lowered walls');
+  assert.ok(FIRST_PERSON_LABEL_Y + label.scale.y / 2 < WALL_HEIGHT, 'the whole label is below the wall top');
+  assert.ok(FIRST_PERSON_LABEL_Y - label.scale.y / 2 > 1.8, 'the plate is above head height, so it does not fill the doorway');
+});
+
+test('label lines: short lines for the default overview, a " · " starts a new line', () => {
+  assert.deepEqual(roomLabelLines('DESKS · WS10', 7), ['DESKS', 'WS10']);
+  assert.deepEqual(roomLabelLines('YOUR OFFICE', 7), ['YOUR', 'OFFICE']);
+  assert.deepEqual(roomLabelLines('LOUNGE 2', 7), ['LOUNGE', '2']);
+  assert.deepEqual(roomLabelLines('LIBRARY', 7), ['LIBRARY']);
+  assert.deepEqual(roomLabelLines('MISSION ROADMAP FOR THE FORK', 7), ['MISSION', 'ROADMAP…']);
+  assert.deepEqual(roomLabelLines('MISSION ROADMAP 3', 16), ['MISSION ROADMAP', '3']);
+});
+
+test('in the overview a plate grows with the zoom distance but never gets wider than a room', () => {
+  const near = roomLabelPose({ viewMode: 'overview', zoomDistance: 20, detail: false }, 2);
+  const far = roomLabelPose({ viewMode: 'overview', zoomDistance: 80, detail: false }, 2);
+  assert.ok(far.height > near.height * 1.9, 'twice the distance, about twice the size');
+  assert.ok(near.y - near.height / 2 >= OVERVIEW_LABEL_BOTTOM - 1e-6 && near.onTop);
+  const wide = roomLabelPose({ viewMode: 'overview', zoomDistance: 200, detail: false }, 6);
+  assert.ok(wide.width <= 12 - 1 + 1e-6, `width ${wide.width}`);
+  const fp = roomLabelPose({ viewMode: 'first-person', zoomDistance: 200, detail: true }, 2);
+  assert.equal(fp.onTop, false);
+  assert.equal(fp.height, FIRST_PERSON_LABEL_HEIGHT);
+});
+
+/** Screen rect (px) of a sprite for a perspective camera, viewport 1600x1000. */
+function screenRect(sprite: THREE.Sprite, camera: THREE.PerspectiveCamera, size = { w: 1600, h: 1000 }) {
+  const center = sprite.getWorldPosition(new THREE.Vector3());
+  const view = center.clone().applyMatrix4(camera.matrixWorldInverse);
+  const depth = -view.z;
+  const pxPerUnit = size.h / (2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+  const ndc = center.clone().project(camera);
+  const x = (ndc.x + 1) / 2 * size.w;
+  const y = (1 - ndc.y) / 2 * size.h;
+  const w = sprite.scale.x * pxPerUnit;
+  const h = sprite.scale.y * pxPerUnit;
+  return { left: x - w / 2, right: x + w / 2, top: y - h / 2, bottom: y + h / 2, height: h };
+}
+
+test('real size, default overview at 1600x1000: every room label plate is at least 22 px tall and no two overlap', () => {
+  const { scene, manager } = buildRealSizeOffice();
+  const camera = new THREE.PerspectiveCamera(60, 1600 / 1000, 0.1, 100);
+  const canvas = dom.window.document.createElement('canvas');
+  const view = new ViewController({ camera, canvas, scene, agents: () => manager.getAgents(), keys: dom.window, hash: '#view=overview' });
+  view.update(0, 0);
+  camera.updateMatrixWorld();
+  scene.updateMatrixWorld();
+  const controller = new LabelDetailController({
+    agents: () => [], camera, canvas, keys: dom.window, scene,
+    viewMode: () => view.mode, zoomDistance: () => view.zoomDistance, pick: () => null, selected: () => null,
+  });
+  controller.refresh();
+  scene.updateMatrixWorld();
+  const labels = labelsIn(scene) as THREE.Sprite[];
+  assert.equal(labels.length, 25);
+  const rects = labels.map((label) => ({ text: label.userData.roomLabel as string, rect: screenRect(label, camera) }));
+  console.log(`room label plates: min ${Math.min(...rects.map((r) => r.rect.height)).toFixed(1)} px at zoom ${view.zoomDistance.toFixed(1)}`);
+  for (const { text, rect } of rects) assert.ok(rect.height >= 22, `${text}: ${rect.height.toFixed(1)} px at zoom ${view.zoomDistance.toFixed(1)}`);
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i].rect;
+      const b = rects[j].rect;
+      const overlap = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      assert.ok(!overlap, `${rects[i].text} overlaps ${rects[j].text}`);
+    }
+  }
+  // The default overview shows the compact face; a war room title fits short lines
+  const war = labels.find((label) => label.userData.roomLabel === 'Mission 3')!;
+  assert.deepEqual(war.userData.labelLines, ['MISSION', '3']);
+  for (const label of labels) assert.equal(label.material.depthTest, false, 'drawn on top in the overview');
+});
+
+test('a room label shows its full name when zoomed in or with labels: all', () => {
+  const scene = new THREE.Scene();
+  const room = buildMissionRoom(missionRoom('Roadmap for the fork'), 0);
+  scene.add(room.group);
+  const camera = new THREE.PerspectiveCamera(60, 1.6, 0.1, 500);
+  camera.position.set(0, 60, 40);
+  camera.updateMatrixWorld();
+  const state = { zoom: 80 };
+  let changes = 0;
+  const controller = new LabelDetailController({
+    agents: () => [], camera, canvas: dom.window.document.createElement('canvas'), keys: dom.window, scene, changed: () => { changes++; },
+    viewMode: () => 'overview', zoomDistance: () => state.zoom, pick: () => null, selected: () => null,
+  });
+  controller.refresh();
+  const [label] = labelsIn(room.group);
+  assert.deepEqual(label.userData.labelLines, ['ROADMAP', 'FOR THE…']);
+  assert.equal(changes, 1, 'a label change asks for a frame');
+  controller.refresh();
+  assert.equal(changes, 1, 'no change, no frame');
+  state.zoom = OVERVIEW_SIGN_ZOOM;
+  controller.refresh();
+  assert.deepEqual(label.userData.labelLines, ['ROADMAP FOR THE', 'FORK']);
+});
+
+test('the sign list is collected once, and again after sceneChanged', () => {
+  const scene = new THREE.Scene();
+  scene.add(buildMissionRoom(missionRoom('One'), 0).group);
+  const camera = new THREE.PerspectiveCamera(60, 1.6, 0.1, 500);
+  camera.position.set(0, 60, 40);
+  camera.updateMatrixWorld();
+  let traversals = 0;
+  const traverse = scene.traverse.bind(scene);
+  scene.traverse = (callback) => { traversals++; traverse(callback); };
+  const controller = new LabelDetailController({
+    agents: () => [], camera, canvas: dom.window.document.createElement('canvas'), keys: dom.window, scene,
+    viewMode: () => 'overview', zoomDistance: () => 80, pick: () => null, selected: () => null,
+  });
+  controller.refresh();
+  controller.refresh();
+  controller.refresh();
+  assert.equal(traversals, 1);
+  const late = buildMissionRoom(missionRoom('Two'), 1);
+  scene.add(late.group);
+  controller.sceneChanged();
+  controller.refresh();
+  assert.equal(traversals, 2);
+  assert.equal((labelsIn(late.group)[0] as THREE.Sprite).material.depthTest, false, 'the new room label gets the overview pose');
 });
 
 test('rooms no longer carry the small door sign chip', () => {
@@ -204,11 +327,12 @@ function frameOf(scene: THREE.Scene, statics: InstanceType<typeof StaticBatch>, 
 }
 
 /** The highest point of every drawn (camera layer) mesh under a zone container that the overview lowers. */
-function drawnWallTops(scene: THREE.Scene): number[] {
+function drawnWallTops(scene: THREE.Scene, zone: 'walls' | 'doors' = 'walls'): number[] {
   const tops: number[] = [];
   const camera = new THREE.Layers();
   for (const container of scene.children) {
     if (container.userData.overviewLower === undefined) continue;
+    if ((container.name === 'static-batch-door-frames') !== (zone === 'doors')) continue;
     container.traverseVisible((object) => {
       if ((object as THREE.Mesh).isMesh && object.layers.test(camera)) tops.push(topOf(object));
     });
@@ -305,6 +429,47 @@ test('the render loop applies the cutaway in the frame of the mode switch and re
   loop.frame(1000);
   assert.equal(renders, before + 1);
   for (const top of drawnWallTops(scene)) assert.ok(top <= OVERVIEW_WALL_HEIGHT + 1e-6, `wall top ${top}`);
+});
+
+test('in the overview door frames drop to 1.2 m, above the 0.5 m walls, so a doorway reads from above', () => {
+  const { scene } = building();
+  const statics = new StaticBatch(scene);
+  frameOf(scene, statics, false);
+  const full = drawnWallTops(scene, 'doors');
+  assert.ok(full.length > 0 && Math.max(...full) > 2, 'full height frames in first person');
+  frameOf(scene, statics, true);
+  const doors = drawnWallTops(scene, 'doors');
+  assert.ok(Math.abs(Math.max(...doors) - OVERVIEW_DOOR_HEIGHT) < 1e-6, `door top ${Math.max(...doors)}`);
+  for (const top of drawnWallTops(scene)) assert.ok(top <= OVERVIEW_WALL_HEIGHT + 1e-6);
+});
+
+test('the render loop redraws the shadows when only the cutaway changes', () => {
+  const { scene } = building();
+  addLighting(scene);
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  camera.position.set(-12, 5.5, 11);
+  let renders = 0;
+  const renderer = {
+    render: () => { renders++; }, info: { render: { calls: 0, triangles: 0 }, reset: () => undefined },
+    shadowMap: { needsUpdate: false, type: THREE.PCFSoftShadowMap }, getPixelRatio: () => 1, setPixelRatio: () => undefined,
+  };
+  const loop = new FrameLoop({
+    scene, camera, renderer: renderer as never, labelRenderer: { render: () => undefined },
+    update: () => undefined, figures: () => [], mode: () => 'overview',
+  });
+  loop.frame(0);
+  loop.frame(100);
+  loop.frame(200);
+  // A zone that stands at full height again (for example built in the overview): only the cutaway changes
+  const zone = scene.children.find((child) => child.name === 'static-batch-hall-walls')!;
+  zone.scale.y = 1;
+  zone.updateMatrixWorld(true);
+  renderer.shadowMap.needsUpdate = false;
+  const before = renders;
+  loop.frame(300);
+  assert.equal(renders, before + 1, 'a frame renders');
+  assert.equal(renderer.shadowMap.needsUpdate, true, 'the shadow maps redraw');
+  assert.ok(zone.scale.y < 1);
 });
 
 // --- AC5: quieter mission signs ---

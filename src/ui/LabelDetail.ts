@@ -57,6 +57,17 @@ export interface RoomLabelFacts {
  * person it hides while you stand in its room, so it does not block the view.
  * Elsewhere it shows; walls hide it in first person by depth.
  */
+/**
+ * What a room label hears each refresh through `userData.applyView` (a layout
+ * hook, for example the building add-on). `detail`: zoomed in, pointed at or
+ * labels: all.
+ */
+export interface RoomLabelHookView {
+  viewMode: ViewMode;
+  zoomDistance: number;
+  detail: boolean;
+}
+
 export function roomLabelVisible(facts: RoomLabelFacts): boolean {
   return facts.viewMode === 'overview' || !facts.cameraInside;
 }
@@ -134,6 +145,8 @@ export interface LabelDetailOptions {
   indicator?: HTMLElement | null;
   /** Where detail signs (`userData.detailSign`) live. Without it, only agent labels change. */
   scene?: THREE.Object3D;
+  /** A room label changed (pose, face or visibility): the scene needs a new frame. */
+  changed?: () => void;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -155,6 +168,7 @@ export class LabelDetailController {
   private signPosition = new THREE.Vector3();
   private raycaster = new THREE.Raycaster();
   private floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private signs: THREE.Object3D[] | null = null;
 
   constructor(private options: LabelDetailOptions) {
     this.currentMode = parseLabelMode(options.hash ?? '');
@@ -200,27 +214,51 @@ export class LabelDetailController {
     this.refreshSigns(view);
   }
 
+  /** Call when rooms or signs were added or removed; the next refresh collects them again. */
+  sceneChanged(): void {
+    this.signs = null;
+  }
+
+  /** Room labels and detail signs, collected once and again after `sceneChanged`, not on every refresh. */
+  private collectSigns(scene: THREE.Object3D): THREE.Object3D[] {
+    const found: THREE.Object3D[] = [];
+    scene.traverse((object) => {
+      if (object.userData.roomRect || object.userData.detailSign) found.push(object);
+    });
+    return found;
+  }
+
   private refreshSigns(view: LabelView): void {
     const { scene } = this.options;
     if (!scene) return;
+    this.signs ??= this.collectSigns(scene);
     const pointed = view.mode === 'smart' ? this.pointedFloor() : null;
-    scene.traverse((object) => {
+    const inRect = (point: THREE.Vector3 | null, rect: DetailSign['rect']) =>
+      point !== null && point.x >= rect.minX && point.x <= rect.maxX && point.z >= rect.minZ && point.z <= rect.maxZ;
+    let changed = false;
+    for (const object of this.signs) {
+      if (!object.parent) continue;
       const roomRect = object.userData.roomRect as DetailSign['rect'] | undefined;
       if (roomRect) {
-        const position = this.cameraPosition;
-        const cameraInside = position.x >= roomRect.minX && position.x <= roomRect.maxX && position.z >= roomRect.minZ && position.z <= roomRect.maxZ;
-        object.visible = roomLabelVisible({ viewMode: view.viewMode, cameraInside });
-        return;
+        const visible = roomLabelVisible({ viewMode: view.viewMode, cameraInside: inRect(this.cameraPosition, roomRect) });
+        const detail = view.mode === 'all' || inRect(pointed, roomRect) || (view.viewMode === 'overview' && view.zoomDistance <= OVERVIEW_SIGN_ZOOM);
+        const key = `${visible}|${view.viewMode}|${detail}|${view.viewMode === 'overview' ? view.zoomDistance.toFixed(2) : ''}`;
+        if (object.userData.labelViewKey === key) continue;
+        object.userData.labelViewKey = key;
+        object.visible = visible;
+        const applyView = object.userData.applyView as ((next: RoomLabelHookView) => void) | undefined;
+        applyView?.({ viewMode: view.viewMode, zoomDistance: view.zoomDistance, detail });
+        changed = true;
+        continue;
       }
       const detail = object.userData.detailSign as DetailSign | undefined;
       const element = (object as THREE.Object3D & { element?: HTMLElement }).element;
-      if (!detail || !element) return;
-      const { rect } = detail;
-      const hovered = pointed !== null && pointed.x >= rect.minX && pointed.x <= rect.maxX && pointed.z >= rect.minZ && pointed.z <= rect.maxZ;
+      if (!detail || !element) continue;
       object.getWorldPosition(this.signPosition);
-      const facts: SignFacts = { hovered, distance: this.signPosition.distanceTo(this.cameraPosition), hoverOnly: detail.hoverOnly === true };
+      const facts: SignFacts = { hovered: inRect(pointed, detail.rect), distance: this.signPosition.distanceTo(this.cameraPosition), hoverOnly: detail.hoverOnly === true };
       applySignVisibility(element, signVisible(facts, view));
-    });
+    }
+    if (changed) this.options.changed?.();
   }
 
   /** The floor point under the pointer (or the screen center while the pointer is locked), or null. */

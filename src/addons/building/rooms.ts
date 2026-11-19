@@ -62,14 +62,33 @@ export function roomTitle(kind: RoomKind, earlierKinds: RoomKind[], tag?: string
 
 export const WALL_HEIGHT = 2.6;
 const WALL_THICKNESS = 0.15;
-/** Height of the center of a room label. The whole label stays below the wall top, so walls hide it in first person. */
-export const ROOM_LABEL_Y = 1.55;
-/** World height of a one-line and a two-line label. */
-const ROOM_LABEL_HEIGHTS = [1.6, 2.0];
-const ROOM_LABEL_MAX_WIDTH = ROOM_SIZE - 1;
-const ROOM_LABEL_MAX_CHARS = 22;
+/** First person: a small plate high in the room; its top (2.55) stays below the wall top, so walls hide it. */
+export const FIRST_PERSON_LABEL_Y = 2.2;
+export const FIRST_PERSON_LABEL_HEIGHT = 0.7;
+/** Overview: plate height at the reference zoom distance; it grows with the distance beyond it. */
+export const OVERVIEW_LABEL_HEIGHT = 1.6;
+export const OVERVIEW_LABEL_REFERENCE_ZOOM = 40;
+/** Overview: the plate bottom, above the lowered walls and the door frames. */
+export const OVERVIEW_LABEL_BOTTOM = 1.3;
+/** A plate is never wider than this, so labels of two neighbor rooms do not overlap. */
+export const ROOM_LABEL_MAX_WIDTH = ROOM_SIZE - 1;
+/** Overview: a plate is never taller than this, so labels of two rooms in a column do not overlap. */
+export const OVERVIEW_LABEL_MAX_HEIGHT = 5;
+/** Characters per line: the full face, and the compact face of the default overview. */
+export const FULL_LABEL_CHARS = 16;
+export const COMPACT_LABEL_CHARS = 7;
+const LABEL_FONT_PX = 64;
+const LABEL_LINE_PX = 68;
+const LABEL_PAD_X = 8;
+const LABEL_PAD_Y = 6;
+/** Capitals are drawn condensed (narrower), so a name fits a room width at a readable height. */
+const LABEL_CONDENSE = 0.58;
 const DOOR_FRAME_HEIGHT = 2.35;
 const DOOR_POST_WIDTH = 0.2;
+/** Top of the lintel. */
+export const DOOR_FRAME_TOP = DOOR_FRAME_HEIGHT + DOOR_POST_WIDTH;
+/** Overview: door frames drop to this height, above the 0.5 walls. */
+export const OVERVIEW_DOOR_HEIGHT = 1.2;
 const DOOR_FRAME_DEPTH = 0.3;
 
 /**
@@ -130,6 +149,15 @@ export function markCutaway(root: THREE.Object3D): void {
   markStatic(root, { zone: 'room-walls', castShadow: false, overviewLower: WALL_HEIGHT });
 }
 
+/**
+ * Door frames get their own cutaway zone: in the overview they drop to
+ * `OVERVIEW_DOOR_HEIGHT`, so the posts and the lintel stand above the low walls
+ * and a doorway reads from above.
+ */
+export function markDoorCutaway(root: THREE.Object3D): void {
+  markStatic(root, { zone: 'door-frames', castShadow: false, overviewLower: DOOR_FRAME_TOP, overviewHeight: OVERVIEW_DOOR_HEIGHT });
+}
+
 /** Low walls with gaps at the doors, so the overview can see in. */
 export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hideSides: Side[] = []): THREE.Group {
   const group = new THREE.Group();
@@ -153,76 +181,141 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
   return group;
 }
 
-/** Up to two lines of at most `ROOM_LABEL_MAX_CHARS`, cut at word breaks, with an ellipsis when the text is longer. */
-export function roomLabelLines(text: string): string[] {
-  const cut = (part: string) => (part.length > ROOM_LABEL_MAX_CHARS ? `${part.slice(0, ROOM_LABEL_MAX_CHARS - 1)}…` : part);
+/**
+ * Up to two lines of at most `maxChars`, cut at word breaks, with an ellipsis
+ * when the text is longer. A " · " starts a new line ("DESKS" / "WS10").
+ */
+export function roomLabelLines(text: string, maxChars: number): string[] {
+  const cut = (part: string) => (part.length > maxChars ? `${part.slice(0, maxChars - 1)}…` : part);
   const lines: string[] = [];
-  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
-    const last = lines[lines.length - 1];
-    if (last !== undefined && `${last} ${word}`.length <= ROOM_LABEL_MAX_CHARS) lines[lines.length - 1] = `${last} ${word}`;
-    else lines.push(word);
+  for (const part of text.trim().split(/\s+·\s+/)) {
+    let first = true;
+    for (const word of part.split(/\s+/).filter(Boolean)) {
+      const last = lines[lines.length - 1];
+      if (!first && last !== undefined && `${last} ${word}`.length <= maxChars) lines[lines.length - 1] = `${last} ${word}`;
+      else lines.push(word);
+      first = false;
+    }
   }
   if (lines.length <= 2) return lines.map(cut);
-  const second = `${lines[1]} ${lines[2]}`;
-  return [cut(lines[0]), `${second.slice(0, ROOM_LABEL_MAX_CHARS - 1)}…`];
+  // More than two lines: the second line ends with an ellipsis after a whole word when it fits
+  return [cut(lines[0]), lines[1].length <= maxChars ? `${lines[1]}…` : `${lines[1].slice(0, maxChars - 1)}…`];
 }
 
-/**
- * A room name in the world: a light plate with dark wide capitals above the room
- * center. It scales with distance, and geometry in front of it hides it.
- */
-export function roomLabel(text: string, position: THREE.Vector3, rect: Rect): THREE.Sprite {
-  const material = new THREE.SpriteMaterial({ depthTest: true, depthWrite: false, transparent: true, toneMapped: false });
-  const label = new THREE.Sprite(material);
-  label.name = 'room-label';
-  label.position.copy(position);
-  // The label controller hides it in first person while the camera is inside this room
-  label.userData.roomRect = { ...rect };
-  setRoomLabelText(label, text);
-  return label;
+/** What the label controller tells a room label each refresh. */
+export interface RoomLabelView {
+  viewMode: 'overview' | 'first-person';
+  zoomDistance: number;
+  /** Zoomed in, pointed at or labels: all: the full name. */
+  detail: boolean;
 }
 
-/** Draw the label text on a new canvas texture (a texture keeps its first size on the GPU). */
-export function setRoomLabelText(label: THREE.Sprite, text: string): void {
-  if (label.userData.roomLabel === text) return;
-  label.userData.roomLabel = text;
-  const lines = roomLabelLines(text.toUpperCase());
-  if (lines.length === 0) lines.push('');
+interface LabelFace {
+  lines: string[];
+  texture: THREE.CanvasTexture;
+  /** Canvas width over height. */
+  aspect: number;
+}
+
+/** Draw a plate with dark wide capitals on a canvas texture. */
+function drawLabelFace(lines: string[]): LabelFace {
   const canvas = document.createElement('canvas');
-  const lineHeightPx = 96;
-  const font = `800 64px system-ui, 'Helvetica Neue', Arial, sans-serif`;
+  const font = `800 ${LABEL_FONT_PX}px system-ui, 'Helvetica Neue', Arial, sans-serif`;
   const ctx = canvas.getContext('2d');
-  const longest = Math.max(...lines.map((line) => line.length), 1);
   if (ctx) {
     ctx.font = font;
-    ctx.letterSpacing = '6px';
+    ctx.letterSpacing = '2px';
   }
+  const longest = Math.max(...lines.map((line) => line.length), 1);
   const measured = ctx?.measureText ? Math.max(...lines.map((line) => ctx.measureText(line)?.width ?? 0)) : 0;
-  const textWidth = Number.isFinite(measured) && measured > 0 ? measured : longest * 50;
-  canvas.width = Math.ceil(textWidth + 80);
-  canvas.height = lines.length * lineHeightPx + 24;
+  const textWidth = Number.isFinite(measured) && measured > 0 ? measured : longest * LABEL_FONT_PX * 0.75;
+  canvas.width = Math.ceil(textWidth * LABEL_CONDENSE + LABEL_PAD_X * 2);
+  canvas.height = lines.length * LABEL_LINE_PX + LABEL_PAD_Y * 2;
   if (ctx?.fillRect) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = 'rgba(247, 241, 228, 0.92)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.strokeStyle = 'rgba(42, 42, 62, 0.85)';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+    ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
     ctx.fillStyle = '#2a2a3e';
     ctx.font = font;
-    ctx.letterSpacing = '6px';
+    ctx.letterSpacing = '2px';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    lines.forEach((line, i) => ctx.fillText(line, canvas.width / 2, 12 + lineHeightPx * (i + 0.5)));
+    ctx.scale(LABEL_CONDENSE, 1);
+    lines.forEach((line, i) => ctx.fillText(line, canvas.width / 2 / LABEL_CONDENSE, LABEL_PAD_Y + LABEL_LINE_PX * (i + 0.5)));
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  label.material.map?.dispose();
-  label.material.map = texture;
-  label.material.needsUpdate = true;
-  const height = ROOM_LABEL_HEIGHTS[Math.min(lines.length, 2) - 1];
-  const width = Math.min(ROOM_LABEL_MAX_WIDTH, height * (canvas.width / canvas.height));
-  label.scale.set(width, width * (canvas.height / canvas.width), 1);
+  return { lines, texture, aspect: canvas.width / canvas.height };
+}
+
+/**
+ * Where and how big a room label is. First person: a small plate high in the
+ * room, below the wall top, hidden by walls (depth test). Overview: a plate that
+ * grows with the zoom distance, so it keeps its size on screen, but never wider
+ * than a room, so two room labels do not overlap; it draws on top.
+ */
+export function roomLabelPose(view: RoomLabelView, aspect: number): { height: number; width: number; y: number; onTop: boolean } {
+  if (view.viewMode === 'first-person') {
+    const height = Math.min(FIRST_PERSON_LABEL_HEIGHT, ROOM_LABEL_MAX_WIDTH / aspect);
+    return { height, width: height * aspect, y: FIRST_PERSON_LABEL_Y, onTop: false };
+  }
+  const wanted = OVERVIEW_LABEL_HEIGHT * Math.max(1, view.zoomDistance / OVERVIEW_LABEL_REFERENCE_ZOOM);
+  const height = Math.min(wanted, OVERVIEW_LABEL_MAX_HEIGHT, ROOM_LABEL_MAX_WIDTH / aspect);
+  return { height, width: height * aspect, y: OVERVIEW_LABEL_BOTTOM + height / 2, onTop: true };
+}
+
+/**
+ * A room name in the world: a light plate with dark capitals above the room
+ * center. It has a full face (first person, zoomed in, pointed at) and a compact
+ * face of short lines (the default overview). The label controller calls
+ * `userData.applyView` each refresh; until then it shows the first person pose.
+ */
+export function roomLabel(text: string, position: THREE.Vector3, rect: Rect): THREE.Sprite {
+  const material = new THREE.SpriteMaterial({ depthTest: true, depthWrite: false, transparent: true, toneMapped: false });
+  const label = new THREE.Sprite(material);
+  label.name = 'room-label';
+  label.position.set(position.x, FIRST_PERSON_LABEL_Y, position.z);
+  // The label controller hides it in first person while the camera is inside this room
+  label.userData.roomRect = { ...rect };
+  let view: RoomLabelView = { viewMode: 'first-person', zoomDistance: 0, detail: true };
+  label.userData.applyView = (next: RoomLabelView) => {
+    view = next;
+    const faces = label.userData.faces as { full: LabelFace; compact: LabelFace };
+    const face = next.viewMode === 'overview' && !next.detail ? faces.compact : faces.full;
+    if (material.map !== face.texture) {
+      material.map = face.texture;
+      material.needsUpdate = true;
+    }
+    label.userData.labelLines = face.lines;
+    const pose = roomLabelPose(next, face.aspect);
+    label.scale.set(pose.width, pose.height, 1);
+    label.position.y = pose.y;
+    material.depthTest = !pose.onTop;
+    label.renderOrder = pose.onTop ? 10 : 0;
+  };
+  label.userData.refreshView = () => (label.userData.applyView as (v: RoomLabelView) => void)(view);
+  setRoomLabelText(label, text);
+  return label;
+}
+
+/** Draw both faces of the label for a new text (a texture keeps its first size on the GPU). */
+export function setRoomLabelText(label: THREE.Sprite, text: string): void {
+  if (label.userData.roomLabel === text) return;
+  label.userData.roomLabel = text;
+  const old = label.userData.faces as { full: LabelFace; compact: LabelFace } | undefined;
+  const upper = text.toUpperCase();
+  const lines = (maxChars: number) => {
+    const found = roomLabelLines(upper, maxChars);
+    return found.length > 0 ? found : [''];
+  };
+  label.userData.faces = { full: drawLabelFace(lines(FULL_LABEL_CHARS)), compact: drawLabelFace(lines(COMPACT_LABEL_CHARS)) };
+  old?.full.texture.dispose();
+  old?.compact.texture.dispose();
+  (label.userData.refreshView as () => void)();
 }
 
 /** Two posts and a lintel around a doorway, in the room floor color, so doors stand out from the walls. */
@@ -286,9 +379,9 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
   markCutaway(walls);
   group.add(walls);
   const doorway = doorFrame(slot.rect, slot.door, FLOOR_TINT[kind]);
-  markCutaway(doorway);
+  markDoorCutaway(doorway);
   group.add(doorway);
-  group.add(roomLabel(title ?? roomTitle(kind, []), frame.point(0, ROOM_SIZE / 2, ROOM_LABEL_Y), slot.rect));
+  group.add(roomLabel(title ?? roomTitle(kind, []), frame.point(0, ROOM_SIZE / 2), slot.rect));
 
   const rows = (count: number, spacing: number) => Array.from({ length: count }, (_, i) => (i - (count - 1) / 2) * spacing);
 

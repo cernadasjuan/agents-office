@@ -68,6 +68,7 @@ const labelDetail = new LabelDetailController({
   agents: () => agentManager.getAgents(),
   camera,
   scene,
+  changed: () => frameLoop.scheduler.request(),
   canvas: renderer.domElement,
   keys: window,
   viewMode: () => view.mode,
@@ -84,6 +85,7 @@ function buildUI(): void {
   panel.render(agents.map((managed) => managed.info));
   document.title = tabTitleFor(agents.map((managed) => managed.info.extras));
   view.agentsChanged(agents);
+  labelDetail.sceneChanged();
   labelDetail.refresh();
   for (const extension of activeExtensions(scene)) extension.agentsChanged?.(agentManager.getAgents());
   frameLoop.sceneChanged();
@@ -100,6 +102,7 @@ async function pollWorld(): Promise<void> {
     const world = (await res.json()) as World;
     setWorld(world);
     for (const extension of activeExtensions(scene)) extension.worldChanged?.(world);
+    labelDetail.sceneChanged();
     frameLoop.sceneChanged();
   } catch {
     // Keep the last world
