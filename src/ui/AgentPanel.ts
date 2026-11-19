@@ -14,11 +14,19 @@ interface PanelCard {
  */
 export class AgentPanel {
   private cards = new Map<string, PanelCard>();
+  private selectedId: string | null = null;
 
   constructor(
     private list: HTMLElement,
     private onPick: (agentId: string, activity: Activity) => void,
+    private onSelect?: (agentId: string) => void,
   ) {}
+
+  /** Mark the card of the selected agent, or none. */
+  setSelected(agentId: string | null): void {
+    this.selectedId = agentId;
+    for (const [id, entry] of this.cards) entry.card.classList.toggle('selected', id === agentId);
+  }
 
   render(agents: AgentInfo[]): void {
     const present = new Set(agents.map((agent) => agent.id));
@@ -41,6 +49,13 @@ export class AgentPanel {
 
     const name = document.createElement('div');
     name.className = 'agent-name';
+    const onSelect = this.onSelect;
+    if (onSelect) {
+      name.classList.add('selectable');
+      name.title = 'Select and fly to this agent';
+      name.addEventListener('click', () => onSelect(agent.id));
+    }
+    card.classList.toggle('selected', agent.id === this.selectedId);
     card.appendChild(name);
 
     const menu = document.createElement('select');

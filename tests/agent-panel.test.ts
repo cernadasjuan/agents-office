@@ -61,3 +61,41 @@ test('choosing an activity reports the agent and the activity', (t) => {
 
   assert.deepEqual(picks, [['a', 'testing']]);
 });
+
+test('a click on the card name selects the agent, a menu change does not', (t) => {
+  const list = installDocument(t);
+  const selected: string[] = [];
+  const panel = new AgentPanel(list, () => undefined, (id) => selected.push(id));
+  panel.render([{ id: 'a', name: 'Agent A', activity: 'idle' }]);
+
+  list.querySelector<HTMLElement>('.agent-name')!.click();
+  const menu = list.querySelector('select')!;
+  menu.value = 'testing';
+  menu.dispatchEvent(new menu.ownerDocument.defaultView!.Event('change'));
+
+  assert.deepEqual(selected, ['a']);
+});
+
+test('the selected card is marked and the mark moves with the selection', (t) => {
+  const list = installDocument(t);
+  const panel = new AgentPanel(list, () => undefined, () => undefined);
+  panel.render([{ id: 'a', name: 'A', activity: 'idle' }, { id: 'b', name: 'B', activity: 'idle' }]);
+  const [cardA, cardB] = list.querySelectorAll('.agent-card');
+
+  panel.setSelected('a');
+  assert.equal(cardA.classList.contains('selected'), true);
+  panel.setSelected('b');
+  assert.equal(cardA.classList.contains('selected'), false);
+  assert.equal(cardB.classList.contains('selected'), true);
+  panel.setSelected(null);
+  assert.equal(list.querySelectorAll('.selected').length, 0);
+});
+
+test('without a select handler the card name does nothing and is not marked clickable', (t) => {
+  const list = installDocument(t);
+  const panel = new AgentPanel(list, () => undefined);
+  panel.render([{ id: 'a', name: 'A', activity: 'idle' }]);
+  const name = list.querySelector<HTMLElement>('.agent-name')!;
+  name.click();
+  assert.equal(name.classList.contains('selectable'), false);
+});

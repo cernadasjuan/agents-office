@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { createScene } from './scene/SceneSetup.js';
 import { createOffice } from './scene/Office.js';
 import { AgentManager } from './agents/AgentManager.js';
-import { updateFreeCamera } from './scene/FreeCamera.js';
+import { ViewController } from './scene/ViewController.js';
+import { onSelectionChange, selectAgent } from './scene/Selection.js';
 import { AgentPoller } from './agents/AgentPoller.js';
 import { AgentPanel } from './ui/AgentPanel.js';
 import { chooseLayoutId, createLayout, layoutIds, rememberLayoutId } from './layout/registry.js';
@@ -37,17 +38,32 @@ window.addEventListener('keydown', (event) => {
 // Agent manager
 const agentManager = new AgentManager(scene, createLayout(layoutId, scene, stations));
 
+// Camera mode (first person by default, key O for the overview) and click to select.
+// `#view=overview` starts in the overview, `#focus=<agent id>` selects that agent once it appears.
+const view = new ViewController({
+  camera,
+  canvas: renderer.domElement,
+  scene,
+  agents: () => agentManager.getAgents(),
+  keys: window,
+  hint: document.getElementById('pointer-hint'),
+  hash: window.location.hash,
+});
+
 // --- UI Panel ---
 const panel = new AgentPanel(
   document.getElementById('agent-list')!,
   (agentId, activity) => agentManager.setActivity(agentId, activity),
+  (agentId) => selectAgent(agentId),
 );
+onSelectionChange((agentId) => panel.setSelected(agentId));
 
 function buildUI(): void {
   const agents = agentManager.getAgents();
   panel.render(agents.map((managed) => managed.info));
   const count = (attention: string) => agents.filter((managed) => managed.info.extras?.attention === attention).length;
   document.title = tabTitle(count('waiting'), count('your-turn'));
+  view.agentsChanged(agents);
   for (const extension of activeExtensions(scene)) extension.agentsChanged?.(agentManager.getAgents());
 }
 
@@ -84,7 +100,7 @@ function animate(): void {
   const delta = clock.getDelta();
   const elapsed = clock.getElapsedTime();
 
-  updateFreeCamera(camera, delta);
+  view.update(elapsed, delta);
   agentManager.update(elapsed, delta);
   for (const extension of activeExtensions(scene)) extension.update?.(elapsed, delta);
 

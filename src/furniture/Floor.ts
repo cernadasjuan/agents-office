@@ -5,6 +5,7 @@ import { OFFICE } from '../utils/Constants.js';
 
 export function createFloor(): THREE.Group {
   const group = new THREE.Group();
+  group.userData.floor = true; // the overview camera frames every floor object
 
   // Main floor
   const floorGeo = new THREE.PlaneGeometry(OFFICE.halfX * 2, OFFICE.halfZ * 2);

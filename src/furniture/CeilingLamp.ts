@@ -75,6 +75,7 @@ export function createCeilingLampWithLight(x: number, z: number): {
   const lampGroup = createCeilingLamp();
   const lampY = 5.2;
   lampGroup.position.set(x, lampY, z);
+  lampGroup.userData.overviewHidden = true;
 
   // SpotLight pointing down from the lamp
   const light = new THREE.SpotLight(0xfff5e6, 3, 20, Math.PI / 3, 0.5, 1);

@@ -9,23 +9,23 @@ const keys = new Set<string>();
 let yaw = 0;
 let pitch = 0;
 let locked = false;
+let lockFilter: (event: MouseEvent) => boolean = () => true;
+
+/** Decide per click whether it engages the camera (for example: not when it selects a figure). */
+export function setPointerLockFilter(filter: (event: MouseEvent) => boolean): void {
+  lockFilter = filter;
+}
 
 export function initFreeCamera(
   camera: THREE.PerspectiveCamera,
   canvas: HTMLCanvasElement,
   lookAtTarget: THREE.Vector3
 ): void {
-  // Compute yaw/pitch from position → target direction
-  const dir = new THREE.Vector3().subVectors(lookAtTarget, camera.position).normalize();
-  yaw = Math.atan2(-dir.x, -dir.z);
-  pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
-
-  // Apply immediately so first frame is correct
-  camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+  setFreeCameraLook(camera, camera.position, lookAtTarget);
 
   // Pointer lock
-  canvas.addEventListener('click', () => {
-    canvas.requestPointerLock();
+  canvas.addEventListener('click', (event) => {
+    if (lockFilter(event)) canvas.requestPointerLock();
   });
 
   document.addEventListener('pointerlockchange', () => {
@@ -49,7 +49,22 @@ export function initFreeCamera(
   });
 }
 
-function clampToOffice(pos: THREE.Vector3): void {
+/** Place the camera and turn it toward a point. */
+export function setFreeCameraLook(camera: THREE.Camera, position: THREE.Vector3, lookAt: THREE.Vector3): void {
+  camera.position.copy(position);
+  const dir = new THREE.Vector3().subVectors(lookAt, position).normalize();
+  yaw = Math.atan2(-dir.x, -dir.z);
+  pitch = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)), -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
+  camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+}
+
+/** Where the first-person camera is and a point it looks at. */
+export function freeCameraLook(camera: THREE.Camera): { position: THREE.Vector3; lookAt: THREE.Vector3 } {
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ')));
+  return { position: camera.position.clone(), lookAt: camera.position.clone().addScaledVector(forward, 5) };
+}
+
+export function clampToOffice(pos: THREE.Vector3): void {
   const m = OFFICE.margin;
   pos.x = THREE.MathUtils.clamp(pos.x, -OFFICE.halfX + m, OFFICE.halfX - m);
   pos.z = THREE.MathUtils.clamp(pos.z, -OFFICE.halfZ + m, OFFICE.halfZ - m);

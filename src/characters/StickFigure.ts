@@ -15,6 +15,7 @@ export class StickFigure {
   joints: Joints;
   label: CSS2DObject;
   name: string;
+  readonly accentColor: THREE.Color;
   activity: Activity = 'idle';
   private targetActivity: Activity = 'idle';
   private transitionProgress = 1;
@@ -30,6 +31,7 @@ export class StickFigure {
 
   constructor(name: string, accentColor: THREE.Color) {
     this.name = name;
+    this.accentColor = accentColor.clone();
     this.joints = buildSkeleton(accentColor);
     this.label = createLabel(name, ACTIVITY_LABELS.idle);
     this.joints.root.add(this.label);
