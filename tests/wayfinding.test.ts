@@ -89,6 +89,8 @@ test('label lines: short lines for the default overview, a " · " starts a new l
   assert.deepEqual(roomLabelLines('LOUNGE 2', 7), ['LOUNGE', '2']);
   assert.deepEqual(roomLabelLines('LIBRARY', 7), ['LIBRARY']);
   assert.deepEqual(roomLabelLines('MISSION ROADMAP FOR THE FORK', 7), ['MISSION', 'ROADMAP…']);
+  assert.deepEqual(roomLabelLines('MISSION ROADMAP 3', 7, 3), ['MISSION', 'ROADMAP', '3']);
+  assert.deepEqual(roomLabelLines('MISSION ROADMAP FOR THE FORK', 7, 3), ['MISSION', 'ROADMAP', 'FOR THE…']);
   assert.deepEqual(roomLabelLines('MISSION ROADMAP 3', 16), ['MISSION ROADMAP', '3']);
 });
 
@@ -166,7 +168,7 @@ test('a room label shows its full name when zoomed in or with labels: all', () =
   });
   controller.refresh();
   const [label] = labelsIn(room.group);
-  assert.deepEqual(label.userData.labelLines, ['ROADMAP', 'FOR THE…']);
+  assert.deepEqual(label.userData.labelLines, ['ROADMAP', 'FOR THE', 'FORK']);
   assert.equal(changes, 1, 'a label change asks for a frame');
   controller.refresh();
   assert.equal(changes, 1, 'no change, no frame');

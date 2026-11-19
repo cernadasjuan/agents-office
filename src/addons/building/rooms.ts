@@ -77,6 +77,8 @@ export const OVERVIEW_LABEL_MAX_HEIGHT = 5;
 /** Characters per line: the full face, and the compact face of the default overview. */
 export const FULL_LABEL_CHARS = 16;
 export const COMPACT_LABEL_CHARS = 7;
+/** The compact face keeps up to three short lines, so a war room keeps its distinct last word. */
+export const COMPACT_LABEL_LINES = 3;
 const LABEL_FONT_PX = 64;
 const LABEL_LINE_PX = 68;
 const LABEL_PAD_X = 8;
@@ -182,10 +184,10 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
 }
 
 /**
- * Up to two lines of at most `maxChars`, cut at word breaks, with an ellipsis
+ * Up to `maxLines` lines of at most `maxChars`, cut at word breaks, with an ellipsis
  * when the text is longer. A " · " starts a new line ("DESKS" / "WS10").
  */
-export function roomLabelLines(text: string, maxChars: number): string[] {
+export function roomLabelLines(text: string, maxChars: number, maxLines = 2): string[] {
   const cut = (part: string) => (part.length > maxChars ? `${part.slice(0, maxChars - 1)}…` : part);
   const lines: string[] = [];
   for (const part of text.trim().split(/\s+·\s+/)) {
@@ -197,9 +199,10 @@ export function roomLabelLines(text: string, maxChars: number): string[] {
       first = false;
     }
   }
-  if (lines.length <= 2) return lines.map(cut);
-  // More than two lines: the second line ends with an ellipsis after a whole word when it fits
-  return [cut(lines[0]), lines[1].length <= maxChars ? `${lines[1]}…` : `${lines[1].slice(0, maxChars - 1)}…`];
+  if (lines.length <= maxLines) return lines.map(cut);
+  // More lines: the last kept line ends with an ellipsis after a whole word when it fits
+  const last = lines[maxLines - 1];
+  return [...lines.slice(0, maxLines - 1).map(cut), last.length <= maxChars ? `${last}…` : `${last.slice(0, maxChars - 1)}…`];
 }
 
 /** What the label controller tells a room label each refresh. */
@@ -308,11 +311,11 @@ export function setRoomLabelText(label: THREE.Sprite, text: string): void {
   label.userData.roomLabel = text;
   const old = label.userData.faces as { full: LabelFace; compact: LabelFace } | undefined;
   const upper = text.toUpperCase();
-  const lines = (maxChars: number) => {
-    const found = roomLabelLines(upper, maxChars);
+  const lines = (maxChars: number, maxLines?: number) => {
+    const found = roomLabelLines(upper, maxChars, maxLines);
     return found.length > 0 ? found : [''];
   };
-  label.userData.faces = { full: drawLabelFace(lines(FULL_LABEL_CHARS)), compact: drawLabelFace(lines(COMPACT_LABEL_CHARS)) };
+  label.userData.faces = { full: drawLabelFace(lines(FULL_LABEL_CHARS)), compact: drawLabelFace(lines(COMPACT_LABEL_CHARS, COMPACT_LABEL_LINES)) };
   old?.full.texture.dispose();
   old?.compact.texture.dispose();
   (label.userData.refreshView as () => void)();
