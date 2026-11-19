@@ -209,3 +209,25 @@ test('a quiet subagent whose last tool call has a result disappears after 30 sec
   writeSubagent(toolResultLine, 2 * 60_000);
   assert.equal(detectAgents().filter((agent) => agent.parentId).length, 0);
 });
+
+test('plugins get the transcript path and subagent type on the server, and the API never sends them', async () => {
+  const { claudeSource } = await import('../server/claudeSource.js');
+  const { projectAgents } = await import('../server/seam.js');
+  writeSession('a.json', 'session-a', 101);
+  writeTranscript('session-a.jsonl', toolUseLine('Read', {}), new Date());
+  const subagentsDir = path.join(projectDir, 'session-a', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(subagentsDir, 'agent-1.meta.json'), JSON.stringify({ agentType: 'Explore', description: 'Look' }));
+  writeTranscript(path.join('session-a', 'subagents', 'agent-1.jsonl'), toolUseLine('Grep', {}), new Date());
+
+  const observations = await claudeSource(detectAgents).scan();
+  const session = observations.find((o) => o.id === 'session-a')!;
+  const subagent = observations.find((o) => o.parentId === 'session-a')!;
+
+  assert.equal(session.internal.transcriptPath, path.join(projectDir, 'session-a.jsonl'));
+  assert.equal(subagent.internal.transcriptPath, path.join(subagentsDir, 'agent-1.jsonl'));
+  assert.equal(subagent.internal.agentType, 'Explore');
+  const json = JSON.stringify(projectAgents(observations, (id) => `public-${id}`));
+  assert.equal(json.includes('.jsonl'), false);
+  assert.equal(json.includes('Explore'), false);
+});
