@@ -28,7 +28,7 @@ export interface Observation {
   activity: string;
   status?: string;
   statusSince?: number;
-  internal: { pid?: number; cwd?: string; sessionId?: string; agentType?: string; [key: string]: unknown };
+  internal: { pid?: number; cwd?: string; sessionId?: string; transcriptPath?: string; agentType?: string; [key: string]: unknown };
   display: DisplayExtras;
 }
 

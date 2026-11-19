@@ -10,7 +10,13 @@ function toObservation(agent: DetectedAgent): Observation {
     activity: agent.activity,
     ...(agent.status ? { status: agent.status } : {}),
     ...(agent.statusSince ? { statusSince: agent.statusSince } : {}),
-    internal: { pid: agent.pid, cwd: agent.cwd, sessionId: agent.parentId ? undefined : agent.id },
+    internal: {
+      pid: agent.pid,
+      cwd: agent.cwd,
+      sessionId: agent.parentId ? undefined : agent.id,
+      ...(agent.transcriptPath ? { transcriptPath: agent.transcriptPath } : {}),
+      ...(agent.agentType ? { agentType: agent.agentType } : {}),
+    },
     display: {},
   };
 }

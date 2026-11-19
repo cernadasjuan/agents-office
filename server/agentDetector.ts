@@ -15,6 +15,10 @@ export interface DetectedAgent {
   status?: string;
   /** When the session file status last changed, in ms. Server only. */
   statusSince?: number;
+  /** The agent's own transcript, when it exists. Server only, for plugins. */
+  transcriptPath?: string;
+  /** The subagent type from its meta file (for example Explore). Server only. */
+  agentType?: string;
 }
 
 interface SessionFile {
@@ -309,6 +313,13 @@ function projectDirFor(cwd: string): string {
  * folder share a project directory, so the newest file there may belong to
  * another session.
  */
+/** The session's own transcript path, or undefined when the ID is unsafe or the file is missing. */
+export function sessionTranscriptPath(cwd: string, sessionId: string): string | undefined {
+  if (!isPlainSessionId(sessionId)) return undefined;
+  const transcriptPath = path.join(projectDirFor(cwd), `${sessionId}.jsonl`);
+  return fs.existsSync(transcriptPath) ? transcriptPath : undefined;
+}
+
 function inferSessionActivity(cwd: string, sessionId: string): string {
   if (!isPlainSessionId(sessionId)) return 'idle';
   const transcriptPath = path.join(projectDirFor(cwd), `${sessionId}.jsonl`);
@@ -358,6 +369,8 @@ function detectSubagents(cwd: string, parentId: string, parentPid: number): Dete
         alive: true,
         activity,
         parentId,
+        transcriptPath,
+        ...(typeof meta.agentType === 'string' ? { agentType: meta.agentType } : {}),
       });
     } catch {
       // skip malformed subagent files
@@ -404,6 +417,7 @@ export function detectAgents(): DetectedAgent[] {
       const name = path.basename(session.cwd);
 
       const { status, statusUpdatedAt } = session as SessionFile & { status?: unknown; statusUpdatedAt?: unknown };
+      const transcriptPath = sessionTranscriptPath(session.cwd, session.sessionId);
       agents.push({
         id: session.sessionId,
         name,
@@ -414,6 +428,7 @@ export function detectAgents(): DetectedAgent[] {
         activity,
         ...(typeof status === 'string' ? { status } : {}),
         ...(typeof statusUpdatedAt === 'number' && Number.isFinite(statusUpdatedAt) ? { statusSince: statusUpdatedAt } : {}),
+        ...(transcriptPath ? { transcriptPath } : {}),
       });
 
       // Detect active subagents
