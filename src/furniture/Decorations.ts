@@ -79,11 +79,11 @@ export function createTallPlant(): THREE.Group {
   return group;
 }
 
-export function createWallArt(width: number, height: number, color: number): THREE.Group {
+export function createWallArt(width: number, height: number, color: number, frameColor = 0x333333): THREE.Group {
   const group = new THREE.Group();
 
   // Frame
-  const frameMat = getToonMaterial(0x333333);
+  const frameMat = getToonMaterial(frameColor);
   const frameW = 0.04;
 
   const top = new THREE.Mesh(new THREE.BoxGeometry(width + frameW * 2, frameW, 0.03), frameMat);
