@@ -10,6 +10,7 @@ import { createPlant } from '../../furniture/Decorations.js';
 import { getToonMaterial } from '../../utils/Materials.js';
 import { Colors } from '../../utils/Colors.js';
 import type { Station } from '../../scene/Office.js';
+import { markStatic } from '../../scene/StaticMerge.js';
 import { DOOR_WIDTH, ROOM_SIZE, type Door, type Rect, type RoomSlot, type Side, wallPieces } from './RoomPlanner.js';
 
 export type RoomKind = 'office' | 'desks' | 'planning' | 'library' | 'lab' | 'review' | 'lounge';
@@ -258,6 +259,8 @@ function sign(text: string, position: THREE.Vector3): CSS2DObject {
 export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDoors: Door[], title?: string): BuiltRoom {
   const group = new THREE.Group();
   group.name = `room-${index}-${kind}`;
+  // Rooms lie outside the hall lamps' cone: their merged furniture casts no shadow
+  markStatic(group, { zone: 'rooms', castShadow: false });
   const frame = new RoomFrame(slot.rect, slot.door);
   const stations = new Map<string, Station>();
   const type = ROOM_STATION_TYPE[kind];

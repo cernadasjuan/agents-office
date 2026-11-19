@@ -1,0 +1,316 @@
+{
+ "source": "Reconstructed from the published counts of the 2026-11-19 review (no raw snapshot kept): 38 agents, 6 waiting (min 7.6 h, median 17.8 h), 22 your turn (median 5.7 d, max 22.7 d), 1 wait under 1 h. Old tab title: (6) +22.",
+ "agents": [
+  {
+   "id": "a01",
+   "name": "session 01",
+   "activity": "meeting",
+   "extras": {
+    "attention": "waiting",
+    "waitMinutes": 456
+   }
+  },
+  {
+   "id": "a02",
+   "name": "session 02",
+   "activity": "meeting",
+   "extras": {
+    "attention": "waiting",
+    "waitMinutes": 700
+   }
+  },
+  {
+   "id": "a03",
+   "name": "session 03",
+   "activity": "meeting",
+   "extras": {
+    "attention": "waiting",
+    "waitMinutes": 1000
+   }
+  },
+  {
+   "id": "a04",
+   "name": "session 04",
+   "activity": "meeting",
+   "extras": {
+    "attention": "waiting",
+    "waitMinutes": 1136
+   }
+  },
+  {
+   "id": "a05",
+   "name": "session 05",
+   "activity": "meeting",
+   "extras": {
+    "attention": "waiting",
+    "waitMinutes": 1500
+   }
+  },
+  {
+   "id": "a06",
+   "name": "session 06",
+   "activity": "meeting",
+   "extras": {
+    "attention": "waiting",
+    "waitMinutes": 2400
+   }
+  },
+  {
+   "id": "a07",
+   "name": "session 07",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 4
+   }
+  },
+  {
+   "id": "a08",
+   "name": "session 08",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 540
+   }
+  },
+  {
+   "id": "a09",
+   "name": "session 09",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 900
+   }
+  },
+  {
+   "id": "a10",
+   "name": "session 10",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 1300
+   }
+  },
+  {
+   "id": "a11",
+   "name": "session 11",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 1700
+   }
+  },
+  {
+   "id": "a12",
+   "name": "session 12",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 2500
+   }
+  },
+  {
+   "id": "a13",
+   "name": "session 13",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 3600
+   }
+  },
+  {
+   "id": "a14",
+   "name": "session 14",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 5000
+   }
+  },
+  {
+   "id": "a15",
+   "name": "session 15",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 6200
+   }
+  },
+  {
+   "id": "a16",
+   "name": "session 16",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 7100
+   }
+  },
+  {
+   "id": "a17",
+   "name": "session 17",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 8000
+   }
+  },
+  {
+   "id": "a18",
+   "name": "session 18",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 8416
+   }
+  },
+  {
+   "id": "a19",
+   "name": "session 19",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 9500
+   }
+  },
+  {
+   "id": "a20",
+   "name": "session 20",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 10500
+   }
+  },
+  {
+   "id": "a21",
+   "name": "session 21",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 12000
+   }
+  },
+  {
+   "id": "a22",
+   "name": "session 22",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 14000
+   }
+  },
+  {
+   "id": "a23",
+   "name": "session 23",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 16000
+   }
+  },
+  {
+   "id": "a24",
+   "name": "session 24",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 18000
+   }
+  },
+  {
+   "id": "a25",
+   "name": "session 25",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 21000
+   }
+  },
+  {
+   "id": "a26",
+   "name": "session 26",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 25000
+   }
+  },
+  {
+   "id": "a27",
+   "name": "session 27",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 29000
+   }
+  },
+  {
+   "id": "a28",
+   "name": "session 28",
+   "activity": "idle",
+   "extras": {
+    "attention": "your-turn",
+    "waitMinutes": 32688
+   }
+  },
+  {
+   "id": "a29",
+   "name": "session 29",
+   "activity": "implementing"
+  },
+  {
+   "id": "a30",
+   "name": "session 30",
+   "activity": "implementing"
+  },
+  {
+   "id": "a31",
+   "name": "session 31",
+   "activity": "implementing"
+  },
+  {
+   "id": "a32",
+   "name": "session 32",
+   "activity": "researching"
+  },
+  {
+   "id": "a33",
+   "name": "session 33",
+   "activity": "researching"
+  },
+  {
+   "id": "a34",
+   "name": "session 34",
+   "activity": "testing"
+  },
+  {
+   "id": "a35",
+   "name": "session 35",
+   "activity": "planning"
+  },
+  {
+   "id": "a36",
+   "name": "session 36",
+   "activity": "implementing",
+   "extras": {
+    "provider": "codex"
+   }
+  },
+  {
+   "id": "a37",
+   "name": "session 37",
+   "activity": "implementing",
+   "extras": {
+    "parentId": "a07"
+   }
+  },
+  {
+   "id": "a38",
+   "name": "session 38",
+   "activity": "researching",
+   "extras": {
+    "parentId": "a08"
+   }
+  }
+ ]
+}

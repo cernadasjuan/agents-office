@@ -49,6 +49,13 @@ test('smart mode: a waiting (blocked) agent always gets a full label, in both vi
   assert.equal(labelDetail(waiting, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'full');
 });
 
+test('smart mode: a cold block (waiting 24 h or more) gets a compact label like any other agent', () => {
+  const coldBlock = facts({ attention: 'waiting', waitMinutes: 2 * 24 * 60, distance: 500 });
+  assert.equal(labelDetail(coldBlock, view()), 'compact');
+  assert.equal(labelDetail(coldBlock, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact');
+  assert.equal(labelDetail(facts({ attention: 'waiting', waitMinutes: 60, distance: 500 }), view()), 'full', 'an aging block stays full');
+});
+
 test('smart mode: "your turn" alone does not make a label full (most idle sessions have it)', () => {
   assert.equal(labelDetail(facts({ attention: 'your-turn' }), view()), 'compact');
   assert.equal(labelDetail(facts({ attention: 'your-turn' }), view({ viewMode: 'overview' })), 'compact');

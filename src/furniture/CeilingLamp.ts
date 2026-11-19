@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getToonMaterial, getEmissiveMaterial } from '../utils/Materials.js';
 import { OFFICE } from '../utils/Constants.js';
+import { markStatic } from '../scene/StaticMerge.js';
 
 export function createCeilingLamp(): THREE.Group {
   const group = new THREE.Group();
@@ -76,6 +77,7 @@ export function createCeilingLampWithLight(x: number, z: number): {
   const lampY = 5.2;
   lampGroup.position.set(x, lampY, z);
   lampGroup.userData.overviewHidden = true;
+  markStatic(lampGroup);
 
   // SpotLight pointing down from the lamp
   const light = new THREE.SpotLight(0xfff5e6, 3, 20, Math.PI / 3, 0.5, 1);

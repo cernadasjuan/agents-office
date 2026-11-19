@@ -4,7 +4,8 @@ import { buildSkeleton, Joints } from './StickFigureParts.js';
 import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
 import { ACTIVITY_LABELS } from '../agents/AgentData.js';
-import { attentionLine } from '../ui/attention.js';
+import { attentionLine, callsForYou } from '../ui/attention.js';
+import type { AgentExtras } from '../agents/AgentData.js';
 import { getToonMaterial } from '../utils/Materials.js';
 import type { Posture } from '../layout/LayoutStrategy.js';
 
@@ -27,6 +28,7 @@ export class StickFigure {
   private tag: string | undefined;
   private attention: string | undefined;
   private waitMinutes: number | undefined;
+  private callsForYou = false;
   private beacon: THREE.Mesh | null = null;
 
   constructor(name: string, accentColor: THREE.Color) {
@@ -64,21 +66,23 @@ export class StickFigure {
     this.refreshLabel();
   }
 
-  /** Who needs the user: 'waiting' raises a hand and shows a beacon, 'your-turn' changes the label only. */
+  /** Who needs the user: every wait changes the label; a fresh wait also raises a hand and shows a beacon. */
   setAttention(attention: string | undefined, waitMinutes: number | undefined): void {
     this.attention = attention;
     this.waitMinutes = waitMinutes;
+    this.callsForYou = callsForYou({ attention: attention as AgentExtras['attention'], waitMinutes });
     this.refreshLabel();
-    if (attention === 'waiting' && !this.beacon) {
+    if (this.callsForYou && !this.beacon) {
       this.beacon = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), getToonMaterial(new THREE.Color(0xffb020)));
       this.beacon.position.set(0, 2.55, 0);
       this.joints.root.add(this.beacon);
     }
-    if (this.beacon) this.beacon.visible = attention === 'waiting';
+    if (this.beacon) this.beacon.visible = this.callsForYou;
   }
 
+  /** True while the wait calls for the user: the right hand stays up. */
   get isWaiting(): boolean {
-    return this.attention === 'waiting';
+    return this.callsForYou;
   }
 
   private refreshLabel(): void {

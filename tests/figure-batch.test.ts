@@ -1,0 +1,105 @@
+import assert from 'node:assert/strict';
+import { after, test } from 'node:test';
+import { JSDOM } from 'jsdom';
+import * as THREE from 'three';
+
+// Toon materials paint a gradient on a canvas at import time; labels need a document.
+const dom = new JSDOM('<!doctype html><html><body></body></html>');
+Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true, writable: true });
+dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
+  get: () => () => undefined,
+  set: () => true,
+})) as never;
+const { StickFigure } = await import('../src/characters/StickFigure.js');
+const { FigureBatch, FIGURE_PART_LAYER } = await import('../src/characters/FigureBatch.js');
+const { pickAgent } = await import('../src/scene/Selection.js');
+const { countDrawCalls } = await import('../src/scene/RenderBudget.js');
+after(() => {
+  dom.window.close();
+  Reflect.deleteProperty(globalThis, 'document');
+});
+
+const RED = new THREE.Color(0xe05050);
+const BLUE = new THREE.Color(0x5070e0);
+
+function figures(scene: THREE.Scene, colors: THREE.Color[]): InstanceType<typeof StickFigure>[] {
+  return colors.map((color, i) => {
+    const figure = new StickFigure(`f${i}`, color);
+    figure.group.position.set(i * 2, 0, 0);
+    scene.add(figure.group);
+    return figure;
+  });
+}
+
+function partsOf(figure: InstanceType<typeof StickFigure>): THREE.Mesh[] {
+  const parts: THREE.Mesh[] = [];
+  figure.group.traverse((object) => {
+    if (object.userData.figurePart) parts.push(object as THREE.Mesh);
+  });
+  return parts;
+}
+
+test('all figures draw in one call per part shape and color, each part where its joint puts it', () => {
+  const scene = new THREE.Scene();
+  const all = figures(scene, [RED, RED, BLUE]);
+  scene.updateMatrixWorld();
+  assert.equal(countDrawCalls(scene).main, 42);
+
+  const batch = new FigureBatch(scene);
+  batch.sync(all.map((figure) => figure.group));
+
+  // head, hand, foot, leg, arm and torso shapes; two torso colors
+  assert.equal(countDrawCalls(scene).main, 7);
+  for (const figure of all) for (const part of partsOf(figure)) assert.equal(part.layers.isEnabled(0), false);
+  const heads = batch.meshes.find((mesh) => mesh.geometry === all[0].joints.head.geometry)!;
+  assert.equal(heads.count, 3);
+  const matrix = new THREE.Matrix4();
+  heads.getMatrixAt(2, matrix);
+  assert.ok(matrix.equals(all[2].joints.head.matrixWorld));
+  assert.ok(batch.meshes.every((mesh) => mesh.castShadow));
+});
+
+test('a figure that moves is reported; a still figure is not', () => {
+  const scene = new THREE.Scene();
+  const all = figures(scene, [RED, BLUE]);
+  const batch = new FigureBatch(scene);
+  const roots = all.map((figure) => figure.group);
+  scene.updateMatrixWorld();
+  const first = batch.sync(roots);
+  assert.equal(first.changed, true);
+
+  scene.updateMatrixWorld();
+  assert.deepEqual(batch.sync(roots), { moved: [], changed: false });
+
+  all[1].joints.rightUpperArm.rotation.x = -1;
+  scene.updateMatrixWorld();
+  const next = batch.sync(roots);
+  assert.deepEqual(next.moved, [all[1].group]);
+  assert.equal(next.changed, false);
+});
+
+test('a figure that leaves the scene leaves the batch', () => {
+  const scene = new THREE.Scene();
+  const all = figures(scene, [RED, RED]);
+  const batch = new FigureBatch(scene);
+  scene.updateMatrixWorld();
+  batch.sync(all.map((figure) => figure.group));
+  scene.remove(all[0].group);
+  const result = batch.sync([all[1].group]);
+  assert.equal(result.changed, true);
+  assert.equal(batch.meshes.find((mesh) => mesh.geometry === all[1].joints.head.geometry)!.count, 1);
+});
+
+test('things attached to a part still draw themselves, and a click still picks a batched figure', () => {
+  const scene = new THREE.Scene();
+  const [figure] = figures(scene, [RED]);
+  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.2), new THREE.MeshBasicMaterial());
+  figure.joints.head.add(hat);
+  scene.updateMatrixWorld();
+  new FigureBatch(scene).sync([figure.group]);
+
+  assert.equal(hat.layers.isEnabled(0), true);
+  assert.equal(figure.joints.head.layers.isEnabled(FIGURE_PART_LAYER), true);
+  const raycaster = new THREE.Raycaster(new THREE.Vector3(0, 1.2, 5), new THREE.Vector3(0, 0, -1));
+  assert.equal(pickAgent(raycaster, [{ id: 'f0', object: figure.group }]), 'f0');
+});

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { ViewMode } from '../scene/Selection.js';
+import { attentionBand } from './attention.js';
 
 /** `smart` shows full labels only where they matter; `all` is the original behavior. */
 export type LabelMode = 'smart' | 'all';
@@ -21,6 +22,8 @@ const MODE_TEXT: Record<LabelMode, string> = { smart: 'Labels: smart (V)', all: 
 
 export interface LabelFacts {
   attention: string | undefined;
+  /** Minutes the agent has waited for the user, when known. A cold block gets no full label. */
+  waitMinutes?: number;
   selected: boolean;
   hovered: boolean;
   /** Distance from the camera to the figure, in world units. */
@@ -37,7 +40,8 @@ export interface LabelView {
 /** Full or compact label for one agent. Pure: no DOM, no scene. */
 export function labelDetail(facts: LabelFacts, view: LabelView): LabelLevel {
   if (view.mode === 'all') return 'full';
-  if (facts.attention === 'waiting' || facts.selected || facts.hovered) return 'full';
+  const blockedRecently = facts.attention === 'waiting' && attentionBand({ attention: facts.attention, waitMinutes: facts.waitMinutes }) !== 'cold';
+  if (blockedRecently || facts.selected || facts.hovered) return 'full';
   if (view.viewMode === 'overview') return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
   return facts.distance <= FIRST_PERSON_FULL_LABEL_DISTANCE ? 'full' : 'compact';
 }
@@ -95,7 +99,7 @@ export function applyLabelDetail(element: HTMLElement, level: LabelLevel): boole
 
 /** The part of a managed agent this module reads. */
 export interface LabelAgent {
-  info: { id: string; extras?: { attention?: string } };
+  info: { id: string; extras?: { attention?: string; waitMinutes?: number } };
   figure: { group: THREE.Object3D; label: { element: HTMLElement } };
 }
 
@@ -171,6 +175,7 @@ export class LabelDetailController {
       agent.figure.group.getWorldPosition(this.figurePosition);
       const level = labelDetail({
         attention: agent.info.extras?.attention,
+        waitMinutes: agent.info.extras?.waitMinutes,
         selected: agent.info.id === selected,
         hovered: agent.info.id === hovered,
         distance: this.figurePosition.distanceTo(this.cameraPosition),

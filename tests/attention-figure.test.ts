@@ -68,3 +68,42 @@ test('the label carries the agent color for the compact dot, and the label keeps
   assert.equal(figure.label.element.style.getPropertyValue('--agent-color'), '#4a90d9');
   assert.equal(figure.label.element.className, 'agent-label');
 });
+
+const beaconOf = (figure: InstanceType<typeof StickFigure>) =>
+  figure.group.children.find((child) => child instanceof THREE.Mesh && child.geometry instanceof THREE.OctahedronGeometry);
+
+test('a fresh your-turn wait raises the hand and shows the beacon', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setActivity('idle');
+  figure.setAttention('your-turn', 4);
+  run(figure, 3);
+  assert.equal(beaconOf(figure)?.visible, true);
+  assert.ok(figure.joints.rightUpperArm.rotation.x < -2.7, `right arm ${figure.joints.rightUpperArm.rotation.x}`);
+  assert.equal(activityText(figure), 'Your turn · 4 min');
+});
+
+test('an aging or cold block keeps its label, with no beacon and no raised hand', () => {
+  for (const minutes of [15, 24 * 60]) {
+    const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+    figure.setActivity('implementing');
+    figure.setAttention('waiting', minutes);
+    run(figure, 3);
+    assert.notEqual(beaconOf(figure)?.visible, true, `${minutes} min`);
+    assert.ok(figure.joints.rightUpperArm.rotation.x > -1.5, `hand on the keyboard at ${minutes} min`);
+    assert.match(activityText(figure) ?? '', /^Waiting for you · /);
+  }
+});
+
+test('a block that ages past the fresh band loses its beacon on the next poll', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setAttention('waiting', 14);
+  assert.equal(beaconOf(figure)?.visible, true);
+  figure.setAttention('waiting', 15);
+  assert.equal(beaconOf(figure)?.visible, false);
+});
+
+test('a block without a wait time keeps the beacon, as before', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setAttention('waiting', undefined);
+  assert.equal(beaconOf(figure)?.visible, true);
+});
