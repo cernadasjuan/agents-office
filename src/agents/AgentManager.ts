@@ -77,7 +77,10 @@ export class AgentManager {
   }
 
   update(elapsed: number, delta: number): void {
-    this.layout.update?.(elapsed, delta);
+    for (const move of this.layout.update?.(elapsed, delta) ?? []) {
+      const managed = this.agents.get(move.agentId);
+      if (managed) this.goToSeat(managed, move.seat, false);
+    }
     for (const managed of this.agents.values()) {
       managed.figure.update(elapsed, delta);
     }

@@ -16,6 +16,12 @@ export interface Seat {
 
 export type Posture = 'seated' | 'standing';
 
+/** A seat change the layout decides on its own, applied by the manager. */
+export interface LayoutMove {
+  agentId: string;
+  seat: Seat;
+}
+
 /** What a layout knows about an agent when it chooses a seat. */
 export interface LayoutAgent {
   id: string;
@@ -39,6 +45,9 @@ export interface LayoutStrategy {
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null;
   /** Free the seat of an agent that left. */
   release(agentId: string): void;
-  /** Optional per-frame hook, for layouts that animate their own scenery. */
-  update?(elapsed: number, delta: number): void;
+  /**
+   * Optional per-frame hook. A layout can return moves that do not come from an
+   * activity change: a trip that starts after a dwell time, a queue that moves up.
+   */
+  update?(elapsed: number, delta: number): LayoutMove[] | void;
 }
