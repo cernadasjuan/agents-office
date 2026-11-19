@@ -84,6 +84,7 @@ Subagents (spawned via the Agent tool) are detected only from the parent's own `
 - **Toon shading**: All meshes use `MeshToonMaterial` with a 4-step gradient map, cached in `Materials.ts`
 - **Station occupancy**: `Station.occupied` flag prevents multiple agents at one location. On activity change, old station is released before new one is claimed
 - **Teleport vs walk**: `addAgent()` teleports to station instantly; `setActivity()` triggers a walk animation (4.5 units/sec) with leg/arm swing
+- **Dwell time (activity layout)**: `ActivityLayout` takes `{ dwellMs, now }` (default 0 = move at once). With `dwellMs > 0`, `seatFor` keeps the seat on a station type change and records a pending trip; `update()` returns the `LayoutMove` once the new type lasted `dwellMs`. A change back to the seat type cancels it, a third type restarts the timer, `release` drops it. `registry.ts` reads `?dwell=<seconds>` (`dwellMsFromSearch`, 0 to 30). The figure switches its activity pose at once; the building layout keeps its own dwell
 - **Same-type station stickiness**: If an activity change maps to the same station type (e.g. implementing→debugging), the agent stays at its current desk
 - **Skeleton animation**: Hierarchical joints (root→body→shoulders/hips→limbs) animated per-activity with sine waves and `approach()` easing
 - **Colors**: Centralized palette in `Colors.ts` with 8 accent colors for agents; an agent's color comes from an FNV-1a hash of its ID

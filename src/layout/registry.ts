@@ -6,7 +6,19 @@ import type { LayoutStrategy } from './LayoutStrategy.js';
 export type LayoutFactory = (scene: THREE.Scene, stations: Map<string, Station>) => LayoutStrategy;
 
 const STORAGE_KEY = 'agents-office.layout';
-const factories = new Map<string, LayoutFactory>([['activity', (_scene, stations) => new ActivityLayout(stations)]]);
+const MAX_DWELL_SECONDS = 30;
+
+/** `?dwell=<seconds>` for the activity layout, clamped to 0 to 30 s. Missing or not a number: 0. */
+export function dwellMsFromSearch(search: string): number {
+  const seconds = Number(new URLSearchParams(search).get('dwell') ?? 0);
+  if (!Number.isFinite(seconds)) return 0;
+  return Math.min(MAX_DWELL_SECONDS, Math.max(0, seconds)) * 1000;
+}
+
+const factories = new Map<string, LayoutFactory>([[
+  'activity',
+  (_scene, stations) => new ActivityLayout(stations, { dwellMs: dwellMsFromSearch(globalThis.location?.search ?? '') }),
+]]);
 let defaultLayoutId = 'activity';
 
 /** Add a layout. An add-on can also make it the default when the user chose none. */
