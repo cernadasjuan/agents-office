@@ -4,40 +4,50 @@ import { Colors } from '../utils/Colors.js';
 
 const RADIAL_SEGMENTS = 6;
 
-export function createHead(): THREE.Mesh {
-  const geo = new THREE.SphereGeometry(0.15, 8, 8);
-  const mesh = new THREE.Mesh(geo, getToonMaterial(Colors.skin));
+// Every figure shares one geometry per part shape, so the figure batch draws all
+// figures' parts of one shape and color in one call (src/characters/FigureBatch.ts).
+const sharedGeometries = new Map<string, THREE.BufferGeometry>();
+
+function shared(key: string, build: () => THREE.BufferGeometry): THREE.BufferGeometry {
+  let geometry = sharedGeometries.get(key);
+  if (!geometry) {
+    geometry = build();
+    sharedGeometries.set(key, geometry);
+  }
+  return geometry;
+}
+
+/** A body part of a stick figure. The figure batch draws these meshes instanced. */
+function part(geometry: THREE.BufferGeometry, material: THREE.Material): THREE.Mesh {
+  const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = true;
+  mesh.userData.figurePart = true;
   return mesh;
+}
+
+export function createHead(): THREE.Mesh {
+  return part(shared('head', () => new THREE.SphereGeometry(0.15, 8, 8)), getToonMaterial(Colors.skin));
 }
 
 export function createTorso(accentColor: THREE.Color): THREE.Mesh {
-  const geo = new THREE.CylinderGeometry(0.12, 0.15, 0.6, RADIAL_SEGMENTS);
-  const mesh = new THREE.Mesh(geo, getToonMaterial(accentColor));
-  mesh.castShadow = true;
-  return mesh;
+  return part(shared('torso', () => new THREE.CylinderGeometry(0.12, 0.15, 0.6, RADIAL_SEGMENTS)), getToonMaterial(accentColor));
 }
 
 export function createLimb(length: number, radius = 0.035): THREE.Mesh {
-  const geo = new THREE.CylinderGeometry(radius, radius, length, RADIAL_SEGMENTS);
-  geo.translate(0, -length / 2, 0);
-  const mesh = new THREE.Mesh(geo, getToonMaterial(Colors.limb));
-  mesh.castShadow = true;
-  return mesh;
+  const geometry = shared(`limb:${length}:${radius}`, () => {
+    const geo = new THREE.CylinderGeometry(radius, radius, length, RADIAL_SEGMENTS);
+    geo.translate(0, -length / 2, 0);
+    return geo;
+  });
+  return part(geometry, getToonMaterial(Colors.limb));
 }
 
 export function createHand(): THREE.Mesh {
-  const geo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
-  const mesh = new THREE.Mesh(geo, getToonMaterial(Colors.skin));
-  mesh.castShadow = true;
-  return mesh;
+  return part(shared('hand', () => new THREE.BoxGeometry(0.06, 0.06, 0.06)), getToonMaterial(Colors.skin));
 }
 
 export function createFoot(): THREE.Mesh {
-  const geo = new THREE.BoxGeometry(0.08, 0.05, 0.12);
-  const mesh = new THREE.Mesh(geo, getToonMaterial(Colors.shoe));
-  mesh.castShadow = true;
-  return mesh;
+  return part(shared('foot', () => new THREE.BoxGeometry(0.08, 0.05, 0.12)), getToonMaterial(Colors.shoe));
 }
 
 export interface Joints {
