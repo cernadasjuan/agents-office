@@ -104,6 +104,39 @@ test('agents blocked on the user go straight to the office and line up by how lo
   assert.deepEqual(moves.map((m) => [m.agentId, m.seat.key]).sort(), [['mid', 'room0_queue_0'], ['short', 'room0_queue_1']]);
 });
 
+test('the queue puts fresh waits before aging ones, the oldest first inside each band, your turn included', () => {
+  const { layout, agent, tick } = setup();
+  const waits = [['aging-young', 'waiting', 20], ['fresh-young', 'your-turn', 1], ['aging-old', 'your-turn', 600], ['fresh-old', 'waiting', 14]] as const;
+  for (const [id, attention, wait] of waits) {
+    layout.seatFor(agent(id, 'implementing'), null);
+    const activity = attention === 'waiting' ? 'meeting' : 'idle';
+    const seat = layout.seatFor(agent(id, activity, { attention, waitMinutes: wait }), 'implementing');
+    assert.match(seat!.key, /^room0_queue_/, `${id} goes to the office at once`);
+  }
+  tick(600);
+  const spotOf = (id: string) => (layout as unknown as { agents: Map<string, { seat: string }> }).agents.get(id)!.seat;
+  assert.deepEqual(['fresh-old', 'fresh-young', 'aging-old', 'aging-young'].map(spotOf),
+    ['room0_queue_0', 'room0_queue_1', 'room0_queue_2', 'room0_queue_3']);
+});
+
+test('a cold wait leaves the queue for the lounge and never joins it', () => {
+  const { layout, agent, tick } = setup();
+  layout.seatFor(agent('b', 'implementing'), null);
+  assert.match(layout.seatFor(agent('b', 'meeting', { attention: 'waiting', waitMinutes: 600 }), 'implementing')!.key, /^room0_queue_/);
+  assert.equal(layout.seatFor(agent('b', 'meeting', { attention: 'waiting', waitMinutes: 24 * 60 }), 'meeting'), null, 'leaves after the dwell time');
+  const leave = tick(4500).find((m) => m.agentId === 'b')!;
+  assert.doesNotMatch(leave.seat.key, /queue/);
+
+  const cold = layout.seatFor(agent('c', 'idle', { attention: 'your-turn', waitMinutes: 3 * 24 * 60 }), null)!;
+  assert.doesNotMatch(cold.key, /queue/);
+});
+
+test('your turn without a wait time stays out of the queue, as before', () => {
+  const { layout, agent } = setup();
+  const seat = layout.seatFor(agent('y', 'idle', { attention: 'your-turn' }), null)!;
+  assert.doesNotMatch(seat.key, /queue/);
+});
+
 test('the building rents a desk room when the hall desks are taken, and rebuilds it after a reload', () => {
   const { layout, agent, storage } = setup();
   const seats = Array.from({ length: 10 }, (_, i) => layout.seatFor(agent(`s${i}`, 'implementing'), null)!);
