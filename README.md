@@ -132,6 +132,25 @@ npx agents-office --plugin name1 --plugin name2
 
 A plugin is a folder `plugins/<name>/` with an `index.ts` (server: sources, enrichers, rooms and boards) and an optional `client.ts` (browser rendering). The server copies only whitelisted, cleaned fields to the browser.
 
+`pnpm dev:fork` starts the dev server with the plugins of this fork (now `herdr`).
+
+### herdr plugin
+
+For sessions that run in [herdr](https://herdr.dev) panes. Each Claude session shows the name of its herdr tab. The session and its subagents get a group: the herdr workspace. Subagents keep their own `>>` names.
+
+What it reads:
+
+- `ps eww -o pid=,command= -p <pids>` once for the session processes it has not seen yet. From that output it keeps only `HERDR_PANE_ID`, `HERDR_TAB_ID` and `HERDR_WORKSPACE_ID`. It keeps or logs no other variable.
+- `herdr tab list` and `herdr workspace list`, at most once every 10 s.
+
+All commands are read-only. They run through `execFile` with fixed arguments and a 1.5 s timeout, never through a shell. If herdr is not installed, a session is not in herdr, or a command fails, the session keeps its normal name and has no group. Raw herdr IDs stay on the server: the API sends only a hashed group ID and the cleaned labels.
+
+Enable it:
+
+```bash
+AGENTS_OFFICE_PLUGINS=herdr pnpm dev   # or: pnpm dev:fork
+```
+
 ## Controls
 
 - **Click** to engage camera
