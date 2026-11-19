@@ -1,0 +1,64 @@
+import assert from 'node:assert/strict';
+import { after, test } from 'node:test';
+import { JSDOM } from 'jsdom';
+import * as THREE from 'three';
+
+// Toon materials paint a gradient on a canvas at import time.
+const dom = new JSDOM('<!doctype html><html><body></body></html>');
+Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true, writable: true });
+dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
+  get: () => () => undefined,
+  set: () => true,
+})) as never;
+const { StickFigure } = await import('../src/characters/StickFigure.js');
+const { formatWait } = await import('../src/ui/attention.js');
+after(() => {
+  dom.window.close();
+  Reflect.deleteProperty(globalThis, 'document');
+});
+
+function run(figure: InstanceType<typeof StickFigure>, seconds: number): void {
+  for (let t = 0; t < seconds; t += 1 / 60) figure.update(t, 1 / 60);
+}
+
+const activityText = (figure: InstanceType<typeof StickFigure>) => figure.label.element.querySelector('.activity')?.textContent;
+
+test('a waiting agent raises its right hand and keeps the rest of its pose', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setActivity('implementing');
+  figure.setAttention('waiting', 12);
+  run(figure, 3);
+
+  assert.ok(figure.joints.rightUpperArm.rotation.x < -2.7, `right arm ${figure.joints.rightUpperArm.rotation.x}`);
+  assert.ok(Math.abs(figure.joints.hips.position.y - 0.5) < 0.02, 'still seated');
+  assert.ok(Math.abs(figure.joints.leftForearm.rotation.x + 1.3) < 0.2, 'left hand still types');
+  assert.equal(activityText(figure), 'Waiting for you · 12 min');
+});
+
+test('the beacon shows only while the agent waits, and the hand comes down after', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setActivity('implementing');
+  figure.setAttention('waiting', 1);
+  const beacon = figure.group.children.find((child) => child instanceof THREE.Mesh && child.geometry instanceof THREE.OctahedronGeometry)!;
+  assert.equal(beacon.visible, true);
+
+  figure.setAttention(undefined, undefined);
+  run(figure, 3);
+  assert.equal(beacon.visible, false);
+  assert.ok(figure.joints.rightUpperArm.rotation.x > -1.5, 'hand back on the keyboard');
+  assert.equal(activityText(figure), 'Implementing');
+});
+
+test('your turn changes the label but raises no hand', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setActivity('idle');
+  figure.setAttention('your-turn', 125);
+  run(figure, 2);
+  assert.equal(activityText(figure), 'Your turn · 2 h');
+  assert.ok(figure.joints.rightUpperArm.rotation.x > -2, 'idle coffee arm');
+});
+
+test('waits read in minutes, hours, then days', () => {
+  assert.deepEqual([formatWait(5), formatWait(59), formatWait(60), formatWait(47 * 60), formatWait(3 * 24 * 60)],
+    ['5 min', '59 min', '1 h', '47 h', '3 d']);
+});

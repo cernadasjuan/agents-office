@@ -37,6 +37,14 @@ Detection runs as a pipeline: the core `claudeSource` (wraps `detectAgents`), th
 
 Plugins in this fork: `plugins/bmad/` (persona hats). Its enricher reads the tool_use blocks of `internal.transcriptPath` incrementally (a per-file offset cache) and `internal.agentType`, and sets persona ids as `badges`. `client.ts` stacks one toon hat per badge on `figure.joints.head` (max 4, then a `+N` marker) and adds the persona names to the label activity line. `roster.ts` is the shared persona list. `pnpm dev:fork` loads the fork plugins.
 
+- **`plugins/github/`**: opt-in with `AGENTS_OFFICE_GITHUB_REPOS=owner/name[,owner/name]`, else it adds nothing. `gh.ts` runs `gh issue list` via `execFile` (5 s, no shell, 60 s cache) and derives the columns. `transcript.ts` finds issue numbers in Bash tool calls. `client.ts` draws wall boards (`KANBAN_BOARD_SLOTS`) and cards in hand. `pnpm dev:fork` loads the fork plugins.
+
+`plugins/herdr/` (enricher, `pnpm dev:fork`): reads only the three `HERDR_*_ID` variables from one batched `ps eww` for new session PIDs, then `herdr tab list` and `herdr workspace list` (cached 10 s, `execFile`, 1.5 s timeout); sets a main session name to its tab label and the workspace as group for the session and its subagents; any failure changes nothing. The command runner is injectable for tests.
+
+### Attention (server/attention.ts, src/ui/attention.ts)
+
+A built-in enricher sets `attention` for main sessions: status `waiting` → `waiting` (blocked), `idle` → `your-turn`, with `waitMinutes` from `statusUpdatedAt`. The figure raises its right hand (the arm overrides the activity pose; the rest stays) and shows an amber beacon while waiting. The label shows "Waiting for you · N min" or "Your turn · N min". The tab title counts both.
+
 ### Activity Inference (server/agentDetector.ts)
 
 The session file `status` comes first (`combineWithSessionStatus`): `waiting` → `meeting` (label "Waiting for you"), `idle` → `idle`, `busy` with a text-only tail → `planning`. Any other status, or none, uses the transcript alone.
@@ -50,6 +58,10 @@ From the transcript, activity is inferred from the **most recent tool_use**, not
 - Last assistant message is text-only → `idle`
 
 The detector reads the session's own `<project-dir>/<sessionId>.jsonl`. Many sessions can share one project directory, so the newest file there may belong to another session. A session without its own transcript shows `idle`. The project directory name is the cwd with every non-alphanumeric character replaced by `-`; older Claude Code versions kept the `.`, so that name is the fallback. Lines are read newest first and joined across 50 KB chunks, up to 4 MB.
+
+### Codex source (server/codexSource.ts)
+
+A built-in source registered in `vitePlugin.ts` with the plugin sources (not as `core`), so a Codex failure drops only Codex agents. It is active only when the Codex home exists (`CODEX_HOME`, else `os.homedir()/.codex`). The `codexHome` option overrides it, and `null` turns it off; tests always pass `null` or a fixture. It walks `sessions/YYYY/MM/DD/rollout-*.jsonl` without following symlinks (realpath containment) and keeps files changed within `RECENT_WINDOW_MS` (10 min), max 50. The first `session_meta` line is canonical: thread `id`, `cwd`, `parent_thread_id` (or `source.subagent.thread_spawn.parent_thread_id`), `subagent_history_start_ordinal`. Activity comes from the newest decisive record in the last 256 KB: shell calls and `CommandExecution` items use the exported `inferBashActivity`; `task_complete`, `turn_aborted` or an assistant message → `idle`. Records before the child history boundary are skipped. Observations use `provider: 'codex'`; the browser appends ` · codex` to the floating label (`StickFigure.setTag`). Presence means "the rollout changed recently", never "the process is alive".
 
 ### Subagent Detection
 
