@@ -1,9 +1,14 @@
 import * as THREE from 'three';
-import { OFFICE } from '../utils/Constants.js';
 
 const MOVE_SPEED = 6;
 const FAST_MULTIPLIER = 2.5;
 const MOUSE_SENSITIVITY = 0.002;
+/** The only limit on first person: the eye stays above the floor. No box: rooms and the roof are open. */
+export const MIN_EYE_HEIGHT = 0.5;
+/** A focus position stays this far inside the floor of the figure's room, clear of its walls. */
+const ROOM_WALL_CLEARANCE = 0.6;
+/** A focus position closer than this to the figure tries the direction toward the room center. */
+const MIN_FOCUS_DISTANCE = 2;
 
 const keys = new Set<string>();
 let yaw = 0;
@@ -64,11 +69,41 @@ export function freeCameraLook(camera: THREE.Camera): { position: THREE.Vector3;
   return { position: camera.position.clone(), lookAt: camera.position.clone().addScaledVector(forward, 5) };
 }
 
-export function clampToOffice(pos: THREE.Vector3): void {
-  const m = OFFICE.margin;
-  pos.x = THREE.MathUtils.clamp(pos.x, -OFFICE.halfX + m, OFFICE.halfX - m);
-  pos.z = THREE.MathUtils.clamp(pos.z, -OFFICE.halfZ + m, OFFICE.halfZ - m);
-  pos.y = THREE.MathUtils.clamp(pos.y, 0.5, OFFICE.height - m);
+export function keepAboveFloor(pos: THREE.Vector3): void {
+  pos.y = Math.max(pos.y, MIN_EYE_HEIGHT);
+}
+
+function clampInto(point: THREE.Vector3, room: THREE.Box3): THREE.Vector3 {
+  const inset = (min: number, max: number) => (max - min > 2 * ROOM_WALL_CLEARANCE ? ROOM_WALL_CLEARANCE : (max - min) / 2);
+  const ix = inset(room.min.x, room.max.x);
+  const iz = inset(room.min.z, room.max.z);
+  point.x = THREE.MathUtils.clamp(point.x, room.min.x + ix, room.max.x - ix);
+  point.z = THREE.MathUtils.clamp(point.z, room.min.z + iz, room.max.z - iz);
+  return point;
+}
+
+function flatDistance(a: THREE.Vector3, b: THREE.Vector3): number {
+  return Math.hypot(a.x - b.x, a.z - b.z);
+}
+
+/**
+ * Where the camera stands to look at a figure: `distance` back along `away`
+ * (flat) and `height` up. With the floor box of the figure's room, the point
+ * stays inside that room, so the camera never ends behind or inside a wall.
+ * When that leaves the camera too close, it backs off toward the room center.
+ */
+export function focusPosition(lookAt: THREE.Vector3, away: THREE.Vector3, room: THREE.Box3 | null, distance: number, height: number): THREE.Vector3 {
+  const at = (direction: THREE.Vector3) => {
+    const flat = new THREE.Vector3(direction.x, 0, direction.z);
+    if (flat.lengthSq() < 1e-9) flat.set(0, 0, 1);
+    const point = lookAt.clone().addScaledVector(flat.normalize(), distance);
+    point.y += height;
+    return room ? clampInto(point, room) : point;
+  };
+  const position = at(away);
+  if (!room || flatDistance(position, lookAt) >= MIN_FOCUS_DISTANCE) return position;
+  const toCenter = at(room.getCenter(new THREE.Vector3()).sub(lookAt));
+  return flatDistance(toCenter, lookAt) > flatDistance(position, lookAt) ? toCenter : position;
 }
 
 export function updateFreeCamera(camera: THREE.PerspectiveCamera, delta: number): void {
@@ -98,5 +133,5 @@ export function updateFreeCamera(camera: THREE.PerspectiveCamera, delta: number)
     camera.position.add(move);
   }
 
-  clampToOffice(camera.position);
+  keepAboveFloor(camera.position);
 }

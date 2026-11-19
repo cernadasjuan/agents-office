@@ -3,7 +3,7 @@ import { registerExtension } from '../extensions.js';
 import { BuildingLayout } from './building/BuildingLayout.js';
 
 // Fork add-on: the growing building with home desks, trips and the user's office.
-// It is the default layout in this fork; `?layout=activity` or key L returns to the original.
+// It is the default layout in this fork and opens in the overview; `?layout=activity` or Shift+L returns to the original.
 let activeBuilding: BuildingLayout | null = null;
 
 registerLayout('building', (scene, stations) => {
@@ -11,7 +11,7 @@ registerLayout('building', (scene, stations) => {
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
   });
   return activeBuilding;
-}, { makeDefault: true });
+}, { makeDefault: true, defaultView: 'overview' });
 
 // Rooms from server plugins (mission war rooms) become rooms of the building.
 registerExtension({
