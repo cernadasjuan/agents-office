@@ -4,6 +4,8 @@ import { registerExtension, type OfficeExtension, type World, type WorldBoard } 
 import { IssueCardBatch } from './cards.js';
 import { canvas, fitted } from './text.js';
 import { installIssueLineStyle, MAX_IDS, showIssueIds } from './labelIds.js';
+// Issue links in the agent card.
+import './links.js';
 
 /**
  * Browser part of the GitHub plugin: kanban boards on the walls and issue

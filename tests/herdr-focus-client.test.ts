@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { JSDOM } from 'jsdom';
 import type { AgentInfo } from '../src/agents/AgentData.js';
-import { FocusClient, HerdrFocusCard, type FetchLike } from '../plugins/herdr/client.js';
+import { FocusClient, focusCardAction, type FetchLike } from '../plugins/herdr/client.js';
+import { AgentCard, registerCardAction, resetCardRegistry } from '../src/ui/AgentCard.js';
+import { SelectionState } from '../src/scene/Selection.js';
 
 function installDocument(t: TestContext): HTMLElement {
   const dom = new JSDOM('<!doctype html><html><body></body></html>');
@@ -63,32 +65,35 @@ test('each failure gives a short text result', async () => {
   assert.equal(await new FocusClient(fetch).focus(ID), 'Focus is not enabled');
 });
 
-test('the button shows only for a selected agent that advertises focus', (t) => {
-  const body = installDocument(t);
-  const card = new HerdrFocusCard(body, new FocusClient(fakeFetch([]).fetch));
-  const button = () => body.querySelector<HTMLButtonElement>('#herdr-focus-card button')!;
-  const root = () => body.querySelector<HTMLElement>('#herdr-focus-card')!;
-  card.update([focusable, plain], null);
-  assert.equal(root().hidden, true);
-  card.update([focusable, plain], plain.id);
-  assert.equal(root().hidden, true);
-  card.update([focusable, plain], ID);
-  assert.equal(root().hidden, false);
-  assert.equal(button().textContent, 'Focus in herdr');
-  card.update([{ ...focusable, extras: {} }], ID);
-  assert.equal(root().hidden, true);
+test('the focus card action applies only to agents that advertise focus, main or subagent', () => {
+  const action = focusCardAction(new FocusClient(fakeFetch([]).fetch));
+  assert.equal(action.label, 'Focus in herdr');
+  assert.equal(action.available(focusable), true);
+  assert.equal(action.available({ ...focusable, extras: { parentId: 'p', actions: ['focus'] } }), true);
+  assert.equal(action.available(plain), false);
+  assert.equal(action.available({ ...focusable, extras: {} }), false);
 });
 
-test('a click posts the focus request and shows the result as text', async (t) => {
-  const body = installDocument(t);
+test('the action posts only on run (the click) and returns the result text', async () => {
   const { fetch, sent } = fakeFetch([{ status: 200, body: { token: 't' } }, { status: 200, body: { ok: true } }]);
-  const card = new HerdrFocusCard(body, new FocusClient(fetch));
-  card.update([{ ...focusable, name: '<img src=x onerror=alert(1)>' }], ID);
-  assert.equal(body.querySelector('img'), null);
-  await card.click();
+  const action = focusCardAction(new FocusClient(fetch));
+  assert.equal(sent.length, 0, 'nothing is sent before the click');
+  assert.equal(await action.run(focusable), 'Focused in herdr');
   assert.deepEqual(JSON.parse(sent[1].init!.body!), { agent: ID });
-  const toast = body.querySelector<HTMLElement>('#herdr-focus-toast')!;
-  assert.equal(toast.hidden, false);
-  assert.equal(toast.textContent, 'Focused in herdr');
-  assert.equal(toast.children.length, 0);
+});
+
+test('the herdr plugin puts its button in the agent card, not in a card of its own', async (t) => {
+  const body = installDocument(t);
+  const selection = new SelectionState();
+  body.innerHTML = '<div id="ui-panel"></div>';
+  const card = new AgentCard(body, { anchor: body.querySelector<HTMLElement>('#ui-panel')!, selection });
+  registerCardAction(focusCardAction(new FocusClient(fakeFetch([]).fetch)));
+  t.after(() => resetCardRegistry());
+  card.render([focusable, plain]);
+  selection.select(ID);
+  const buttons = [...body.querySelectorAll<HTMLButtonElement>('#agent-inspector .inspector-actions button')];
+  assert.deepEqual(buttons.map((button) => button.textContent), ['Focus in herdr']);
+  assert.equal(body.querySelector('#herdr-focus-card'), null);
+  selection.select(plain.id);
+  assert.equal(body.querySelectorAll('#agent-inspector .inspector-actions button').length, 0);
 });

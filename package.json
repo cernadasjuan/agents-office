@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "dev": "vite",
-    "dev:fork": "AGENTS_OFFICE_PLUGINS=herdr,github,bmad,missions,library vite",
+    "dev:fork": "AGENTS_OFFICE_PLUGINS=herdr,github,bmad,missions,library AGENTS_OFFICE_HERDR_FOCUS=1 vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --import tsx --test tests/*.test.ts",
