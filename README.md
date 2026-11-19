@@ -140,6 +140,16 @@ Subagents never ask; their parent does. Without a status in the session file, no
 - **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads. A subagent wears its parent's color and stands at 85% of the height.
 - **Label:** the name and the activity text float over each figure. The side panel lists the same agents. Its menu lets you preview another activity until the next update.
 
+## Fork layout: the growing building
+
+This fork adds a second layout, `building`, and makes it the default. `?layout=activity` or key L returns to the original layout.
+
+- **Your office:** the first room, east of the hall. Agents that wait for your permission or answer walk in and queue in front of your desk, the longest wait first. When one leaves, the line moves up.
+- **Home desks:** each session gets its own desk for its whole life. Coding, debugging and deploying happen there.
+- **Trips:** planning goes to a whiteboard, research to a bookshelf, tests to a test station, reviews and docs to a writing desk, breaks to a sofa or the coffee machine. The agent walks back home when desk work starts again. A trip starts only when the new activity lasts 4 seconds, so short tool calls do not make agents walk.
+- **Subagents** stand around their parent's desk.
+- **Growth:** when a kind of station runs out, the building adds a room of that kind next to the others: desks, planning room, library, test lab, writing room, lounge, or another waiting room. Rooms are never removed, and the browser remembers them.
+
 ## Plugins
 
 Optional plugins add data from other tools. None run by default.

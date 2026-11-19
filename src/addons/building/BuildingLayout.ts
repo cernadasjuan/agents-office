@@ -1,0 +1,298 @@
+import * as THREE from 'three';
+import type { Activity } from '../../agents/ActivityAnimations.js';
+import { OFFICE_WALLS, type Station } from '../../scene/Office.js';
+import { OFFICE } from '../../utils/Constants.js';
+import type { LayoutAgent, LayoutMove, LayoutStrategy, Seat } from '../../layout/LayoutStrategy.js';
+import { HALL, matchingDoor, slotFor, type Door } from './RoomPlanner.js';
+import { buildRoom, buildWalls, ROOM_STATION_TYPE, type RoomKind } from './rooms.js';
+
+/** Work that happens at the agent's own desk. Everything else is a trip. */
+const DESK_WORK = new Set<Activity>(['implementing', 'debugging', 'deploying']);
+const TRIP_STATION: Partial<Record<Activity, string>> = {
+  planning: 'planning',
+  researching: 'researching',
+  testing: 'testing',
+  reviewing: 'reviewing',
+  writing_docs: 'reviewing',
+  idle: 'idle',
+};
+const ROOM_FOR_STATION: Record<string, RoomKind> = Object.fromEntries(
+  Object.entries(ROOM_STATION_TYPE).map(([kind, type]) => [type, kind as RoomKind]),
+) as Record<string, RoomKind>;
+
+export const BUILDING_STORAGE_KEY = 'agents-office.building.rooms';
+const DEFAULT_DWELL_MS = 4000;
+const QUEUE_REFRESH_MS = 500;
+
+type Target = 'home' | 'pod' | 'queue' | `trip:${string}`;
+
+interface AgentState {
+  agent: LayoutAgent;
+  target: Target | null;
+  seat: string | null;
+  home: string | null;
+  pending: { target: Target; since: number } | null;
+  queuedAt: number | null;
+}
+
+interface RoomRecord {
+  kind: RoomKind;
+  index: number;
+  group: THREE.Group;
+  extraDoors: Door[];
+}
+
+export interface BuildingOptions {
+  now?: () => number;
+  dwellMs?: number;
+  storage?: Pick<Storage, 'getItem' | 'setItem'>;
+}
+
+/**
+ * The fork's building layout. Each session has a home desk for its life and
+ * walks to shared stations for other work. Agents that wait for the user queue
+ * in the user's office. Subagents gather at their parent's desk. When a kind of
+ * station runs out, the building rents a new room next to the others and never
+ * gives it back.
+ */
+export class BuildingLayout implements LayoutStrategy {
+  readonly id = 'building';
+  private agents = new Map<string, AgentState>();
+  private rooms: RoomRecord[] = [];
+  private hallWalls: THREE.Group | null = null;
+  private now: () => number;
+  private dwellMs: number;
+  private storage: BuildingOptions['storage'];
+  private lastQueueRefresh = -Infinity;
+
+  constructor(private scene: THREE.Scene, private stations: Map<string, Station>, options: BuildingOptions = {}) {
+    this.now = options.now ?? (() => performance.now());
+    this.dwellMs = options.dwellMs ?? DEFAULT_DWELL_MS;
+    this.storage = options.storage;
+    this.hideHallSideWalls();
+    const remembered = this.rememberedRooms();
+    for (const kind of remembered.length > 0 ? remembered : ['office' as RoomKind]) this.addRoom(kind, false);
+    this.saveRooms();
+  }
+
+  get roomKinds(): RoomKind[] {
+    return this.rooms.map((room) => room.kind);
+  }
+
+  seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
+    const state = this.stateOf(agent);
+    const desired = this.targetFor(state);
+    if (previous === null || state.target === null) return this.assign(state, desired);
+    if (desired === state.target) {
+      state.pending = null;
+      return null;
+    }
+    // Waiting for the user is urgent; any other change waits for the dwell time
+    if (desired === 'queue') return this.assign(state, desired);
+    if (state.pending?.target !== desired) state.pending = { target: desired, since: this.now() };
+    return null;
+  }
+
+  release(agentId: string): void {
+    const state = this.agents.get(agentId);
+    if (!state) return;
+    this.free(state.seat);
+    if (state.home !== state.seat) this.free(state.home);
+    this.agents.delete(agentId);
+  }
+
+  update(): LayoutMove[] {
+    const now = this.now();
+    const moves: LayoutMove[] = [];
+    for (const state of this.agents.values()) {
+      if (!state.pending || now - state.pending.since < this.dwellMs) continue;
+      const seat = this.assign(state, state.pending.target);
+      if (seat) moves.push({ agentId: state.agent.id, seat });
+    }
+    if (now - this.lastQueueRefresh >= QUEUE_REFRESH_MS) {
+      this.lastQueueRefresh = now;
+      moves.push(...this.orderQueue());
+    }
+    return moves;
+  }
+
+  // --- Targets ---
+
+  private targetFor(state: AgentState): Target {
+    const { agent } = state;
+    const parentId = agent.extras?.parentId;
+    if (!parentId && (agent.extras?.attention === 'waiting' || agent.activity === 'meeting')) return 'queue';
+    if (parentId && this.agents.get(parentId)?.home) return 'pod';
+    if (DESK_WORK.has(agent.activity)) return 'home';
+    return `trip:${TRIP_STATION[agent.activity] ?? 'idle'}`;
+  }
+
+  private assign(state: AgentState, target: Target): Seat {
+    if (state.seat && state.seat !== state.home) this.free(state.seat);
+    state.pending = null;
+    state.queuedAt = target === 'queue' ? (state.queuedAt ?? this.now()) : null;
+    state.target = target;
+
+    let key: string;
+    if (target === 'home') key = this.homeOf(state);
+    else if (target === 'pod') key = this.claim(this.podKeys(this.agents.get(state.agent.extras!.parentId!)!), 'pod');
+    else if (target === 'queue') key = this.claimOfType('queue');
+    else key = this.claimOfType(target.slice('trip:'.length));
+    state.seat = key;
+    return this.seat(key);
+  }
+
+  private homeOf(state: AgentState): string {
+    if (!state.home) state.home = this.claimOfType('implementing');
+    return state.home;
+  }
+
+  /** Four spots around a desk for the subagents of its owner, more in a second ring when needed. */
+  private podKeys(parent: AgentState): string[] {
+    const desk = this.stations.get(parent.home!)!;
+    const facing = new THREE.Vector3().subVectors(desk.lookAt, desk.position).setY(0).normalize();
+    const side = new THREE.Vector3(-facing.z, 0, facing.x);
+    const keys: string[] = [];
+    const offsets: Array<[number, number]> = [[1.0, 0.1], [-1.0, 0.1], [0.55, -0.9], [-0.55, -0.9], [1.4, -0.9], [-1.4, -0.9]];
+    offsets.forEach(([across, ahead], i) => {
+      const key = `${parent.home}_pod${i}`;
+      if (!this.stations.has(key)) {
+        const position = desk.position.clone().addScaledVector(side, across).addScaledVector(facing, ahead);
+        this.stations.set(key, { type: 'pod', position, lookAt: desk.lookAt.clone(), occupied: false, posture: 'standing' });
+      }
+      keys.push(key);
+    });
+    return keys;
+  }
+
+  // --- Queue ---
+
+  private orderQueue(): LayoutMove[] {
+    const waiting = [...this.agents.values()]
+      .filter((state) => state.target === 'queue')
+      .sort((a, b) => (b.agent.extras?.waitMinutes ?? 0) - (a.agent.extras?.waitMinutes ?? 0) || (a.queuedAt ?? 0) - (b.queuedAt ?? 0));
+    const spots = this.keysOfType('queue');
+    while (spots.length < waiting.length) {
+      this.addRoom('office');
+      spots.splice(0, spots.length, ...this.keysOfType('queue'));
+    }
+    const moves: LayoutMove[] = [];
+    for (const state of waiting) this.free(state.seat);
+    waiting.forEach((state, i) => {
+      const key = spots[i];
+      this.stations.get(key)!.occupied = true;
+      if (state.seat !== key) {
+        state.seat = key;
+        moves.push({ agentId: state.agent.id, seat: this.seat(key) });
+      }
+    });
+    return moves;
+  }
+
+  // --- Stations and rooms ---
+
+  private keysOfType(type: string): string[] {
+    return [...this.stations.entries()].filter(([, station]) => station.type === type).map(([key]) => key);
+  }
+
+  private claimOfType(type: string): string {
+    const free = this.keysOfType(type).find((key) => !this.stations.get(key)!.occupied);
+    if (free) return this.claim([free], type);
+    this.addRoom(ROOM_FOR_STATION[type] ?? 'lounge');
+    return this.claimOfType(type);
+  }
+
+  private claim(keys: string[], type: string): string {
+    const free = keys.find((key) => !this.stations.get(key)!.occupied);
+    if (!free) {
+      // More subagents than pod spots: they stand at the next free lounge seat
+      return type === 'pod' ? this.claimOfType('idle') : this.claimOfType(type);
+    }
+    this.stations.get(free)!.occupied = true;
+    return free;
+  }
+
+  private free(key: string | null): void {
+    if (!key) return;
+    const station = this.stations.get(key);
+    if (station) station.occupied = false;
+  }
+
+  private seat(key: string): Seat {
+    const station = this.stations.get(key)!;
+    return { key, position: station.position, lookAt: station.lookAt, posture: station.posture };
+  }
+
+  private stateOf(agent: LayoutAgent): AgentState {
+    let state = this.agents.get(agent.id);
+    if (!state) {
+      state = { agent, target: null, seat: null, home: null, pending: null, queuedAt: null };
+      this.agents.set(agent.id, state);
+    }
+    state.agent = agent;
+    return state;
+  }
+
+  private addRoom(kind: RoomKind, save = true): void {
+    const index = this.rooms.length;
+    const slot = slotFor(index);
+    const built = buildRoom(kind, slot, index, []);
+    const record: RoomRecord = { kind, index, group: built.group, extraDoors: [] };
+    this.rooms.push(record);
+    this.scene.add(built.group);
+    for (const [key, station] of built.stations) this.stations.set(key, station);
+
+    if (slot.ring === 0) this.rebuildHallWalls();
+    else {
+      // Open the wall of the room inside this one, so the new room has a way in
+      const inner = this.rooms[index - 7];
+      inner.extraDoors.push(matchingDoor(slot));
+      this.rebuildRoomWalls(inner);
+    }
+    if (save) this.saveRooms();
+  }
+
+  private rebuildRoomWalls(room: RoomRecord): void {
+    const slot = slotFor(room.index);
+    const old = room.group.getObjectByName('room-walls');
+    if (old) room.group.remove(old);
+    const walls = buildWalls(slot.rect, [slot.door, ...room.extraDoors]);
+    walls.name = 'room-walls';
+    room.group.add(walls);
+  }
+
+  /** The hall keeps its furniture; its four side walls are replaced by walls with a door for each attached room. */
+  private hideHallSideWalls(): void {
+    const original = this.scene.getObjectByName(OFFICE_WALLS);
+    original?.children.forEach((child) => {
+      if (!(child instanceof THREE.Mesh) || !(child.geometry instanceof THREE.BoxGeometry)) return;
+      if (child.geometry.parameters.height === OFFICE.height) child.visible = false;
+    });
+  }
+
+  private rebuildHallWalls(): void {
+    if (this.hallWalls) this.scene.remove(this.hallWalls);
+    const doors = this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0).map(matchingDoor);
+    this.hallWalls = buildWalls(HALL, doors, OFFICE.height, ['south', 'west']);
+    this.hallWalls.name = 'building-hall-walls';
+    this.scene.add(this.hallWalls);
+  }
+
+  private rememberedRooms(): RoomKind[] {
+    try {
+      const parsed: unknown = JSON.parse(this.storage?.getItem(BUILDING_STORAGE_KEY) ?? '[]');
+      const kinds = Object.keys(ROOM_STATION_TYPE);
+      return Array.isArray(parsed) ? parsed.filter((kind): kind is RoomKind => kinds.includes(kind)).slice(0, 200) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private saveRooms(): void {
+    try {
+      this.storage?.setItem(BUILDING_STORAGE_KEY, JSON.stringify(this.roomKinds));
+    } catch {
+      // Storage full or blocked: the building still works for this page
+    }
+  }
+}
