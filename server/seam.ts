@@ -17,6 +17,8 @@ export interface DisplayExtras {
   badges?: string[];
   issues?: Array<{ number: number; title: string; column?: string }>;
   roomKey?: string;
+  /** One role token, for example 'librarian'. */
+  role?: string;
 }
 
 /** One agent as the server sees it. `internal` never leaves the server. */
@@ -158,6 +160,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId) {
       ...(badges.length > 0 ? { badges } : {}),
       ...(issues ? { issues } : {}),
       ...(extras.roomKey ? { room: publicId(`room:${extras.roomKey}`) } : {}),
+      ...(typeof extras.role === 'string' && BADGE.test(extras.role) ? { role: extras.role } : {}),
     };
   });
 }

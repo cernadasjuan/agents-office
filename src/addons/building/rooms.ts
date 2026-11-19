@@ -193,9 +193,17 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
       break;
     }
     case 'library': {
+      // Shelves on the far wall and on both side walls: the knowledge base of the office
       for (const along of rows(4, 2.5)) {
         place(group, createBookshelf(), frame.point(along, ROOM_SIZE - 0.5), frame.faceDoor);
         stations.set(key(stations.size), station('researching', frame.point(along, ROOM_SIZE - 1.5), frame.point(along, ROOM_SIZE - 0.5, 1.0)));
+      }
+      for (const side of [-1, 1]) {
+        for (const depth of [3.5, 6, 8.5]) {
+          const wallAlong = side * (ROOM_SIZE / 2 - 0.5);
+          place(group, createBookshelf(), frame.point(wallAlong, depth), frame.faceDoor + side * Math.PI / 2);
+          stations.set(key(stations.size), station('researching', frame.point(wallAlong - side, depth), frame.point(wallAlong, depth, 1.0)));
+        }
       }
       break;
     }

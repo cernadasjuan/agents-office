@@ -75,6 +75,8 @@ export class BuildingLayout implements LayoutStrategy {
     this.hideHallSideWalls();
     const remembered = this.rememberedRooms();
     for (const kind of remembered.length > 0 ? remembered : ['office' as RoomKind]) this.addRoom(kind, false);
+    // The Library is its own room from the start: research trips and librarians go there
+    if (!this.roomKinds.includes('library')) this.addRoom('library', false);
     this.saveRooms();
   }
 
@@ -163,6 +165,8 @@ export class BuildingLayout implements LayoutStrategy {
     const room = agent.extras?.room ? this.missionRooms.get(agent.extras.room) : undefined;
     if (!parentId && room && !room.locked) return `room:${room.id}`;
     const parent = parentId ? this.agents.get(parentId) : undefined;
+    // A librarian fetches from the Library while it researches, and brings it back to its agent otherwise
+    if (agent.extras?.role === 'librarian' && agent.activity === 'researching') return 'trip:researching';
     if (parent && (parent.home || parent.target?.startsWith('room:'))) return 'pod';
     if (DESK_WORK.has(agent.activity)) return 'home';
     return `trip:${TRIP_STATION[agent.activity] ?? 'idle'}`;
@@ -245,7 +249,11 @@ export class BuildingLayout implements LayoutStrategy {
   }
 
   private claimOfType(type: string): string {
-    const free = this.keysOfType(type).find((key) => !this.stations.get(key)!.occupied);
+    // Research prefers the Library room's shelves over the two hall shelves
+    const keys = type === 'researching'
+      ? [...this.keysOfType(type).filter((key) => key.startsWith('room')), ...this.keysOfType(type).filter((key) => !key.startsWith('room'))]
+      : this.keysOfType(type);
+    const free = keys.find((key) => !this.stations.get(key)!.occupied);
     if (free) return this.claim([free], type);
     this.addRoom(ROOM_FOR_STATION[type] ?? 'lounge');
     return this.claimOfType(type);
