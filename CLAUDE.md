@@ -45,6 +45,10 @@ Plugins in this fork: `plugins/bmad/` (persona hats). Its enricher reads the too
 
 A built-in enricher sets `attention` for main sessions: status `waiting` → `waiting` (blocked), `idle` → `your-turn`, with `waitMinutes` from `statusUpdatedAt`. The figure raises its right hand (the arm overrides the activity pose; the rest stays) and shows an amber beacon while waiting. The label shows "Waiting for you · N min" or "Your turn · N min". The tab title counts both.
 
+### Fork add-on: building layout (src/addons/building*)
+
+`src/addons/building.ts` registers `BuildingLayout` as the default layout (fork only, tier T3). `RoomPlanner.ts` is pure geometry: 12x12 room slots around the 30x26 hall (first ring of 7, the office first at east-center; later rings shift outward and open toward the inner room), door gaps and wall pieces. `rooms.ts` builds a room in a local frame (`RoomFrame`: depth from the door wall, position along it): floor marked `userData.floor`, low walls named `room-walls`, a CSS2D sign, furniture and stations. `BuildingLayout.ts` keeps per-agent state (home desk, current seat, target, pending trip, queue time): desk work at home, trips to station types after `dwellMs` (4 s), main sessions with attention `waiting` or activity `meeting` go to `queue` spots at once and are reordered by `waitMinutes` in `update()`, subagents use pod spots around the parent desk. An exhausted station type adds a room (`ROOM_STATION_TYPE`), saved in `localStorage` (`agents-office.building.rooms`) and rebuilt on load. The hall side walls are hidden and replaced by `building-hall-walls` with a door per first-ring room.
+
 ### Activity Inference (server/agentDetector.ts)
 
 The session file `status` comes first (`combineWithSessionStatus`): `waiting` → `meeting` (label "Waiting for you"), `idle` → `idle`, `busy` with a text-only tail → `planning`. Any other status, or none, uses the transcript alone.
