@@ -101,6 +101,17 @@ Subagents (spawned via the Agent tool) are detected only from the parent's own `
 
 `sessionName`: a main session uses the session file `name` when `nameSource` is a string other than `derived` (seen: `auto`; `derived` is an automatic `<folder>-xx` name). Otherwise, or when the name is not 1 to 80 characters after trimming, it uses `path.basename(cwd)`. `subagentName`: the meta `name` (Claude Code writes it for team agents), else `description`, else `agentType`, else `subagent`. The herdr enricher runs later and can still replace a main session name with its tab label. `projectAgents` caps the name at 60 characters.
 
+### Rendering budget (src/scene/FrameLoop.ts)
+
+`FrameLoop` runs the logic at most 30 times a second (`RenderScheduler`) and renders only when something moved: a figure part (`FigureBatch.sync`), the camera, a static batch, the view mode, a selection (the ring pulses), or `sceneChanged()` (after each poll and world update). Without motion it renders once per second. `scene.matrixWorldAutoUpdate` is false: the loop updates world matrices once per tick.
+
+- **Static merge** (`src/scene/StaticMerge.ts`): `markStatic(root, { zone, castShadow })` marks furniture that does not move (the hall, each room, each mission room, the hall walls, each lamp in place). `StaticBatch.update` merges its `MeshToonMaterial` meshes into one mesh per material and shadow flags. Sources stay in the graph on `STATIC_SOURCE_LAYER` (31), so names, `visible` and wall rebuilds keep working; a batch rebuilds when a source is added, removed or hidden. Not merged: other materials (canvas boards), transparent meshes, and meshes under `userData.dynamic` or `userData.overviewHidden`. Rooms and mission rooms cast no shadow: they lie outside the cone of the three hall lamps.
+- **Figure batch** (`src/characters/FigureBatch.ts`): parts made in `StickFigureParts.ts` (`userData.figurePart`, shared geometries) draw as one `InstancedMesh` per shape and material. The parts move to `FIGURE_PART_LAYER` (30); `pickAgent` enables it on its ray. Meshes attached to a part (hats, a book) stay on layer 0.
+- **Shadows**: `shadowMap.autoUpdate = false`. `needsUpdate` is set on a batch rebuild, a view mode change, a figure set change, new shadow casters (`casterSignature`), or a moving figure inside a shadow light's frustum.
+- **Overview**: `renderQuality` sets the pixel ratio to at most 1.5 and `BasicShadowMap`; first person keeps 2 and `PCFShadowMap`.
+- **Labels**: `renderOnScreenLabels` hides labels outside the screen during the CSS2D pass only.
+- **Budget test**: `tests/render-budget.test.ts` builds the office at the real size (`tests/real-size-office.ts`) and fails above `DRAW_CALL_BUDGET` (500), counting camera calls plus shadow casters times shadow lights. `pnpm measure` prints the numbers; `?debug=1` exposes `window.__officeStats`.
+
 ### Key Patterns
 
 - **Toon shading**: All meshes use `MeshToonMaterial` with a 4-step gradient map, cached in `Materials.ts`

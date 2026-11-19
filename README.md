@@ -301,6 +301,7 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 
 - **Server**: Vite plugin reads Claude session files, validates PIDs, combines the session status with the newest tool call of the session's own transcript, and detects that session's active subagents
 - **Client**: Three.js scene with toon-shaded stick figures, station-based layout, walking animations, and per-activity poses
+- **Rendering**: static furniture draws merged (one mesh per material), figure parts draw instanced, and shadow maps redraw only when a caster changes. Frames render on demand, at most 30 per second, and once per second when nothing moves. The overview uses at most 1.5 pixels per CSS pixel and hard shadows. At 25 rooms and 40 agents a frame takes about 340 draw calls (shadow pass included) instead of about 10,000. `pnpm measure` prints the count; `?debug=1` exposes `window.__officeStats` (renders, draw calls, render times)
 
 ## Requirements
 

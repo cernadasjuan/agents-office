@@ -8,6 +8,7 @@ import { buildRoom, buildWalls, ROOM_STATION_TYPE, type RoomKind } from './rooms
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
 import type { WorldRoom } from '../../extensions.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
+import { markStatic } from '../../scene/StaticMerge.js';
 
 /** Work that happens at the agent's own desk. Everything else is a trip. */
 const DESK_WORK = new Set<Activity>(['implementing', 'debugging', 'deploying']);
@@ -369,6 +370,7 @@ export class BuildingLayout implements LayoutStrategy {
     ].map(matchingDoor);
     this.hallWalls = buildWalls(HALL, doors, OFFICE.height, ['south', 'west']);
     this.hallWalls.name = 'building-hall-walls';
+    markStatic(this.hallWalls, { zone: 'hall' });
     this.scene.add(this.hallWalls);
   }
 

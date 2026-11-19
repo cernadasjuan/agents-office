@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { createScene } from './scene/SceneSetup.js';
 import { createOffice } from './scene/Office.js';
 import { AgentManager } from './agents/AgentManager.js';
@@ -10,6 +9,8 @@ import { chooseLayoutId, createLayout, layoutIds, rememberLayoutId } from './lay
 import { activeExtensions, setWorld, type World } from './extensions.js';
 import { tabTitleFor } from './ui/attention.js';
 import { LabelDetailController } from './ui/LabelDetail.js';
+import { FrameLoop } from './scene/FrameLoop.js';
+import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
@@ -83,6 +84,7 @@ function buildUI(): void {
   view.agentsChanged(agents);
   labelDetail.refresh();
   for (const extension of activeExtensions(scene)) extension.agentsChanged?.(agentManager.getAgents());
+  frameLoop.sceneChanged();
 }
 
 // World: rooms and boards from server plugins, every 10 s, one request at a time.
@@ -96,6 +98,7 @@ async function pollWorld(): Promise<void> {
     const world = (await res.json()) as World;
     setWorld(world);
     for (const extension of activeExtensions(scene)) extension.worldChanged?.(world);
+    frameLoop.sceneChanged();
   } catch {
     // Keep the last world
   } finally {
@@ -110,21 +113,25 @@ const poller = new AgentPoller(agentManager);
 poller.start(3000, buildUI);
 
 // --- Render loop ---
-const clock = new THREE.Clock();
-
-function animate(): void {
-  requestAnimationFrame(animate);
-
-  const delta = clock.getDelta();
-  const elapsed = clock.getElapsedTime();
-
-  view.update(elapsed, delta);
-  agentManager.update(elapsed, delta);
-  labelDetail.update(performance.now());
-  for (const extension of activeExtensions(scene)) extension.update?.(elapsed, delta);
-
-  renderer.render(scene, camera);
-  labelRenderer.render(scene, camera);
-}
-
-animate();
+// On demand, at most 30 fps, once a second when nothing moves. `?debug=1` exposes `window.__officeStats`.
+const stats = isDebugMode(window.location.search) ? new FrameStats() : null;
+const frameLoop = new FrameLoop({
+  scene,
+  camera,
+  renderer,
+  labelRenderer,
+  update(elapsed, delta) {
+    view.update(elapsed, delta);
+    agentManager.update(elapsed, delta);
+    labelDetail.update(performance.now());
+    for (const extension of activeExtensions(scene)) extension.update?.(elapsed, delta);
+  },
+  figures: () => agentManager.getAgents().map((managed) => managed.figure.group),
+  mode: () => view.mode,
+  animating: () => selectedAgentId() !== null,
+  events: window,
+  devicePixelRatio: () => window.devicePixelRatio,
+  stats,
+});
+if (stats) Object.assign(window, { __officeStats: Object.assign(stats, { drawCalls: () => frameLoop.drawCalls() }) });
+frameLoop.start((callback) => requestAnimationFrame(callback));
