@@ -84,6 +84,24 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 | Only read-only programs: `ls`, `cat`, `rg`, `grep`, `find`, `git status`... | Researching (bookshelf) |
 | Anything else | Implementing (desk) |
 
+### Codex agents
+
+If a Codex home exists (`CODEX_HOME`, else `~/.codex`), the app also shows Codex threads. It reads only the rollout files in `sessions/YYYY/MM/DD/rollout-*.jsonl`. It does not read `auth.json`, `config.toml`, `history.jsonl` or the memory files. Without a Codex home, nothing changes.
+
+- **Presence:** a thread is shown when its rollout file changed in the last 10 minutes. This is recent activity, not proof of a running process. A long silent command, or an open thread that waits for you, can disappear. A closed thread can stay for up to 10 minutes.
+- **Activity:** from the newest record in the last 256 KB of the rollout. Shell commands use the Bash rules above. A file change is implementing, a read-only MCP call or a web search is researching, a plan or subagent step is planning, and a question for you is waiting. A completed or aborted turn, or a final assistant message, is taking a break. A wrapped script (`exec`) is implementing; the app never runs or evaluates it.
+- **Name and parent:** the folder name of the thread's working directory, else `codex`. A spawned child links to its parent only when the parent is also shown. Records that a child copies from its parent are ignored.
+- **Label:** the floating label adds `· codex` after the activity.
+- Tested against the rollout layout of Codex 0.169.0. Unknown records are skipped. Symlinks inside the sessions folder are not followed.
+
+### Who needs you
+
+- **Blocked:** a session that waits for your permission or answer raises its right hand, shows an amber marker over its head, and its label reads "Waiting for you · 12 min".
+- **Your turn:** a session that finished its turn shows "Your turn · 5 min" in its label, with no marker.
+- **Tab title:** `(2) +5 · Agents Office` means 2 blocked and 5 waiting for your next prompt.
+
+Subagents never ask; their parent does. Without a status in the session file, nothing changes.
+
 ### Location: stations
 
 | Station | Where | Seats | Activities |
@@ -93,7 +111,8 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 | Whiteboards | Back wall | 2 | Planning |
 | Bookshelves | Left wall | 2 | Researching |
 | Test stations | Right side | 2 | Testing |
-| Coffee machine | Front left | 2 | Taking a break |
+| Coffee machine | Front left | 2 | Taking a break (standing) |
+| Lounge sofas | Front left | 6 | Taking a break (seated) |
 | Meeting table | Front right | 3 | Waiting for you |
 
 - A new agent appears directly at its seat. When its activity changes, it walks to a seat of the new type.
@@ -118,7 +137,7 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 ### Identity: name, color, label
 
 - **Name:** the folder name of the session. Subagents show `>>` followed by their task description.
-- **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads.
+- **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads. A subagent wears its parent's color and stands at 85% of the height.
 - **Label:** the name and the activity text float over each figure. The side panel lists the same agents. Its menu lets you preview another activity until the next update.
 
 ## Plugins
@@ -132,7 +151,7 @@ npx agents-office --plugin name1 --plugin name2
 
 A plugin is a folder `plugins/<name>/` with an `index.ts` (server: sources, enrichers, rooms and boards) and an optional `client.ts` (browser rendering). The server copies only whitelisted, cleaned fields to the browser.
 
-`pnpm dev:fork` starts the dev server with the plugins of this fork (`github`).
+`pnpm dev:fork` starts the dev server with the plugins of this fork (`herdr`, `github`).
 
 ### GitHub: kanban board and issue cards
 
@@ -149,6 +168,24 @@ AGENTS_OFFICE_GITHUB_REPOS=owner/one,owner/two npx agents-office --plugin github
 - **Board:** up to 4 boards. The first hangs on the right part of the back wall, the next ones on the right wall (`KANBAN_BOARD_SLOTS` in `plugins/github/client.ts`).
 - **Cards in hand:** the plugin reads the agent's own tool calls, never the prompt text: `gh issue view|comment|edit N`, a git branch that starts with `N-` (`git switch -c`, `git checkout -b`, `git worktree add -b`), and `#N` or `owner/repo#N` in a `git commit` message. The agent holds the 5 most recent issues. A card shows the issue number. The title comes from the board data when the issue belongs to a configured repository.
 - **What leaves the server:** issue numbers, titles (60 to 80 characters) and column names only.
+
+
+### herdr plugin
+
+For sessions that run in [herdr](https://herdr.dev) panes. Each Claude session shows the name of its herdr tab. The session and its subagents get a group: the herdr workspace. Subagents keep their own `>>` names.
+
+What it reads:
+
+- `ps eww -o pid=,command= -p <pids>` once for the session processes it has not seen yet. From that output it keeps only `HERDR_PANE_ID`, `HERDR_TAB_ID` and `HERDR_WORKSPACE_ID`. It keeps or logs no other variable.
+- `herdr tab list` and `herdr workspace list`, at most once every 10 s.
+
+All commands are read-only. They run through `execFile` with fixed arguments and a 1.5 s timeout, never through a shell. If herdr is not installed, a session is not in herdr, or a command fails, the session keeps its normal name and has no group. Raw herdr IDs stay on the server: the API sends only a hashed group ID and the cleaned labels.
+
+Enable it:
+
+```bash
+AGENTS_OFFICE_PLUGINS=herdr pnpm dev   # or: pnpm dev:fork
+```
 
 ## Controls
 

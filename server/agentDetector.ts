@@ -180,7 +180,7 @@ function isReadOnlyStep(words: string[]): boolean {
 }
 
 // Classify a shell command by the programs it runs, not by words in its arguments
-function inferBashActivity(command: string): string {
+export function inferBashActivity(command: string): string {
   const segments = commandSegments(command);
   if (segments.some(isTestRun)) return 'testing';
   if (segments.some(isDeployStep)) return 'deploying';

@@ -44,7 +44,7 @@ async function fixtureServer(detect = () => records, beforePlugin?: Plugin, rela
     root,
     configFile: false,
     envFile: false,
-    plugins: [...(beforePlugin ? [beforePlugin] : []), agentDetectorPlugin(detect)],
+    plugins: [...(beforePlugin ? [beforePlugin] : []), agentDetectorPlugin({ detect, codexHome: null })],
     server: { host: '127.0.0.1', port: 0, open: false, watch: null, ws: false,
       ...(relaxViteHostCheck ? { allowedHosts: true } : {}) },
     optimizeDeps: { noDiscovery: true, include: [] },
@@ -146,7 +146,7 @@ test('unsafe listen hosts are rejected even when passed as overrides', async () 
   for (const host of [true, '0.0.0.0', '::', '192.168.1.10', 'evil.example']) {
     await assert.rejects(createServer({
       root: os.tmpdir(), configFile: false, envFile: false,
-      plugins: [agentDetectorPlugin(() => records)],
+      plugins: [agentDetectorPlugin({ detect: () => records, codexHome: null })],
       server: { host, open: false, watch: null, ws: false },
       optimizeDeps: { noDiscovery: true, include: [] }, logLevel: 'silent',
     }), /must listen on localhost/);
