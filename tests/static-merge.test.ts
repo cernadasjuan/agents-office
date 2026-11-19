@@ -182,3 +182,18 @@ test('the overview hiding walls and lamps does not rebuild a batch', () => {
   assert.equal(batch.update(), false);
   assert.equal(countDrawCalls(scene).main, 1);
 });
+
+test('a source that changes its material rebuilds its batch with the new material', () => {
+  const scene = new THREE.Scene();
+  const room = new THREE.Group();
+  markStatic(room);
+  const floor = box(wood(), 0);
+  room.add(floor, box(wood(), 2));
+  scene.add(room);
+  scene.updateMatrixWorld();
+  const statics = new StaticBatch(scene);
+  statics.update();
+  floor.material = metal();
+  assert.equal(statics.update(), true);
+  assert.deepEqual(new Set(statics.mergedMeshes.map((mesh) => mesh.material)), new Set([wood(), metal()]));
+});

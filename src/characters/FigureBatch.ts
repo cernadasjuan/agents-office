@@ -7,9 +7,12 @@ import * as THREE from 'three';
  * The figures keep their skeleton (joints, poses, hats on the head, a book in the
  * hand). Each part mesh (`userData.figurePart`, see StickFigureParts.ts) only
  * moves to `FIGURE_PART_LAYER`, which no camera renders but `pickAgent` still
- * hits. Objects attached to a part stay on the default layer and draw as before.
+ * hits. Objects attached to a part stay on the default layer and draw as before,
+ * unless they are marked as figure parts too (the BMAD hats, which share their
+ * shapes): those join the batch on the next sync.
  */
 export const FIGURE_PART_LAYER = 30;
+const PART_LAYER_MASK = 1 << FIGURE_PART_LAYER;
 
 const EPSILON = 1e-6;
 const INITIAL_CAPACITY = 64;
@@ -52,7 +55,6 @@ function isShown(part: THREE.Object3D, root: THREE.Object3D): boolean {
 
 export class FigureBatch {
   private buckets = new Map<string, Bucket>();
-  private partsOf = new WeakMap<THREE.Object3D, THREE.Mesh[]>();
   private layout = 0;
 
   constructor(private parent: THREE.Object3D) {}
@@ -90,9 +92,11 @@ export class FigureBatch {
         const offset = i * 16;
         let differs = false;
         for (let k = 0; k < 16; k++) {
-          if (!(Math.abs(array[offset + k] - source[k]) <= EPSILON)) {
+          // The buffer holds float32: compare at that precision, or a far figure always looks moved
+          const value = Math.fround(source[k]);
+          if (!(Math.abs(array[offset + k] - value) <= EPSILON)) {
             differs = true;
-            array[offset + k] = source[k];
+            array[offset + k] = value;
           }
         }
         if (differs) {
@@ -121,16 +125,14 @@ export class FigureBatch {
     return [...this.buckets.values()].filter((bucket) => bucket.mesh.visible).map((bucket) => bucket.mesh);
   }
 
+  /** The figure parts under a root, found again on each sync so that parts attached later join. */
   private parts(root: THREE.Object3D): THREE.Mesh[] {
-    let parts = this.partsOf.get(root);
-    if (!parts) {
-      parts = [];
-      root.traverse((object) => {
-        if ((object as THREE.Mesh).isMesh && object.userData.figurePart) parts!.push(object as THREE.Mesh);
-      });
-      for (const part of parts) part.layers.set(FIGURE_PART_LAYER);
-      this.partsOf.set(root, parts);
-    }
+    const parts: THREE.Mesh[] = [];
+    root.traverse((object) => {
+      if (!(object as THREE.Mesh).isMesh || !object.userData.figurePart) return;
+      if (object.layers.mask !== PART_LAYER_MASK) object.layers.set(FIGURE_PART_LAYER);
+      parts.push(object as THREE.Mesh);
+    });
     return parts;
   }
 

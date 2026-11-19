@@ -7,7 +7,7 @@ import { AgentPoller } from './agents/AgentPoller.js';
 import { AgentPanel, isDemoMode, setupPanelCollapse } from './ui/AgentPanel.js';
 import { chooseLayoutId, createLayout, layoutIds, rememberLayoutId } from './layout/registry.js';
 import { activeExtensions, setWorld, type World } from './extensions.js';
-import { tabTitle } from './ui/attention.js';
+import { tabTitleFor } from './ui/attention.js';
 import { LabelDetailController } from './ui/LabelDetail.js';
 import { FrameLoop } from './scene/FrameLoop.js';
 import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
@@ -80,8 +80,7 @@ onSelectionChange(() => labelDetail.refresh());
 function buildUI(): void {
   const agents = agentManager.getAgents();
   panel.render(agents.map((managed) => managed.info));
-  const count = (attention: string) => agents.filter((managed) => managed.info.extras?.attention === attention).length;
-  document.title = tabTitle(count('waiting'), count('your-turn'));
+  document.title = tabTitleFor(agents.map((managed) => managed.info.extras));
   view.agentsChanged(agents);
   labelDetail.refresh();
   for (const extension of activeExtensions(scene)) extension.agentsChanged?.(agentManager.getAgents());
