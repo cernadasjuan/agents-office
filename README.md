@@ -192,7 +192,7 @@ npx agents-office --plugin name1 --plugin name2
 
 A plugin is a folder `plugins/<name>/` with an `index.ts` (server: sources, enrichers, rooms and boards) and an optional `client.ts` (browser rendering). The server copies only whitelisted, cleaned fields to the browser.
 
-`pnpm dev:fork` starts the office with the plugins of this fork (`herdr`, `github`, `bmad`).
+`pnpm dev:fork` starts the office with the plugins of this fork (`herdr`, `github`, `bmad`, `missions`, `library`) and turns on herdr focus (`AGENTS_OFFICE_HERDR_FOCUS=1`).
 
 ### bmad: persona hats
 
@@ -239,13 +239,15 @@ AGENTS_OFFICE_PLUGINS=herdr pnpm dev   # or: pnpm dev:fork
 
 This is the only action in the office that changes something on your machine. It is off by default.
 
-What it does: select an agent that runs in a herdr pane. A small card with a **Focus in herdr** button appears at the bottom of the screen. A click moves the herdr focus to the pane of that agent (`herdr agent focus <pane>`). If herdr does not detect an agent in that pane, it focuses the tab (`herdr tab focus <tab>`). A short text message shows the result. The action does not type text, send keys or answer a prompt. It changes the focus inside the herdr window only. It does not bring the terminal window to the front.
+What it does: select an agent that runs in a herdr pane. The agent card shows a **Focus in herdr** button. For a subagent, the button focuses the pane of its parent session. A click moves the herdr focus to the pane of that agent (`herdr agent focus <pane>`). If herdr does not detect an agent in that pane, it focuses the tab (`herdr tab focus <tab>`). A short text message shows the result. The action does not type text, send keys or answer a prompt. It changes the focus inside the herdr window only. It does not bring the terminal window to the front.
 
 Enable it:
 
 ```bash
 AGENTS_OFFICE_PLUGINS=herdr AGENTS_OFFICE_HERDR_FOCUS=1 pnpm dev
 ```
+
+`pnpm dev:fork` sets `AGENTS_OFFICE_HERDR_FOCUS=1`. The button still acts only on your click.
 
 Without `AGENTS_OFFICE_HERDR_FOCUS=1`, or without the herdr plugin, the server has no write route, no token and no button. The API stays GET only.
 
@@ -288,6 +290,7 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 - **O** to switch between first person (the default) and the overview, a view from above at an angle that shows the whole floor. In the overview, drag to pan, use the mouse wheel to zoom, and use W/A/S/D to pan
 - **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on a row in the triage list also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
 - **Esc** clears the selection (in first person it first releases the camera)
+- **Agent card:** a selection opens a card left of the triage panel. It shows the name, the activity, the attention band and wait, the herdr workspace, the provider, the personas, the subagents (a click selects one) and up to 10 linked issues, newest first, or "No linked issues". With the github plugin, an issue of a configured repository is a link to GitHub. The card updates in place on each poll. A click on another agent changes the card content. Esc or the close button closes it. The camera puts the selected figure in the free area left of the card
 - **V** to switch the labels between `smart` (the default) and `all` full labels. `#labels=all` in the URL starts with all labels
 
 - `?dwell=<seconds>` in the URL (0 to 30, default 0) makes an agent in the original `activity` layout wait that long before it walks to a new station. A change back before the time cancels the walk. The figure shows the new activity at once.

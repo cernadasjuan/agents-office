@@ -53,7 +53,7 @@ S7 keeps the API read-only by default. A write action exists only when a loaded 
 - With an action on, every response gets `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
 - Tests inject the command runner and the audit path (`auditLogPath` option). Never run a real write command in a test.
 
-herdr focus: the enricher keeps `focusTargets` (observation id → pid, pane id, tab id; a subagent uses its parent's pane) and sets `display.actions = ['focus']`. `run` re-reads `ps eww` for the pid and `herdr pane get <pane>` (same pane and tab), then `herdr agent focus <pane>`, else `herdr tab focus <tab>` when the pane has no detected agent or agent focus fails. `plugins/herdr/client.ts` shows a "Focus in herdr" card for the selected agent when `extras.actions` holds `focus`; `FocusClient` fetches the token (once more after a 403) and shows the result in a text toast.
+herdr focus: the enricher keeps `focusTargets` (observation id → pid, pane id, tab id; a subagent uses its parent's pane) and sets `display.actions = ['focus']`. `run` re-reads `ps eww` for the pid and `herdr pane get <pane>` (same pane and tab), then `herdr agent focus <pane>`, else `herdr tab focus <tab>` when the pane has no detected agent or agent focus fails. `plugins/herdr/client.ts` registers a "Focus in herdr" button in the agent card (`registerCardAction`) for agents whose `extras.actions` holds `focus`; `FocusClient` fetches the token (once more after a 403), and the card shows the result as text. `pnpm dev:fork` sets `AGENTS_OFFICE_HERDR_FOCUS=1`; the request still goes out only on the click.
 
 ### Attention (server/attention.ts, src/ui/attention.ts)
 
@@ -134,6 +134,10 @@ Two modes, owned by `src/scene/ViewController.ts`. First person stays the defaul
 ### Selection
 
 `src/scene/Selection.ts` holds the shared selection: `selectAgent(id)`, `clearSelection()`, `selectedAgentId()`, `onSelectionChange(cb)` (returns an unsubscribe function). Extensions and other UI (for example a triage list) use it. A click on a figure (raycast against the figure meshes) or on an agent name in the side panel selects; Esc clears; an agent that leaves is deselected. On a new selection the camera flies to the agent in 0.6 s and `SelectionMarker.ts` draws a ring in the agent's color under it. `#focus=<agent id>` selects that agent once it appears.
+
+### Agent card (src/ui/AgentCard.ts)
+
+`AgentCard` subscribes to the shared selection and opens in the same task as the selection: a 360 px `aside#agent-inspector` docked left of `#ui-panel` (top aligned, max height viewport minus 120 px). It shows name, activity, attention line and band (`attentionBand`), provider (Codex or Claude Code), workspace (`extras.group.label`), personas (`extras.badges`), the parent of a subagent, subagents (agents whose `extras.parentId` is this agent; a click selects) and up to `CARD_MAX_ISSUES` (10) of `extras.issues` in API order (newest first), else "No linked issues". `render(agents)` after each poll updates it in place; a new selection swaps the content without hiding the element. Lists are rebuilt only when their content changes. The card knows no plugin: `registerCardAction({ id, label, available, run })` adds a button (run only on click, result as text in the status line), and `registerIssueLinker(fn)` turns an issue into an https link (`plugins/github/links.ts` matches the issue to exactly one `owner/name` board from `/api/world`, else plain text). `cameraShiftPx()` feeds `ViewController`'s `figureShiftPx` option: on a selection, the camera moves the figure that many pixels left of the canvas center (overview: pans the target; first person: moves camera and aim to the screen right), so it sits in the middle of the free area left of the card. All text goes through `textContent`.
 
 ### Label detail (src/ui/LabelDetail.ts)
 

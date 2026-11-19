@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../../src/agents/AgentManager.js';
 import { registerExtension, type OfficeExtension, type World, type WorldBoard } from '../../src/extensions.js';
+// Issue links in the agent card.
+import './links.js';
 
 /**
  * Browser part of the GitHub plugin: kanban boards on the walls and issue
