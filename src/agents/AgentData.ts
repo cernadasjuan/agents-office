@@ -10,6 +10,7 @@ export interface AgentExtras {
   badges?: string[];
   issues?: Array<{ number: number; title: string; column?: string }>;
   room?: string;
+  role?: string;
 }
 
 export interface AgentInfo {

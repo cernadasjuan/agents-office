@@ -57,10 +57,10 @@ function setup(storage = new Map<string, string>()) {
   return { scene, layout, storage, agent, tick: (ms: number) => { clock += ms; return layout.update(); } };
 }
 
-test('the building opens with the user office and remembers its rooms', () => {
+test('the building opens with the user office and the Library, and remembers its rooms', () => {
   const { layout, storage, scene } = setup();
-  assert.deepEqual(layout.roomKinds, ['office']);
-  assert.equal(storage.get(BUILDING_STORAGE_KEY), '["office"]');
+  assert.deepEqual(layout.roomKinds, ['office', 'library']);
+  assert.equal(storage.get(BUILDING_STORAGE_KEY), '["office","library"]');
   assert.ok(scene.getObjectByName('building-hall-walls'));
 });
 
@@ -107,10 +107,10 @@ test('the building rents a desk room when the hall desks are taken, and rebuilds
   const { layout, agent, storage } = setup();
   const seats = Array.from({ length: 10 }, (_, i) => layout.seatFor(agent(`s${i}`, 'implementing'), null)!);
   assert.equal(new Set(seats.map((s) => s.key)).size, 10);
-  assert.deepEqual(layout.roomKinds, ['office', 'desks']);
+  assert.deepEqual(layout.roomKinds, ['office', 'library', 'desks']);
 
   const reloaded = setup(storage).layout;
-  assert.deepEqual(reloaded.roomKinds, ['office', 'desks']);
+  assert.deepEqual(reloaded.roomKinds, ['office', 'library', 'desks']);
 });
 
 test('idle agents beyond the hall seats get a lounge room', () => {
@@ -171,4 +171,30 @@ test('a waiting agent still goes to the user office before its war room', () => 
   layout.syncWorldRooms([missionRoom()]);
   const seat = layout.seatFor(agent('w', 'meeting', { room: 'room-1', attention: 'waiting' }), null)!;
   assert.match(seat.key, /^room0_queue_/);
+});
+
+// --- Library and librarians ---
+
+test('research trips go to the Library room before the hall shelves', () => {
+  const { layout, agent } = setup();
+  const seat = layout.seatFor(agent('r', 'researching'), null)!;
+  assert.match(seat.key, /^room1_researching_/);
+});
+
+test('a librarian walks to the Library to research and back to its agent with what it found', () => {
+  const { layout, agent, tick } = setup();
+  const desk = layout.seatFor(agent('parent', 'implementing'), null)!;
+  const fetching = layout.seatFor(agent('lib', 'researching', { parentId: 'parent', role: 'librarian' }), null)!;
+  assert.match(fetching.key, /^room1_researching_/);
+
+  layout.seatFor(agent('lib', 'writing_docs', { parentId: 'parent', role: 'librarian' }), 'researching');
+  const back = tick(4500).find((m) => m.agentId === 'lib')!;
+  assert.match(back.seat.key, /_pod\d$/);
+  assert.ok(back.seat.position.distanceTo(desk.position) < 2);
+});
+
+test('an ordinary subagent that researches stays at its parent desk', () => {
+  const { layout, agent } = setup();
+  layout.seatFor(agent('parent', 'implementing'), null);
+  assert.match(layout.seatFor(agent('helper', 'researching', { parentId: 'parent' }), null)!.key, /_pod\d$/);
 });
