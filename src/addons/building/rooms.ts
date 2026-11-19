@@ -135,7 +135,7 @@ function sign(text: string, position: THREE.Vector3): CSS2DObject {
 }
 
 /** Build one room: floor, low walls, furniture, a door sign and its stations. */
-export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDoors: Door[]): BuiltRoom {
+export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDoors: Door[], title?: string): BuiltRoom {
   const group = new THREE.Group();
   group.name = `room-${index}-${kind}`;
   const frame = new RoomFrame(slot.rect, slot.door);
@@ -152,7 +152,7 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
   const walls = buildWalls(slot.rect, [slot.door, ...extraDoors]);
   walls.name = 'room-walls';
   group.add(walls);
-  group.add(sign(ROOM_TITLE[kind], frame.point(0, 0.4, WALL_HEIGHT + 0.4)));
+  group.add(sign(title ?? ROOM_TITLE[kind], frame.point(0, 0.4, WALL_HEIGHT + 0.4)));
 
   const rows = (count: number, spacing: number) => Array.from({ length: count }, (_, i) => (i - (count - 1) / 2) * spacing);
 

@@ -53,6 +53,10 @@ A built-in enricher sets `attention` for main sessions: status `waiting` → `wa
 
 `plugins/missions/index.ts` reads `mission.yaml` records (via the `yaml` package, 1 MB cap, 30 s cache) from `AGENTS_OFFICE_MISSION_ROOTS` and provides world rooms (`mission:<slug>`, open unless done or abandoned) with walls (destination, artifact titles, GitHub members, thread kanban) and `sleepers` (journey sessions). Its enricher scans each session transcript incrementally for tool calls that touch `missions/<slug>/` or a `mission <cmd> <slug>` command and sets `roomKey` for the session and its subagents. The building add-on registers a `building-world-rooms` extension: `BuildingLayout.syncWorldRooms` builds any world room in the mission wing (`missionSlot`: two columns north of the hall back wall, rows further north), updates walls each poll, and seats agents whose `extras.room` matches (queue still wins). Locked rooms close their door and take no agents.
 
+### Workspace desk rooms
+
+`BuildingLayout.homeOf` gives a main session with `extras.group` (herdr workspace) a desk in a `desks` room tagged with the group label (rented when needed, sign "Desks · <label>"); sessions without a group use untagged desks (hall first). Tags persist by label as `desks@<label>` in the room list, because public group IDs change per server run. `needsRehome` moves a session once when its group appears after it got an untagged desk.
+
 ### Library and librarians (plugins/library)
 
 The projection whitelist has a `role` token (`DisplayExtras.role`, cleaned like badges). `plugins/library` sets `role: 'librarian'` for subagents whose server-side `agentType` is in `AGENTS_OFFICE_LIBRARIAN_TYPES` (default `bibliotheque-librarian`); its client puts a book in their right hand. `BuildingLayout` adds a `library` room after the office when missing, prefers room shelves for `researching`, and sends a librarian subagent to the Library while it researches and to its parent's pod otherwise.

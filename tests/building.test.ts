@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
+import { CSS2DObject as CSS2DObjectType } from 'three/addons/renderers/CSS2DRenderer.js';
 import { HALL, rectsOverlap, slotFor, wallPieces } from '../src/addons/building/RoomPlanner.js';
 import type { Activity } from '../src/agents/ActivityAnimations.js';
 import type { AgentExtras } from '../src/agents/AgentData.js';
@@ -197,4 +198,41 @@ test('an ordinary subagent that researches stays at its parent desk', () => {
   const { layout, agent } = setup();
   layout.seatFor(agent('parent', 'implementing'), null);
   assert.match(layout.seatFor(agent('helper', 'researching', { parentId: 'parent' }), null)!.key, /_pod\d$/);
+});
+
+// --- Rooms by workspace ---
+
+const inWorkspace = (label: string) => ({ group: { id: `g-${label}`, label } });
+
+test('sessions of one workspace share a desk room named after it; others keep the hall desks', () => {
+  const { layout, agent, scene, storage } = setup();
+  const a1 = layout.seatFor(agent('a1', 'implementing', inWorkspace('Alpha')), null)!;
+  const a2 = layout.seatFor(agent('a2', 'implementing', inWorkspace('Alpha')), null)!;
+  const b1 = layout.seatFor(agent('b1', 'implementing', inWorkspace('Beta')), null)!;
+  const loner = layout.seatFor(agent('n', 'implementing'), null)!;
+
+  assert.equal(a1.key.split('_')[0], a2.key.split('_')[0], 'same room');
+  assert.notEqual(a1.key.split('_')[0], b1.key.split('_')[0], 'another room for Beta');
+  assert.match(loner.key, /^desk_/);
+  const signs = scene.children.flatMap((c) => c.children).filter((c) => c instanceof CSS2DObjectType).map((c) => (c as { element: HTMLElement }).element.textContent);
+  assert.ok(signs.includes('Desks · Alpha') && signs.includes('Desks · Beta'));
+  assert.deepEqual(JSON.parse(storage.get(BUILDING_STORAGE_KEY)!), ['office', 'library', 'desks@Alpha', 'desks@Beta']);
+});
+
+test('workspace rooms come back by name after a reload', () => {
+  const { layout, agent, storage } = setup();
+  layout.seatFor(agent('a1', 'implementing', inWorkspace('Alpha')), null);
+  const reloaded = setup(storage).layout;
+  const seat = reloaded.seatFor(agent('again', 'implementing', inWorkspace('Alpha')), null)!;
+  assert.match(seat.key, /^room2_/);
+  assert.deepEqual(reloaded.roomKinds, ['office', 'library', 'desks']);
+});
+
+test('a session whose workspace becomes known later moves once to its workspace room', () => {
+  const { layout, agent } = setup();
+  const hall = layout.seatFor(agent('late', 'implementing'), null)!;
+  assert.match(hall.key, /^desk_/);
+  const moved = layout.seatFor(agent('late', 'implementing', inWorkspace('Gamma')), 'implementing')!;
+  assert.match(moved.key, /^room\d+_implementing_/);
+  assert.equal(layout.seatFor(agent('late', 'implementing', inWorkspace('Gamma')), 'implementing'), null, 'only once');
 });
