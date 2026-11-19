@@ -133,3 +133,42 @@ test('the hall side walls are replaced by walls with doors', () => {
   const tallWalls = original.children.filter((c) => c instanceof THREE.Mesh && (c.geometry as THREE.BoxGeometry).parameters?.height === 6);
   assert.ok(tallWalls.length === 4 && tallWalls.every((wall) => !wall.visible));
 });
+
+// --- Mission war rooms ---
+
+const missionRoom = (state: 'open' | 'locked' = 'open') => ({
+  id: 'room-1', kind: 'mission' as const, title: 'Office roadmap', state, sleepers: 3,
+  walls: { statement: 'Ship it', docs: ['Explainer'], issues: [{ number: 46, title: 'Parent', state: 'open' as const }], kanban: [] },
+});
+
+test('a mission becomes a war room north of the hall, with a door in the hall back wall', () => {
+  const { layout, scene } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  assert.equal(layout.missionRoomCount, 1);
+  const room = scene.getObjectByName('mission-room-0')!;
+  const floor = room.children.find((c) => c.userData.floor)!;
+  assert.ok(floor.position.z < -13, 'north of the hall');
+  const hallWalls = scene.getObjectByName('building-hall-walls')!;
+  const northPieces = hallWalls.children.filter((w) => Math.abs(w.position.z + 13) < 0.01);
+  assert.ok(northPieces.length >= 2, 'the back wall has a door gap');
+});
+
+test('agents of a mission work in its war room, their helpers stand near them, and a locked room keeps them out', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const seat = layout.seatFor(agent('s', 'planning', { room: 'room-1' }), null)!;
+  assert.match(seat.key, /^mission0_seat_/);
+  const helper = layout.seatFor(agent('h', 'researching', { parentId: 's' }), null)!;
+  assert.match(helper.key, /^mission0_seat_\d+_pod\d$/);
+
+  layout.syncWorldRooms([missionRoom('locked')]);
+  const late = layout.seatFor(agent('late', 'implementing', { room: 'room-1' }), null)!;
+  assert.doesNotMatch(late.key, /^mission/);
+});
+
+test('a waiting agent still goes to the user office before its war room', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const seat = layout.seatFor(agent('w', 'meeting', { room: 'room-1', attention: 'waiting' }), null)!;
+  assert.match(seat.key, /^room0_queue_/);
+});
