@@ -6,7 +6,8 @@ import { attentionBand, attentionLine } from './attention.js';
  * Agent card (inspector, phase 1): a click on a figure or a triage row opens a
  * card docked left of the triage panel. It shows who the agent is, its state
  * and wait, where it runs, its personas, subagents and linked issues. Plugins
- * add buttons (`registerCardAction`) and issue links (`registerIssueLinker`);
+ * add buttons (`registerCardAction`), issue links (`registerIssueLinker`) and
+ * sections at the end (`registerCardPanel`);
  * the card itself knows no plugin. All text goes through textContent.
  */
 
@@ -30,8 +31,20 @@ export interface CardAction {
 /** Returns a URL for an issue, or null when the plugin does not know the issue. */
 export type IssueLinker = (issue: CardIssue) => string | null;
 
+/**
+ * A section a plugin adds at the end of the card. `render` runs after each
+ * selection change and poll while `available` is true; it fills its own element
+ * (created once) and must use textContent for text.
+ */
+export interface CardPanel {
+  id: string;
+  available(agent: AgentInfo): boolean;
+  render(agent: AgentInfo, root: HTMLElement): void;
+}
+
 const actions: CardAction[] = [];
 const linkers: IssueLinker[] = [];
+const panels: CardPanel[] = [];
 
 export function registerCardAction(action: CardAction): void {
   if (!actions.some((known) => known.id === action.id)) actions.push(action);
@@ -41,10 +54,15 @@ export function registerIssueLinker(linker: IssueLinker): void {
   linkers.push(linker);
 }
 
-/** Tests only: forget registered actions and linkers. */
+export function registerCardPanel(panel: CardPanel): void {
+  if (!panels.some((known) => known.id === panel.id)) panels.push(panel);
+}
+
+/** Tests only: forget registered actions, linkers and panels. */
 export function resetCardRegistry(): void {
   actions.length = 0;
   linkers.length = 0;
+  panels.length = 0;
 }
 
 function issueUrl(issue: CardIssue): string | null {
@@ -103,6 +121,7 @@ export class AgentCard {
   private readonly subagents: Section;
   private readonly issues: Section;
   private readonly selection: SelectionState;
+  private readonly panelRoots = new Map<string, HTMLElement>();
   private agents: AgentInfo[] = [];
   private current: AgentInfo | null = null;
   private renderedKey = '';
@@ -218,7 +237,32 @@ export class AgentCard {
     this.current = agent;
     this.dock();
     this.fill(agent);
+    this.renderPanels(agent);
     this.root.hidden = false;
+  }
+
+  private renderPanels(agent: AgentInfo): void {
+    for (const panel of panels) {
+      let root = this.panelRoots.get(panel.id);
+      if (!root) {
+        root = this.text('div', '');
+        root.className = 'inspector-panel';
+        root.dataset.panel = panel.id;
+        this.root.appendChild(root);
+        this.panelRoots.set(panel.id, root);
+      }
+      try {
+        if (panel.available(agent)) {
+          root.hidden = false;
+          panel.render(agent, root);
+          continue;
+        }
+      } catch (error) {
+        console.debug('card panel failed', error);
+      }
+      root.hidden = true;
+      root.replaceChildren();
+    }
   }
 
   private cardLeftPx(): number {

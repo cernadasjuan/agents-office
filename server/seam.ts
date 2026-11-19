@@ -1,8 +1,11 @@
+import { maskSecrets } from './secrets.js';
+
 /**
  * Extension seam. Sources find agents, enrichers add display data, world
  * providers describe rooms and boards. Everything they produce stays on the
  * server until `projectAgents` and `projectWorld` copy the whitelisted fields
- * into the API response. Those two functions are the only exit.
+ * into the API response. Those two functions are the only exit, plus
+ * `projectPeek` for the opt-in per-agent peek view (`/api/views/peek`).
  */
 
 export type Attention = 'waiting' | 'your-turn';
@@ -97,12 +100,38 @@ export interface OfficeAction {
   run(agent: Observation): Promise<ActionOutcome>;
 }
 
+/** The closed set of per-agent read views. A plugin can offer only these, behind its own opt-in. */
+export const VIEW_NAMES = ['peek'] as const;
+export type ViewName = typeof VIEW_NAMES[number];
+
+/**
+ * What the peek view may return for one agent. `projectPeek` caps and masks it
+ * again before it leaves. Never in `/api/agents` or `/api/world`.
+ */
+export interface PeekInput {
+  lines: Array<{ kind: 'text' | 'tool'; text: string }>;
+  question?: string;
+  assets: Array<{ kind: 'issue' | 'pr' | 'mr' | 'jira'; label: string; url: string }>;
+  skills: string[];
+  repos: string[];
+}
+
+/**
+ * An opt-in read view for one selected agent. The server mounts
+ * `GET /api/views/<name>?agent=<public id>` only when a loaded plugin offers it.
+ */
+export interface OfficeView {
+  name: ViewName;
+  read(agent: Observation): PeekInput | Promise<PeekInput>;
+}
+
 export interface OfficePlugin {
   name: string;
   sources?: AgentSource[];
   enrichers?: Enricher[];
   world?: WorldProvider[];
   actions?: OfficeAction[];
+  views?: OfficeView[];
 }
 
 const STEP_TIMEOUT_MS = 2000;
@@ -218,6 +247,47 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
       ...(typeof extras.role === 'string' && BADGE.test(extras.role) ? { role: extras.role } : {}),
     };
   });
+}
+
+const PEEK_LINES = 10;
+const PEEK_LINE_LENGTH = 200;
+const PEEK_LIST = 10;
+const PEEK_TOKEN = /^[A-Za-z0-9:_.-]{1,64}$/;
+const ASSET_KINDS = new Set(['issue', 'pr', 'mr', 'jira']);
+
+function peekText(value: unknown): string {
+  return displayText(maskSecrets(String(value ?? '').slice(0, 4000)), PEEK_LINE_LENGTH);
+}
+
+function httpsUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 300) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The peek view for one agent: capped lines (masked again), https links, plain tokens. */
+export function projectPeek(input: PeekInput) {
+  const lines = (Array.isArray(input?.lines) ? input.lines : []).slice(-PEEK_LINES)
+    .map((line) => ({ kind: line?.kind === 'text' ? 'text' as const : 'tool' as const, text: peekText(line?.text) }))
+    .filter((line) => line.text.length > 0);
+  const question = input?.question ? peekText(input.question) : '';
+  const assets = (Array.isArray(input?.assets) ? input.assets : []).flatMap((asset) => {
+    const url = httpsUrl(asset?.url);
+    return url && ASSET_KINDS.has(asset.kind) ? [{ kind: asset.kind, label: displayText(asset.label, 80), url }] : [];
+  }).slice(0, PEEK_LIST);
+  const tokens = (list: unknown, pattern: RegExp) => (Array.isArray(list) ? list : [])
+    .filter((item): item is string => typeof item === 'string' && pattern.test(item)).slice(0, PEEK_LIST);
+  return {
+    lines,
+    ...(question ? { question } : {}),
+    assets,
+    skills: tokens(input?.skills, PEEK_TOKEN),
+    repos: tokens(input?.repos, REPO_SHORT).filter((repo) => repo !== '.' && repo !== '..'),
+  };
 }
 
 export function projectWorld(parts: WorldInput[], pluginNames: string[], publicId: PublicId) {
