@@ -86,3 +86,11 @@ test('the URL hash picks the start view and the agent to focus', () => {
   assert.deepEqual(parseViewHash('#focus=<script>'), { view: 'first-person', focus: null });
   assert.deepEqual(parseViewHash(`#focus=${'a'.repeat(200)}`), { view: 'first-person', focus: null });
 });
+
+test('a pick leaves the raycaster layers as it found them', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0xe05050));
+  const raycaster = new THREE.Raycaster(new THREE.Vector3(0, 1.2, 5), new THREE.Vector3(0, 0, -1));
+  const mask = raycaster.layers.mask;
+  pickAgent(raycaster, [{ id: 'a', object: figure.group }]);
+  assert.equal(raycaster.layers.mask, mask);
+});

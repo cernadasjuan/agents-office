@@ -292,7 +292,7 @@ test('the render loop applies the cutaway in the frame of the mode switch and re
   let mode: 'first-person' | 'overview' = 'first-person';
   let renders = 0;
   const renderer = {
-    render: () => { renders++; }, info: { render: { calls: 0, triangles: 0 } },
+    render: () => { renders++; }, info: { render: { calls: 0, triangles: 0 }, reset: () => undefined },
     shadowMap: { needsUpdate: false, type: THREE.PCFSoftShadowMap }, getPixelRatio: () => 1, setPixelRatio: () => undefined,
   };
   const loop = new FrameLoop({

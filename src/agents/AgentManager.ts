@@ -6,6 +6,7 @@ import { Station } from '../scene/Office.js';
 import { Colors } from '../utils/Colors.js';
 import { ActivityLayout } from '../layout/ActivityLayout.js';
 import type { LayoutStrategy, Seat } from '../layout/LayoutStrategy.js';
+import { isAnimationAsleep } from '../scene/AnimationSleep.js';
 
 // FNV-1a hash of the agent ID, so an agent keeps its color across polls and reloads
 function accentColorFor(agentId: string): THREE.Color {
@@ -31,6 +32,8 @@ export interface ManagedAgent {
  */
 export class AgentManager {
   private agents = new Map<string, ManagedAgent>();
+  /** The pose a sleeping figure last settled into. */
+  private settledPose = new WeakMap<ManagedAgent, string>();
   private scene: THREE.Scene;
   readonly layout: LayoutStrategy;
 
@@ -84,7 +87,22 @@ export class AgentManager {
       if (managed) this.goToSeat(managed, move.seat, false);
     }
     for (const managed of this.agents.values()) {
-      managed.figure.update(elapsed, delta);
+      const figure = managed.figure;
+      if (!isAnimationAsleep(figure.group)) {
+        this.settledPose.delete(managed);
+        figure.update(elapsed, delta);
+        continue;
+      }
+      // Out of view or far: a walk goes on to its arrival snap and turn
+      if (figure.walking) {
+        this.settledPose.delete(managed);
+        figure.update(elapsed, delta);
+        if (figure.walking) continue;
+      }
+      // No sway, but each new pose (activity, posture, raised hand) shows at once
+      if (this.settledPose.get(managed) === figure.poseKey) continue;
+      figure.settle(elapsed);
+      this.settledPose.set(managed, figure.poseKey);
     }
   }
 

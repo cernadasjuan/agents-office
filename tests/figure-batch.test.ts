@@ -103,3 +103,37 @@ test('things attached to a part still draw themselves, and a click still picks a
   const raycaster = new THREE.Raycaster(new THREE.Vector3(0, 1.2, 5), new THREE.Vector3(0, 0, -1));
   assert.equal(pickAgent(raycaster, [{ id: 'f0', object: figure.group }]), 'f0');
 });
+
+test('a part attached after the first sync (a hat marked as a figure part) joins the batch on the next sync', () => {
+  const scene = new THREE.Scene();
+  const all = figures(scene, [RED, RED]);
+  const batch = new FigureBatch(scene);
+  const roots = all.map((figure) => figure.group);
+  scene.updateMatrixWorld();
+  batch.sync(roots);
+  const before = countDrawCalls(scene).main;
+
+  const cone = new THREE.ConeGeometry(0.1, 0.2);
+  const material = new THREE.MeshBasicMaterial();
+  for (const figure of all) {
+    const hat = new THREE.Mesh(cone, material);
+    hat.userData.figurePart = true;
+    figure.joints.head.add(hat);
+  }
+  scene.updateMatrixWorld();
+  assert.equal(batch.sync(roots).changed, true);
+  assert.equal(countDrawCalls(scene).main, before + 1);
+  assert.equal(batch.meshes.find((mesh) => mesh.geometry === cone)!.count, 2);
+});
+
+test('a still figure far from the origin is not reported as moved (float32 instance matrices)', () => {
+  const scene = new THREE.Scene();
+  const [figure] = figures(scene, [RED]);
+  figure.group.position.set(37.3, 0, -45.1);
+  figure.group.rotation.y = 0.7;
+  const batch = new FigureBatch(scene);
+  scene.updateMatrixWorld();
+  batch.sync([figure.group]);
+  scene.updateMatrixWorld();
+  assert.deepEqual(batch.sync([figure.group]).moved, []);
+});

@@ -10,7 +10,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   get: () => () => undefined,
   set: () => true,
 })) as never;
-const { buildRealSizeOffice } = await import('./real-size-office.js');
+const { buildRealSizeOffice, realSizeCameras, REAL_SIZE } = await import('./real-size-office.js');
 const { countDrawCalls, DRAW_CALL_BUDGET } = await import('../src/scene/RenderBudget.js');
 const { StaticBatch, STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
 const { FigureBatch } = await import('../src/characters/FigureBatch.js');
@@ -23,21 +23,66 @@ function vertexCount(meshes: THREE.Mesh[]): number {
   return meshes.reduce((sum, mesh) => sum + mesh.geometry.attributes.position.count, 0);
 }
 
-test('at the real size (25 rooms, 40 agents) one frame stays under the draw-call budget, shadow pass included', () => {
+function countNamed(scene: THREE.Object3D, name: string): number {
+  let count = 0;
+  scene.traverse((object) => { if (object.name === name) count++; });
+  return count;
+}
+
+test('the real-size fixture wears BMAD hats and holds GitHub cards, as with the fork plugins on', () => {
+  const { scene } = buildRealSizeOffice();
+  assert.equal(countNamed(scene, 'bmad-hats'), REAL_SIZE.hatWearers);
+  assert.equal(countNamed(scene, 'github-cards'), REAL_SIZE.cardHolders);
+});
+
+test('at the real size (25 rooms, 40 agents, hats and cards) a frame from each start view stays under the draw-call budget, shadow pass included', () => {
   const { scene, manager } = buildRealSizeOffice();
   scene.updateMatrixWorld();
-  const before = countDrawCalls(scene);
+  const cameras = realSizeCameras(scene);
+  const before = countDrawCalls(scene, cameras.firstPerson);
   // Without the batches the same scene is far above the budget: the test can fail
-  assert.ok(before.total > DRAW_CALL_BUDGET * 10, `unbatched ${JSON.stringify(before)}`);
+  assert.ok(before.total > DRAW_CALL_BUDGET * 2, `unbatched ${JSON.stringify(before)}`);
 
   const statics = new StaticBatch(scene);
   statics.update();
   new FigureBatch(scene).sync(manager.getAgents().map((managed) => managed.figure.group));
-  const after = countDrawCalls(scene);
+  for (const [view, camera] of Object.entries(cameras)) {
+    const after = countDrawCalls(scene, camera);
+    console.log(`${view}: draw calls before ${JSON.stringify(before)} after ${JSON.stringify(after)}`);
+    assert.equal(after.shadowLights, 3);
+    assert.ok(after.total < DRAW_CALL_BUDGET, `${view} batched ${JSON.stringify(after)}`);
+  }
+});
 
-  console.log(`draw calls before ${JSON.stringify(before)} after ${JSON.stringify(after)}`);
-  assert.equal(after.shadowLights, 3);
-  assert.ok(after.total < DRAW_CALL_BUDGET, `batched ${JSON.stringify(after)}`);
+test('the count culls like the renderer: a mesh behind the camera or outside every lamp cone costs nothing', () => {
+  const scene = new THREE.Scene();
+  const light = new THREE.SpotLight(0xffffff, 1, 20, Math.PI / 3);
+  light.castShadow = true;
+  light.position.set(0, 5, 0);
+  light.target.position.set(0, 0, 0);
+  scene.add(light, light.target);
+  const box = () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial());
+    mesh.castShadow = true;
+    scene.add(mesh);
+    return mesh;
+  };
+  box().position.set(0, 0.5, 0); // seen by the camera and the lamp
+  box().position.set(0, 0.5, 30); // behind the camera, outside the cone
+  const always = box();
+  always.position.set(50, 0.5, 50);
+  always.frustumCulled = false; // an instanced batch: drawn in every pass
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  camera.position.set(0, 2, 10);
+  camera.lookAt(0, 0, 0);
+  scene.updateMatrixWorld();
+  camera.updateMatrixWorld();
+
+  const culled = countDrawCalls(scene, camera);
+  assert.deepEqual({ main: culled.main, shadowCalls: culled.shadowCalls, total: culled.total }, { main: 2, shadowCalls: 2, total: 4 });
+  // Without a camera the count stays the worst case: every mesh, every caster for every light
+  const worst = countDrawCalls(scene);
+  assert.deepEqual({ main: worst.main, shadowCalls: worst.shadowCalls, total: worst.total }, { main: 3, shadowCalls: 3, total: 6 });
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

@@ -10,7 +10,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
  * The source meshes stay in the scene graph (names, `visible`, `getObjectByName`
  * and wall rebuilds keep working); they only move to `STATIC_SOURCE_LAYER`, which
  * no camera renders. A batch rebuilds when its sources change: a mesh is added or
- * removed, or its visibility changes.
+ * removed, its visibility changes, or it takes another material.
  *
  * Never merged, so they keep their own draw call and can change: meshes whose
  * material is not a `MeshToonMaterial` (canvas boards), transparent meshes, and
@@ -60,6 +60,18 @@ interface Batch {
 
 function mix(hash: number, value: number): number {
   return Math.imul(hash ^ value, 0x01000193) >>> 0;
+}
+
+const materialNumbers = new WeakMap<THREE.Material, number>();
+let nextMaterialNumber = 1;
+
+function materialNumber(material: THREE.Material): number {
+  let number = materialNumbers.get(material);
+  if (number === undefined) {
+    number = nextMaterialNumber++;
+    materialNumbers.set(material, number);
+  }
+  return number;
 }
 
 function isMergeable(mesh: THREE.Mesh): boolean {
@@ -137,7 +149,7 @@ export class StaticBatch {
       if (merge) batch.sources.push(mesh);
       else batch.excluded.push(mesh);
       let hash = signatures.get(key) ?? 0x811c9dc5;
-      hash = mix(mix(hash, mesh.id), merge ? 1 : 0);
+      hash = mix(mix(mix(hash, mesh.id), merge ? 1 : 0), merge ? materialNumber(mesh.material as THREE.Material) : 0);
       signatures.set(key, hash);
     }
     for (const child of object.children) this.collect(child, key, isVisible, isBlocked, signatures);
