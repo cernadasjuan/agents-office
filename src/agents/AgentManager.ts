@@ -17,6 +17,8 @@ function accentColorFor(agentId: string): THREE.Color {
   return Colors.accents[(hash >>> 0) % Colors.accents.length];
 }
 
+const SUBAGENT_SCALE = 0.85;
+
 export interface ManagedAgent {
   info: AgentInfo;
   figure: StickFigure;
@@ -38,7 +40,10 @@ export class AgentManager {
   }
 
   addAgent(info: AgentInfo): StickFigure {
-    const figure = new StickFigure(info.name, accentColorFor(info.id));
+    // A subagent wears its parent's color and stands a little smaller, so you see whose helper it is
+    const parentId = info.extras?.parentId;
+    const figure = new StickFigure(info.name, accentColorFor(parentId ?? info.id));
+    if (parentId) figure.group.scale.setScalar(SUBAGENT_SCALE);
     const managed: ManagedAgent = { info, figure, seat: null };
     this.agents.set(info.id, managed);
     this.scene.add(figure.group);
