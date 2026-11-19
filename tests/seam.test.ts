@@ -102,7 +102,7 @@ const testPlugin: OfficePlugin = {
 async function server() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agents-office-seam-test-'));
   const vite = await createServer({ root, configFile: false, envFile: false,
-    plugins: [agentDetectorPlugin({ detect: () => [record], plugins: [testPlugin] })],
+    plugins: [agentDetectorPlugin({ detect: () => [record], plugins: [testPlugin], codexHome: null })],
     server: { host: '127.0.0.1', port: 0, open: false, watch: null, ws: false },
     optimizeDeps: { noDiscovery: true, include: [] }, logLevel: 'silent' });
   resources.push({ server: vite, root });

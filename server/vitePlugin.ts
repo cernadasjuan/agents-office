@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin, ViteDevServer } from 'vite';
 import type { DetectedAgent } from './agentDetector.js';
 import { claudeSource } from './claudeSource.js';
+import { codexSource } from './codexSource.js';
 import { attentionEnricher } from './attention.js';
 import { isOfficePlugin, pluginEntry } from './plugins.js';
 import { describeWorld, observe, projectAgents, projectWorld, type OfficePlugin } from './seam.js';
@@ -20,6 +21,8 @@ export interface AgentDetectorOptions {
   /** Plugin folder names to load from `pluginsDir` (AGENTS_OFFICE_PLUGINS or --plugin). */
   pluginNames?: string[];
   pluginsDir?: string;
+  /** Codex home for the built-in Codex source. Default: CODEX_HOME, else ~/.codex. null turns the source off. */
+  codexHome?: string | null;
 }
 
 /**
@@ -73,7 +76,9 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
 
   const pipeline = () => ({
     core: claudeSource(settings.detect),
-    sources: plugins.flatMap((plugin) => plugin.sources ?? []),
+    // Codex is built in but runs like a plugin source: its failure drops only its own agents.
+    sources: [...(settings.codexHome === null ? [] : [codexSource(settings.codexHome)]),
+      ...plugins.flatMap((plugin) => plugin.sources ?? [])],
     enrichers: [attentionEnricher(), ...plugins.flatMap((plugin) => plugin.enrichers ?? [])],
     world: plugins.flatMap((plugin) => plugin.world ?? []),
   });

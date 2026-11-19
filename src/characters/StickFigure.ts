@@ -23,6 +23,7 @@ export class StickFigure {
   private targetLookAt = new THREE.Vector3();
   private isMoving = false;
   private posture: Posture | undefined;
+  private tag: string | undefined;
   private attention: string | undefined;
   private waitMinutes: number | undefined;
   private beacon: THREE.Mesh | null = null;
@@ -53,6 +54,13 @@ export class StickFigure {
     this.refreshLabel();
   }
 
+  /** Optional provider mark in the floating label, for example "codex". */
+  setTag(tag: string | undefined): void {
+    if (tag === this.tag) return;
+    this.tag = tag;
+    this.refreshLabel();
+  }
+
   /** Who needs the user: 'waiting' raises a hand and shows a beacon, 'your-turn' changes the label only. */
   setAttention(attention: string | undefined, waitMinutes: number | undefined): void {
     this.attention = attention;
@@ -71,7 +79,8 @@ export class StickFigure {
   }
 
   private refreshLabel(): void {
-    updateLabel(this.label, this.name, attentionLine(ACTIVITY_LABELS[this.targetActivity] ?? this.targetActivity, this.attention, this.waitMinutes));
+    const activityText = ACTIVITY_LABELS[this.targetActivity] ?? this.targetActivity;
+    updateLabel(this.label, this.name, attentionLine(activityText, this.attention, this.waitMinutes), this.tag);
   }
 
   /** Force a posture for the current seat, or undefined to let the activity decide. */

@@ -44,6 +44,7 @@ export class AgentManager {
     const parentId = info.extras?.parentId;
     const figure = new StickFigure(info.name, accentColorFor(parentId ?? info.id));
     if (parentId) figure.group.scale.setScalar(SUBAGENT_SCALE);
+    figure.setTag(info.extras?.provider);
     const managed: ManagedAgent = { info, figure, seat: null };
     this.agents.set(info.id, managed);
     this.scene.add(figure.group);
@@ -71,6 +72,7 @@ export class AgentManager {
     const managed = this.agents.get(agentId);
     if (!managed) return;
     managed.info.extras = extras;
+    managed.figure.setTag(extras?.provider);
     managed.figure.setAttention(extras?.attention, extras?.waitMinutes);
     const seat = this.layout.seatFor(managed.info, managed.info.activity);
     if (seat) this.goToSeat(managed, seat, false);
