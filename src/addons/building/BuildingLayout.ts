@@ -39,6 +39,8 @@ interface AgentState {
 
 interface RoomRecord {
   kind: RoomKind;
+  /** The herdr workspace a desk room belongs to, by name. */
+  tag?: string;
   index: number;
   group: THREE.Group;
   extraDoors: Door[];
@@ -74,7 +76,7 @@ export class BuildingLayout implements LayoutStrategy {
     this.storage = options.storage;
     this.hideHallSideWalls();
     const remembered = this.rememberedRooms();
-    for (const kind of remembered.length > 0 ? remembered : ['office' as RoomKind]) this.addRoom(kind, false);
+    for (const { kind, tag } of remembered.length > 0 ? remembered : [{ kind: 'office' as RoomKind }]) this.addRoom(kind, false, tag);
     // The Library is its own room from the start: research trips and librarians go there
     if (!this.roomKinds.includes('library')) this.addRoom('library', false);
     this.saveRooms();
@@ -121,6 +123,12 @@ export class BuildingLayout implements LayoutStrategy {
 
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
     const state = this.stateOf(agent);
+    if (this.needsRehome(state)) {
+      if (state.seat === state.home) state.seat = null;
+      this.free(state.home);
+      state.home = null;
+      if (state.target === 'home') return this.assign(state, 'home');
+    }
     const desired = this.targetFor(state);
     if (previous === null || state.target === null) return this.assign(state, desired);
     if (desired === state.target) {
@@ -188,9 +196,33 @@ export class BuildingLayout implements LayoutStrategy {
     return this.seat(key);
   }
 
+  /**
+   * The agent's desk for life. A session in a herdr workspace gets a desk in that
+   * workspace's desk room (one is rented when needed); others use the hall desks.
+   */
   private homeOf(state: AgentState): string {
-    if (!state.home) state.home = this.claimOfType('implementing');
-    return state.home;
+    if (state.home) return state.home;
+    const workspace = state.agent.extras?.parentId ? undefined : state.agent.extras?.group?.label;
+    const desks = () => this.keysOfType('implementing').filter((key) => this.roomTagOf(key) === workspace);
+    let free = desks().find((key) => !this.stations.get(key)!.occupied);
+    if (!free) {
+      this.addRoom('desks', true, workspace);
+      free = desks().find((key) => !this.stations.get(key)!.occupied)!;
+    }
+    this.stations.get(free)!.occupied = true;
+    state.home = free;
+    return free;
+  }
+
+  private roomTagOf(key: string): string | undefined {
+    const match = /^room(\d+)_/.exec(key);
+    return match ? this.rooms[Number(match[1])]?.tag : undefined;
+  }
+
+  /** A session whose workspace became known after it got a desk moves once to its workspace room. */
+  private needsRehome(state: AgentState): boolean {
+    const workspace = state.agent.extras?.parentId ? undefined : state.agent.extras?.group?.label;
+    return state.home !== null && workspace !== undefined && this.roomTagOf(state.home) !== workspace;
   }
 
   /** A seat in a war room, or a lounge seat when the room is full. */
@@ -290,11 +322,11 @@ export class BuildingLayout implements LayoutStrategy {
     return state;
   }
 
-  private addRoom(kind: RoomKind, save = true): void {
+  private addRoom(kind: RoomKind, save = true, tag?: string): void {
     const index = this.rooms.length;
     const slot = slotFor(index);
-    const built = buildRoom(kind, slot, index, []);
-    const record: RoomRecord = { kind, index, group: built.group, extraDoors: [] };
+    const built = buildRoom(kind, slot, index, [], tag ? `Desks · ${tag}` : undefined);
+    const record: RoomRecord = { kind, index, group: built.group, extraDoors: [], ...(tag ? { tag } : {}) };
     this.rooms.push(record);
     this.scene.add(built.group);
     for (const [key, station] of built.stations) this.stations.set(key, station);
@@ -338,11 +370,17 @@ export class BuildingLayout implements LayoutStrategy {
     this.scene.add(this.hallWalls);
   }
 
-  private rememberedRooms(): RoomKind[] {
+  /** Remembered rooms: a kind, or `desks@<workspace name>` for a workspace desk room. */
+  private rememberedRooms(): Array<{ kind: RoomKind; tag?: string }> {
     try {
       const parsed: unknown = JSON.parse(this.storage?.getItem(BUILDING_STORAGE_KEY) ?? '[]');
       const kinds = Object.keys(ROOM_STATION_TYPE);
-      return Array.isArray(parsed) ? parsed.filter((kind): kind is RoomKind => kinds.includes(kind)).slice(0, 200) : [];
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((entry): entry is string => typeof entry === 'string').slice(0, 200).flatMap((entry) => {
+        const [kind, ...rest] = entry.split('@');
+        const tag = rest.join('@').trim().slice(0, 40);
+        return kinds.includes(kind) ? [{ kind: kind as RoomKind, ...(tag ? { tag } : {}) }] : [];
+      });
     } catch {
       return [];
     }
@@ -350,7 +388,7 @@ export class BuildingLayout implements LayoutStrategy {
 
   private saveRooms(): void {
     try {
-      this.storage?.setItem(BUILDING_STORAGE_KEY, JSON.stringify(this.roomKinds));
+      this.storage?.setItem(BUILDING_STORAGE_KEY, JSON.stringify(this.rooms.map((room) => (room.tag ? `${room.kind}@${room.tag}` : room.kind))));
     } catch {
       // Storage full or blocked: the building still works for this page
     }
