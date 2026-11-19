@@ -30,15 +30,22 @@ export interface StaticOptions {
   zone?: string;
   /** False: the merged meshes cast no shadow (rooms outside the hall lamps' reach). */
   castShadow?: boolean;
+  /**
+   * Zone only: the full height of a zone that stands on the floor (walls, door
+   * frames). The zone container carries it as `userData.overviewLower`, and
+   * `applyCutaway` lowers the zone in the overview.
+   */
+  overviewLower?: number;
 }
 
 interface StaticMark {
   zone: string | null;
   castShadow: boolean;
+  overviewLower: number | null;
 }
 
 export function markStatic(root: THREE.Object3D, options: StaticOptions = {}): void {
-  root.userData[MARK] = { zone: options.zone ?? null, castShadow: options.castShadow ?? true } satisfies StaticMark;
+  root.userData[MARK] = { zone: options.zone ?? null, castShadow: options.castShadow ?? true, overviewLower: options.overviewLower ?? null } satisfies StaticMark;
 }
 
 interface Batch {
@@ -144,6 +151,7 @@ export class StaticBatch {
         container = new THREE.Group();
         container.name = `static-batch-${mark.zone}`;
         container.userData[MERGED] = true;
+        if (mark.overviewLower !== null) container.userData.overviewLower = mark.overviewLower;
         this.scene.add(container);
       }
       batch = { container, castShadow: mark.castShadow, signature: 0, sources: [], excluded: [], merged: [], seen: false };
@@ -158,6 +166,23 @@ export class StaticBatch {
       mesh.geometry.dispose();
     }
     batch.merged = [];
+  }
+
+  /**
+   * The inverse of the container's world matrix. A cutaway zone may be lowered
+   * (scaled on y) right now; its merged geometry is built at full height.
+   */
+  private unscaledInverse(container: THREE.Object3D): THREE.Matrix4 {
+    if (container.userData.overviewLower === undefined || container.scale.y === 1) {
+      return new THREE.Matrix4().copy(container.matrixWorld).invert();
+    }
+    const scaleY = container.scale.y;
+    container.scale.y = 1;
+    container.updateMatrixWorld();
+    const inverse = new THREE.Matrix4().copy(container.matrixWorld).invert();
+    container.scale.y = scaleY;
+    container.updateMatrixWorld();
+    return inverse;
   }
 
   private rebuild(batch: Batch): void {
@@ -179,7 +204,7 @@ export class StaticBatch {
       groups.set(key, list);
     }
 
-    const inverse = new THREE.Matrix4().copy(batch.container.matrixWorld).invert();
+    const inverse = this.unscaledInverse(batch.container);
     for (const meshes of groups.values()) {
       const geometries = meshes.map((mesh) => {
         const geometry = mesh.geometry.clone();

@@ -6,7 +6,7 @@ import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
 import type { WorldRoom } from '../../extensions.js';
 import { ROOM_SIZE, type Rect, type RoomSlot } from './RoomPlanner.js';
-import { buildWalls, doorFrame, ROOM_LABEL_Y, roomLabel, RoomFrame, setRoomLabelText } from './rooms.js';
+import { buildWalls, doorFrame, markCutaway, ROOM_LABEL_Y, roomLabel, RoomFrame, setRoomLabelText } from './rooms.js';
 
 /**
  * The mission wing: war rooms north of the hall, behind its back wall, two per
@@ -110,9 +110,12 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   group.add(floor);
   const walls = buildWalls(slot.rect, [slot.door]);
   walls.name = 'room-walls';
+  markCutaway(walls);
   group.add(walls);
-  group.add(doorFrame(slot.rect, slot.door, FLOOR_COLOR));
-  const label = roomLabel(room.title, frame.point(0, ROOM_SIZE / 2, ROOM_LABEL_Y));
+  const doorway = doorFrame(slot.rect, slot.door, FLOOR_COLOR);
+  markCutaway(doorway);
+  group.add(doorway);
+  const label = roomLabel(room.title, frame.point(0, ROOM_SIZE / 2, ROOM_LABEL_Y), slot.rect);
   group.add(label);
 
   // The table and its seats; more agents stand around it
@@ -155,6 +158,8 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.4, 0.1), getToonMaterial(0x5a4a3a));
   door.position.copy(frame.point(slot.door.at - (slot.rect.minX + slot.rect.maxX) / 2, 0.02, 1.2));
   door.visible = false;
+  // The closed door stands in the doorway: it drops with the walls in the overview
+  markCutaway(door);
   group.add(door);
   const lockSign = sign('Locked: mission closed', frame.point(0, 0.4, 2.6), slot.rect, false, 'rgba(120, 40, 40, 0.9)');
   lockSign.visible = false;

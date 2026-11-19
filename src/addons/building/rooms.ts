@@ -122,6 +122,14 @@ function station(type: string, position: THREE.Vector3, lookAt: THREE.Vector3, p
   return { type, position, lookAt, occupied: false, ...(posture ? { posture } : {}) };
 }
 
+/**
+ * Put walls and door frames in the shared cutaway zone: they draw merged, and
+ * the overview lowers the zone so the room floors show (`applyCutaway`).
+ */
+export function markCutaway(root: THREE.Object3D): void {
+  markStatic(root, { zone: 'room-walls', castShadow: false, overviewLower: WALL_HEIGHT });
+}
+
 /** Low walls with gaps at the doors, so the overview can see in. */
 export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hideSides: Side[] = []): THREE.Group {
   const group = new THREE.Group();
@@ -140,7 +148,6 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
     wall.castShadow = true;
     wall.receiveShadow = true;
     if (hideSides.includes(piece.side)) wall.userData.overviewHidden = true;
-    else wall.userData.overviewLower = true;
     group.add(wall);
   }
   return group;
@@ -164,11 +171,13 @@ export function roomLabelLines(text: string): string[] {
  * A room name in the world: a light plate with dark wide capitals above the room
  * center. It scales with distance, and geometry in front of it hides it.
  */
-export function roomLabel(text: string, position: THREE.Vector3): THREE.Sprite {
+export function roomLabel(text: string, position: THREE.Vector3, rect: Rect): THREE.Sprite {
   const material = new THREE.SpriteMaterial({ depthTest: true, depthWrite: false, transparent: true, toneMapped: false });
   const label = new THREE.Sprite(material);
   label.name = 'room-label';
   label.position.copy(position);
+  // The label controller hides it in first person while the camera is inside this room
+  label.userData.roomRect = { ...rect };
   setRoomLabelText(label, text);
   return label;
 }
@@ -274,9 +283,12 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
   group.add(floor);
   const walls = buildWalls(slot.rect, [slot.door, ...extraDoors]);
   walls.name = 'room-walls';
+  markCutaway(walls);
   group.add(walls);
-  group.add(doorFrame(slot.rect, slot.door, FLOOR_TINT[kind]));
-  group.add(roomLabel(title ?? roomTitle(kind, []), frame.point(0, ROOM_SIZE / 2, ROOM_LABEL_Y)));
+  const doorway = doorFrame(slot.rect, slot.door, FLOOR_TINT[kind]);
+  markCutaway(doorway);
+  group.add(doorway);
+  group.add(roomLabel(title ?? roomTitle(kind, []), frame.point(0, ROOM_SIZE / 2, ROOM_LABEL_Y), slot.rect));
 
   const rows = (count: number, spacing: number) => Array.from({ length: count }, (_, i) => (i - (count - 1) / 2) * spacing);
 

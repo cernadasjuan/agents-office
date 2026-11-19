@@ -370,7 +370,8 @@ export class BuildingLayout implements LayoutStrategy {
     ].map(matchingDoor);
     this.hallWalls = buildWalls(HALL, doors, OFFICE.height, ['south', 'west']);
     this.hallWalls.name = 'building-hall-walls';
-    markStatic(this.hallWalls, { zone: 'hall' });
+    // Its own zone: the overview lowers the hall walls like the room walls
+    markStatic(this.hallWalls, { zone: 'hall-walls', overviewLower: OFFICE.height });
     this.scene.add(this.hallWalls);
   }
 

@@ -46,6 +46,21 @@ export function labelDetail(facts: LabelFacts, view: LabelView): LabelLevel {
   return facts.distance <= FIRST_PERSON_FULL_LABEL_DISTANCE ? 'full' : 'compact';
 }
 
+export interface RoomLabelFacts {
+  viewMode: LabelView['viewMode'];
+  /** The camera stands inside the label's room. */
+  cameraInside: boolean;
+}
+
+/**
+ * Whether a room label (an in-scene sprite above the room center) shows. In first
+ * person it hides while you stand in its room, so it does not block the view.
+ * Elsewhere it shows; walls hide it in first person by depth.
+ */
+export function roomLabelVisible(facts: RoomLabelFacts): boolean {
+  return facts.viewMode === 'overview' || !facts.cameraInside;
+}
+
 export interface SignFacts {
   /** The pointer is over the sign's room. */
   hovered: boolean;
@@ -190,6 +205,13 @@ export class LabelDetailController {
     if (!scene) return;
     const pointed = view.mode === 'smart' ? this.pointedFloor() : null;
     scene.traverse((object) => {
+      const roomRect = object.userData.roomRect as DetailSign['rect'] | undefined;
+      if (roomRect) {
+        const position = this.cameraPosition;
+        const cameraInside = position.x >= roomRect.minX && position.x <= roomRect.maxX && position.z >= roomRect.minZ && position.z <= roomRect.maxZ;
+        object.visible = roomLabelVisible({ viewMode: view.viewMode, cameraInside });
+        return;
+      }
       const detail = object.userData.detailSign as DetailSign | undefined;
       const element = (object as THREE.Object3D & { element?: HTMLElement }).element;
       if (!detail || !element) return;

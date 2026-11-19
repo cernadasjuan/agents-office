@@ -11,10 +11,6 @@ const FIRST_PERSON_FOCUS_HEIGHT = 1.2;
 const FIGURE_CHEST = 1.1;
 const PAN_SPEED_PER_DISTANCE = 0.9;
 const FAST_MULTIPLIER = 2.5;
-/** In the overview, walls marked `userData.overviewLower` drop to this height (a dollhouse cutaway). */
-export const OVERVIEW_WALL_HEIGHT = 0.5;
-/** How often the overview checks for walls built since it opened. */
-const CUTAWAY_REFRESH_SECONDS = 0.5;
 
 export const VIEW_HINTS: Record<ViewMode, string> = {
   'first-person': 'Click to look around — WASD to move — Space/Q up/down — Shift = fast — ESC to release — Click a figure to select — O = overview',
@@ -49,8 +45,6 @@ export class ViewController {
   private flight: { tween: PoseTween; end: CameraPose } | null = null;
   private savedFirstPerson: CameraPose | null = null;
   private hiddenInOverview: THREE.Object3D[] = [];
-  private loweredInOverview = new Map<THREE.Object3D, { scaleY: number; y: number }>();
-  private lastCutaway = Number.NEGATIVE_INFINITY;
   private panKeys = new Set<string>();
   private pressPoint: ScreenPoint | null = null;
   private dragPoint: ScreenPoint | null = null;
@@ -118,10 +112,6 @@ export class ViewController {
 
   update(elapsed: number, delta: number): void {
     const camera = this.options.camera;
-    if (this.currentMode === 'overview' && elapsed - this.lastCutaway >= CUTAWAY_REFRESH_SECONDS) {
-      this.lastCutaway = elapsed;
-      this.hideNearWalls();
-    }
     if (this.flight) {
       const pose = this.flight.tween.advance(delta);
       this.applyPose(pose);
@@ -274,42 +264,18 @@ export class ViewController {
     this.overview.pan(right * step, forward * step);
   }
 
-  /**
-   * Walls and lamps marked `userData.overviewHidden` would block the overview; hide them there.
-   * Walls marked `userData.overviewLower` drop to `OVERVIEW_WALL_HEIGHT`, so the room floors show.
-   * Safe to call again: it only acts on objects it has not handled yet (walls built later).
-   */
+  /** Walls and lamps marked `userData.overviewHidden` would block the overview; hide them there. */
   private hideNearWalls(): void {
+    this.hiddenInOverview = [];
     this.options.scene.traverse((object) => {
-      if (object.userData.overviewHidden && object.visible) {
-        object.visible = false;
-        this.hiddenInOverview.push(object);
-      }
-      if (object.userData.overviewLower && !this.loweredInOverview.has(object)) this.lower(object);
+      if (object.userData.overviewHidden && object.visible) this.hiddenInOverview.push(object);
     });
-  }
-
-  /** Scale a wall mesh down to the overview height; its bottom stays where it was. */
-  private lower(object: THREE.Object3D): void {
-    if (!(object instanceof THREE.Mesh)) return;
-    if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
-    const { min, max } = object.geometry.boundingBox!;
-    const height = (max.y - min.y) * object.scale.y;
-    if (!(height > OVERVIEW_WALL_HEIGHT)) return;
-    this.loweredInOverview.set(object, { scaleY: object.scale.y, y: object.position.y });
-    const bottom = object.position.y + min.y * object.scale.y;
-    object.scale.y *= OVERVIEW_WALL_HEIGHT / height;
-    object.position.y = bottom - min.y * object.scale.y;
+    for (const object of this.hiddenInOverview) object.visible = false;
   }
 
   private showNearWalls(): void {
     for (const object of this.hiddenInOverview) object.visible = true;
     this.hiddenInOverview = [];
-    for (const [object, saved] of this.loweredInOverview) {
-      object.scale.y = saved.scaleY;
-      object.position.y = saved.y;
-    }
-    this.loweredInOverview.clear();
   }
 
   private setHint(): void {

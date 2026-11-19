@@ -5,7 +5,6 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { DOOR_WIDTH, slotFor, type Door, type Rect } from '../src/addons/building/RoomPlanner.js';
 import type { Activity } from '../src/agents/ActivityAnimations.js';
-import type { LayoutStrategy } from '../src/layout/LayoutStrategy.js';
 
 // Furniture paints toon gradients on a canvas; room labels draw on a canvas too.
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
@@ -16,13 +15,15 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout } = await import('../src/addons/building/BuildingLayout.js');
-const { buildRoom, buildWalls, roomFloorColor, roomTitle, ROOM_LABEL_Y, WALL_HEIGHT } = await import('../src/addons/building/rooms.js');
+const { buildRoom, roomFloorColor, roomTitle, ROOM_LABEL_Y, WALL_HEIGHT } = await import('../src/addons/building/rooms.js');
 const { buildMissionRoom } = await import('../src/addons/building/missionRooms.js');
-const { ViewController, OVERVIEW_WALL_HEIGHT } = await import('../src/scene/ViewController.js');
-const { AgentManager } = await import('../src/agents/AgentManager.js');
-const { SelectionState } = await import('../src/scene/Selection.js');
+const { applyCutaway, OVERVIEW_WALL_HEIGHT } = await import('../src/scene/Cutaway.js');
+const { StaticBatch, STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
+const { FrameLoop } = await import('../src/scene/FrameLoop.js');
+const { addLighting } = await import('../src/scene/SceneSetup.js');
+const { OFFICE } = await import('../src/utils/Constants.js');
 const {
-  LabelDetailController, OVERVIEW_SIGN_ZOOM, FIRST_PERSON_SIGN_DISTANCE, signVisible,
+  LabelDetailController, OVERVIEW_SIGN_ZOOM, FIRST_PERSON_SIGN_DISTANCE, roomLabelVisible, signVisible,
 } = await import('../src/ui/LabelDetail.js');
 after(() => {
   dom.window.close();
@@ -95,6 +96,40 @@ test('a war room label follows the mission title', () => {
   assert.equal(labelsIn(room.group)[0].userData.roomLabel, 'New title');
 });
 
+test('a room label hides in first person while the camera is inside its room, so it does not block the view', () => {
+  assert.equal(roomLabelVisible({ viewMode: 'first-person', cameraInside: true }), false);
+  assert.equal(roomLabelVisible({ viewMode: 'first-person', cameraInside: false }), true);
+  assert.equal(roomLabelVisible({ viewMode: 'overview', cameraInside: true }), true);
+});
+
+test('the label controller applies the room label rule from the camera position', () => {
+  const scene = new THREE.Scene();
+  const slot = slotFor(1);
+  const room = buildRoom('library', slot, 1, []);
+  scene.add(room.group);
+  const [label] = labelsIn(room.group);
+  assert.deepEqual(label.userData.roomRect, slot.rect);
+  const camera = new THREE.PerspectiveCamera(60, 16 / 10, 0.1, 500);
+  const inside = center(slot.rect);
+  camera.position.set(inside.x, 1.6, inside.z);
+  camera.updateMatrixWorld();
+  let viewMode: 'overview' | 'first-person' = 'first-person';
+  const controller = new LabelDetailController({
+    agents: () => [], camera, canvas: dom.window.document.createElement('canvas'), keys: dom.window, scene,
+    viewMode: () => viewMode, zoomDistance: () => 40, pick: () => null, selected: () => null,
+  });
+  controller.refresh();
+  assert.equal(label.visible, false, 'inside the room in first person');
+  camera.position.set(0, 1.6, 0);
+  camera.updateMatrixWorld();
+  controller.refresh();
+  assert.equal(label.visible, true, 'from the hall');
+  camera.position.set(inside.x, 1.6, inside.z);
+  viewMode = 'overview';
+  controller.refresh();
+  assert.equal(label.visible, true, 'always in the overview');
+});
+
 // --- AC4: lounge names ---
 
 test('lounges are numbered in the order they are rented', () => {
@@ -161,71 +196,115 @@ test('every doorway of the building has a frame, outer rings and war rooms inclu
 
 // --- AC3: cut-away walls ---
 
-test('room walls and hall walls are marked to be lowered in the overview, hidden walls stay hidden', () => {
-  const walls = buildWalls({ minX: 0, maxX: 12, minZ: 0, maxZ: 12 }, [{ side: 'west', at: 6 }], 6, ['south']);
-  for (const wall of walls.children) {
-    if (wall.userData.overviewHidden) continue;
-    assert.equal(wall.userData.overviewLower, true);
-  }
-  assert.ok(walls.children.some((wall) => wall.userData.overviewHidden), 'the south side is still hidden');
-});
+/** Run the static merge and the cutaway once, as a frame of the render loop does. */
+function frameOf(scene: THREE.Scene, statics: InstanceType<typeof StaticBatch>, overview: boolean): boolean {
+  scene.updateMatrixWorld();
+  statics.update();
+  return applyCutaway(scene, overview);
+}
 
-function viewOver(scene: THREE.Scene) {
-  const document = dom.window.document;
-  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
-  camera.position.set(-12, 5.5, 11);
-  const canvas = document.createElement('canvas');
-  document.body.appendChild(canvas);
-  const empty: LayoutStrategy = { id: 'none', seatFor: () => null, release: () => undefined };
-  const manager = new AgentManager(new THREE.Scene(), empty);
-  const view = new ViewController({ camera, canvas, scene, selection: new SelectionState(), agents: () => manager.getAgents(), keys: dom.window });
-  const press = (code: string) => dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { code, key: code }));
-  return { view, press };
+/** The highest point of every drawn (camera layer) mesh under a zone container that the overview lowers. */
+function drawnWallTops(scene: THREE.Scene): number[] {
+  const tops: number[] = [];
+  const camera = new THREE.Layers();
+  for (const container of scene.children) {
+    if (container.userData.overviewLower === undefined) continue;
+    container.traverseVisible((object) => {
+      if ((object as THREE.Mesh).isMesh && object.layers.test(camera)) tops.push(topOf(object));
+    });
+  }
+  return tops;
+}
+
+/** Every source wall and door frame mesh of the building: none may draw itself (they draw merged). */
+function sourceWalls(scene: THREE.Scene): THREE.Mesh[] {
+  const found: THREE.Mesh[] = [];
+  scene.traverse((object) => {
+    if (object.name !== 'room-walls' && object.name !== 'building-hall-walls' && object.name !== 'door-frame') return;
+    object.traverse((child) => { if ((child as THREE.Mesh).isMesh && child.visible && !child.userData.overviewHidden) found.push(child as THREE.Mesh); });
+  });
+  return found;
 }
 
 const topOf = (mesh: THREE.Object3D) => new THREE.Box3().setFromObject(mesh).max.y;
 
-test('the overview lowers the walls so the room floors show; first person restores full walls', () => {
+test('room walls, door frames and hall walls draw merged in zones the overview lowers', () => {
+  const { scene, layout } = building();
+  layout.syncWorldRooms([missionRoom('A')]);
+  const statics = new StaticBatch(scene);
+  frameOf(scene, statics, false);
+  const sources = sourceWalls(scene);
+  assert.ok(sources.length > 20, `${sources.length} wall meshes`);
+  for (const mesh of sources) assert.ok(mesh.layers.isEnabled(STATIC_SOURCE_LAYER) && !mesh.layers.isEnabled(0), `${mesh.name} draws merged`);
+  const tops = drawnWallTops(scene);
+  assert.ok(tops.length > 0, 'the walls draw from cutaway zones');
+  assert.ok(Math.max(...tops) >= WALL_HEIGHT - 1e-6, 'first person keeps full walls');
+});
+
+test('the overview lowers the merged walls so the room floors show; first person restores full walls', () => {
   const { scene } = building();
-  const { view, press } = viewOver(scene);
-  const walls: THREE.Mesh[] = [];
-  scene.traverse((object) => { if (object.userData.overviewLower) walls.push(object as THREE.Mesh); });
-  assert.ok(walls.length > 10);
-  const before = walls.map(topOf);
+  const statics = new StaticBatch(scene);
+  frameOf(scene, statics, false);
+  const before = drawnWallTops(scene);
 
-  press('KeyO');
-  assert.equal(view.mode, 'overview');
-  for (const wall of walls) assert.ok(Math.abs(topOf(wall) - OVERVIEW_WALL_HEIGHT) < 1e-6, `wall top ${topOf(wall)}`);
-  for (const wall of walls) assert.ok(new THREE.Box3().setFromObject(wall).min.y > -1e-6, 'the wall stays on the floor');
+  assert.equal(frameOf(scene, statics, true), true, 'the cutaway reports a change');
+  for (const top of drawnWallTops(scene)) assert.ok(top <= OVERVIEW_WALL_HEIGHT + 1e-6, `wall top ${top}`);
+  assert.equal(frameOf(scene, statics, true), false, 'a second overview frame changes nothing');
 
-  press('KeyO');
-  assert.deepEqual(walls.map(topOf), before);
+  frameOf(scene, statics, false);
+  assert.deepEqual(drawnWallTops(scene), before);
 });
 
-test('walls built while the overview is on are lowered too', () => {
+test('walls built while the overview is on are lowered in the same frame, and stand at full height after it', () => {
   const { scene, layout, agent } = building();
-  const { view, press } = viewOver(scene);
-  press('KeyO');
+  const statics = new StaticBatch(scene);
+  frameOf(scene, statics, true);
   for (let i = 0; i < 6 + 9; i++) layout.seatFor(agent(`idle-${i}`, 'idle'), null);
-  view.update(1, 1);
-  const tall: THREE.Object3D[] = [];
-  scene.traverse((object) => {
-    if (object.userData.overviewLower && object.visible && topOf(object) > OVERVIEW_WALL_HEIGHT + 1e-6) tall.push(object);
-  });
-  assert.equal(tall.length, 0);
+  layout.syncWorldRooms([missionRoom('Late')]);
+  frameOf(scene, statics, true);
+  for (const top of drawnWallTops(scene)) assert.ok(top <= OVERVIEW_WALL_HEIGHT + 1e-6, `wall top ${top}`);
+  frameOf(scene, statics, false);
+  const tops = drawnWallTops(scene);
+  assert.ok(Math.max(...tops) <= OFFICE.height + 1e-6, `no stretched wall (${Math.max(...tops)})`);
+  assert.ok(Math.max(...tops) >= WALL_HEIGHT - 1e-6);
 });
 
-test('the activity layout scene does not change in the overview, except its marked walls', () => {
+test('the activity layout scene does not change in the overview', () => {
   const scene = new THREE.Scene();
   createOffice(scene);
   const original: THREE.Object3D[] = [];
-  scene.traverse((object) => { if (!object.userData.overviewHidden) original.push(object); });
+  scene.traverse((object) => original.push(object));
   const snapshot = () => original.map((object) => `${object.uuid}:${object.visible}:${object.scale.toArray()}:${object.position.toArray()}`);
   const before = snapshot();
-  const { view, press } = viewOver(scene);
-  press('KeyO');
-  view.update(1, 1);
-  assert.deepEqual(snapshot(), before);
+  const statics = new StaticBatch(scene);
+  frameOf(scene, statics, false);
+  const merged = snapshot();
+  assert.equal(frameOf(scene, statics, true), false);
+  assert.deepEqual(snapshot(), merged);
+  assert.equal(before.length, merged.length);
+});
+
+test('the render loop applies the cutaway in the frame of the mode switch and redraws the shadows', () => {
+  const { scene } = building();
+  addLighting(scene);
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  camera.position.set(-12, 5.5, 11);
+  let mode: 'first-person' | 'overview' = 'first-person';
+  let renders = 0;
+  const renderer = {
+    render: () => { renders++; }, info: { render: { calls: 0, triangles: 0 } },
+    shadowMap: { needsUpdate: false, type: THREE.PCFSoftShadowMap }, getPixelRatio: () => 1, setPixelRatio: () => undefined,
+  };
+  const loop = new FrameLoop({
+    scene, camera, renderer: renderer as never, labelRenderer: { render: () => undefined },
+    update: () => undefined, figures: () => [], mode: () => mode,
+  });
+  loop.frame(0);
+  mode = 'overview';
+  const before = renders;
+  loop.frame(1000);
+  assert.equal(renders, before + 1);
+  for (const top of drawnWallTops(scene)) assert.ok(top <= OVERVIEW_WALL_HEIGHT + 1e-6, `wall top ${top}`);
 });
 
 // --- AC5: quieter mission signs ---

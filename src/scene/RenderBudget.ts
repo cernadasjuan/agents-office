@@ -24,7 +24,7 @@ function callsOf(object: THREE.Mesh): number {
 /**
  * Count the draw calls of one frame without a GPU, the way WebGLRenderer
  * decides: visible objects on a camera layer, one call per mesh and visible
- * material. Frustum culling is ignored, so the count is the worst case.
+ * material, one per sprite. Frustum culling is ignored, so the count is the worst case.
  */
 export function countDrawCalls(scene: THREE.Object3D, cameraLayers = new THREE.Layers()): DrawCallCount {
   let main = 0;
@@ -32,6 +32,11 @@ export function countDrawCalls(scene: THREE.Object3D, cameraLayers = new THREE.L
   let shadowLights = 0;
   scene.traverseVisible((object) => {
     if ((object as THREE.Light).isLight && (object as THREE.Light).castShadow) shadowLights++;
+    // A sprite (a room label) is one camera draw call; three draws no sprite into a shadow map
+    if ((object as THREE.Sprite).isSprite && object.layers.test(cameraLayers)) {
+      if ((object as THREE.Sprite).material.visible) main++;
+      return;
+    }
     if (!(object as THREE.Mesh).isMesh || !object.layers.test(cameraLayers)) return;
     const calls = callsOf(object as THREE.Mesh);
     main += calls;

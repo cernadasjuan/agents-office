@@ -5,6 +5,7 @@ import { casterSignature, countDrawCalls } from './RenderBudget.js';
 import { FrameStats, RenderScheduler, inShadowReach, renderOnScreenLabels, renderQuality, shadowFrustums } from './RenderScheduler.js';
 import type { ViewMode } from './Selection.js';
 import { StaticBatch } from './StaticMerge.js';
+import { applyCutaway } from './Cutaway.js';
 
 export interface FrameLoopOptions {
   scene: THREE.Scene;
@@ -79,13 +80,14 @@ export class FrameLoop {
     const modeChanged = this.applyQuality();
     scene.updateMatrixWorld();
     const rebuilt = this.staticBatch.update();
+    const cut = applyCutaway(scene, this.options.mode() === 'overview');
     const figures = this.figureBatch.sync(this.options.figures());
     camera.updateMatrixWorld();
     const cameraMoved = !this.lastView.equals(camera.matrixWorld) || !this.lastProjection.equals(camera.projectionMatrix);
-    const active = rebuilt || modeChanged || cameraMoved || figures.changed || figures.moved.length > 0 || Boolean(this.options.animating?.());
+    const active = rebuilt || cut || modeChanged || cameraMoved || figures.changed || figures.moved.length > 0 || Boolean(this.options.animating?.());
     if (!this.scheduler.shouldRender(now, active)) return false;
 
-    const shadows = rebuilt || modeChanged || figures.changed || this.shadowsDirty || this.castersMoved(figures.moved);
+    const shadows = rebuilt || cut || modeChanged || figures.changed || this.shadowsDirty || this.castersMoved(figures.moved);
     if (shadows) renderer.shadowMap.needsUpdate = true;
     this.shadowsDirty = false;
 
