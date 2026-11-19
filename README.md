@@ -169,6 +169,8 @@ This fork adds a second layout, `building`, and makes it the default. `?layout=a
 - **Subagents** stand around their parent's desk.
 - **Library:** the building opens a Library room right after your office. Research trips go there first. With the `library` plugin, librarian subagents (types in `AGENTS_OFFICE_LIBRARIAN_TYPES`, default `bibliotheque-librarian`) carry a book and walk between the Library, while they research, and the agent they serve.
 - **Growth:** when a kind of station runs out, the building adds a room of that kind next to the others: desks, planning room, library, test lab, writing room, lounge, or another waiting room. Rooms are never removed, and the browser remembers them.
+- **Wayfinding:** each room has a large name label above its center ("LIBRARY", "LOUNGE 2"). The label is part of the 3D scene: it gets smaller with distance, and walls hide it in first person. Lounges are numbered in the order the building adds them. Each door has a frame (two posts and a lintel) in the room's floor color, so you find the doors from the hall.
+- **Cut-away walls:** in the overview, the room and hall walls drop to 0.5 m, so you see each room floor and the figures in it. First person keeps the full walls.
 
 ## Plugins
 
@@ -262,6 +264,7 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 - **Who works there:** a session joins a mission's room when its own tool calls touch that mission (a `mission` script command with the slug, or a file under `missions/<slug>/`). Its subagents stand near it. A session that waits for you still goes to your office first.
 - **Walls:** the mission statement, the documents, the GitHub issues and a kanban of the mission's threads (needs you, open, done).
 - **Past sessions:** one bed with a sleeping agent per finished session (up to 12), and a count.
+- **Signs:** the room name is a large label above the room, like the other rooms. The small title sign shows only when you zoom in (overview camera distance 24 or less), come near it in first person (12 units), or point at the room. The past sessions count shows only when you point at the room. `#labels=all` (key V) shows all signs. The "You" sign at your desk follows the same rule.
 - **Closed missions:** the room locks, its door closes and no agent goes in. The room stays.
 - Without `AGENTS_OFFICE_MISSION_ROOTS`, the plugin adds nothing. It reads files only, with a size cap.
 

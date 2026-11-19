@@ -9,6 +9,10 @@ export type LabelLevel = 'full' | 'compact';
 export const FIRST_PERSON_FULL_LABEL_DISTANCE = 8;
 /** Overview: at this camera distance or closer, every label is full. Above the 12-unit fly-to focus distance. */
 export const OVERVIEW_FULL_LABEL_ZOOM = 14;
+/** Overview: at this camera distance or closer, war room signs show. */
+export const OVERVIEW_SIGN_ZOOM = 24;
+/** First person: war room signs within this many units of the camera show. */
+export const FIRST_PERSON_SIGN_DISTANCE = 12;
 /** How often the labels are recomputed. */
 export const LABEL_DETAIL_INTERVAL_MS = 150;
 
@@ -36,6 +40,40 @@ export function labelDetail(facts: LabelFacts, view: LabelView): LabelLevel {
   if (facts.attention === 'waiting' || facts.selected || facts.hovered) return 'full';
   if (view.viewMode === 'overview') return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
   return facts.distance <= FIRST_PERSON_FULL_LABEL_DISTANCE ? 'full' : 'compact';
+}
+
+export interface SignFacts {
+  /** The pointer is over the sign's room. */
+  hovered: boolean;
+  /** Distance from the camera to the sign, in world units. */
+  distance: number;
+  /** A sign that shows only on hover (or with labels: all), never from zoom alone. */
+  hoverOnly: boolean;
+}
+
+/**
+ * Whether a detail sign (a war room sign, marked `userData.detailSign`) shows.
+ * Same rule as agent labels: zoom in or hover in the overview, near the camera in first person.
+ */
+export function signVisible(facts: SignFacts, view: LabelView): boolean {
+  if (view.mode === 'all' || facts.hovered) return true;
+  if (facts.hoverOnly) return false;
+  if (view.viewMode === 'overview') return view.zoomDistance <= OVERVIEW_SIGN_ZOOM;
+  return facts.distance <= FIRST_PERSON_SIGN_DISTANCE;
+}
+
+/** Show or hide a sign with `visibility`, which CSS2DRenderer leaves alone. Returns true only when the DOM changed. */
+export function applySignVisibility(element: HTMLElement, visible: boolean): boolean {
+  const value = visible ? '' : 'hidden';
+  if (element.style.visibility === value) return false;
+  element.style.visibility = value;
+  return true;
+}
+
+/** The rect a detail sign belongs to, on the floor plane. */
+interface DetailSign {
+  rect: { minX: number; maxX: number; minZ: number; maxZ: number };
+  hoverOnly?: boolean;
 }
 
 /** `#labels=all` restores every full label. Anything else is the smart default. */
@@ -75,6 +113,8 @@ export interface LabelDetailOptions {
   hash?: string;
   /** Shows the current mode, for example in the side panel header. */
   indicator?: HTMLElement | null;
+  /** Where detail signs (`userData.detailSign`) live. Without it, only agent labels change. */
+  scene?: THREE.Object3D;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -84,7 +124,8 @@ function isFormField(target: EventTarget | null): boolean {
 
 /**
  * Decides on a throttle which labels are full and which are compact, and only
- * toggles a class on each label element. Key V cycles smart and all.
+ * toggles a class on each label element. With a scene, it also shows or hides
+ * detail signs (war room signs). Key V cycles smart and all.
  */
 export class LabelDetailController {
   private currentMode: LabelMode;
@@ -92,6 +133,9 @@ export class LabelDetailController {
   private pointer: { x: number; y: number } | null = null;
   private figurePosition = new THREE.Vector3();
   private cameraPosition = new THREE.Vector3();
+  private signPosition = new THREE.Vector3();
+  private raycaster = new THREE.Raycaster();
+  private floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
   constructor(private options: LabelDetailOptions) {
     this.currentMode = parseLabelMode(options.hash ?? '');
@@ -133,6 +177,37 @@ export class LabelDetailController {
       }, view);
       applyLabelDetail(agent.figure.label.element, level);
     }
+    this.refreshSigns(view);
+  }
+
+  private refreshSigns(view: LabelView): void {
+    const { scene } = this.options;
+    if (!scene) return;
+    const pointed = view.mode === 'smart' ? this.pointedFloor() : null;
+    scene.traverse((object) => {
+      const detail = object.userData.detailSign as DetailSign | undefined;
+      const element = (object as THREE.Object3D & { element?: HTMLElement }).element;
+      if (!detail || !element) return;
+      const { rect } = detail;
+      const hovered = pointed !== null && pointed.x >= rect.minX && pointed.x <= rect.maxX && pointed.z >= rect.minZ && pointed.z <= rect.maxZ;
+      object.getWorldPosition(this.signPosition);
+      const facts: SignFacts = { hovered, distance: this.signPosition.distanceTo(this.cameraPosition), hoverOnly: detail.hoverOnly === true };
+      applySignVisibility(element, signVisible(facts, view));
+    });
+  }
+
+  /** The floor point under the pointer (or the screen center while the pointer is locked), or null. */
+  private pointedFloor(): THREE.Vector3 | null {
+    const { canvas, camera } = this.options;
+    const rect = canvas.getBoundingClientRect();
+    if (!(rect.width > 0 && rect.height > 0)) return null;
+    const locked = canvas.ownerDocument.pointerLockElement === canvas;
+    if (!locked && !this.pointer) return null;
+    const x = locked ? rect.left + rect.width / 2 : this.pointer!.x;
+    const y = locked ? rect.top + rect.height / 2 : this.pointer!.y;
+    const ndc = new THREE.Vector2(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, camera);
+    return this.raycaster.ray.intersectPlane(this.floor, new THREE.Vector3());
   }
 
   /** Under the pointer, or under the screen center while the pointer is locked (first person). */

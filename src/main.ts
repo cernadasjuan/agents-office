@@ -62,9 +62,11 @@ setupPanelCollapse(document.getElementById('ui-panel')!, document.getElementById
 onSelectionChange((agentId) => panel.setSelected(agentId));
 
 // Label detail: full labels only for waiting, selected, hovered or near agents. Key V or `#labels=all` shows all.
+// War room signs show only when zoomed in, near or hovered.
 const labelDetail = new LabelDetailController({
   agents: () => agentManager.getAgents(),
   camera,
+  scene,
   canvas: renderer.domElement,
   keys: window,
   viewMode: () => view.mode,

@@ -4,7 +4,7 @@ import { OFFICE_WALLS, type Station } from '../../scene/Office.js';
 import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, Seat } from '../../layout/LayoutStrategy.js';
 import { HALL, matchingDoor, slotFor, type Door } from './RoomPlanner.js';
-import { buildRoom, buildWalls, ROOM_STATION_TYPE, type RoomKind } from './rooms.js';
+import { buildRoom, buildWalls, ROOM_STATION_TYPE, roomTitle, type RoomKind } from './rooms.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
 import type { WorldRoom } from '../../extensions.js';
 
@@ -325,7 +325,7 @@ export class BuildingLayout implements LayoutStrategy {
   private addRoom(kind: RoomKind, save = true, tag?: string): void {
     const index = this.rooms.length;
     const slot = slotFor(index);
-    const built = buildRoom(kind, slot, index, [], tag ? `Desks · ${tag}` : undefined);
+    const built = buildRoom(kind, slot, index, [], roomTitle(kind, this.roomKinds, tag));
     const record: RoomRecord = { kind, index, group: built.group, extraDoors: [], ...(tag ? { tag } : {}) };
     this.rooms.push(record);
     this.scene.add(built.group);

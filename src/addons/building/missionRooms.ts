@@ -4,8 +4,8 @@ import { createMeetingTable } from '../../furniture/MeetingTable.js';
 import { getToonMaterial } from '../../utils/Materials.js';
 import type { Station } from '../../scene/Office.js';
 import type { WorldRoom } from '../../extensions.js';
-import { ROOM_SIZE, type RoomSlot } from './RoomPlanner.js';
-import { buildWalls, RoomFrame } from './rooms.js';
+import { ROOM_SIZE, type Rect, type RoomSlot } from './RoomPlanner.js';
+import { buildWalls, doorFrame, ROOM_LABEL_Y, roomLabel, RoomFrame, setRoomLabelText } from './rooms.js';
 
 /**
  * The mission wing: war rooms north of the hall, behind its back wall, two per
@@ -23,6 +23,7 @@ export function missionSlot(index: number): RoomSlot {
 }
 
 const MAX_BEDS = 12;
+const FLOOR_COLOR = 0x6f7f9a;
 const TABLE_SEATS = 8;
 const STANDING_SPOTS = 12;
 
@@ -62,15 +63,21 @@ function bed(): THREE.Group {
   return group;
 }
 
-function sign(text: string, position: THREE.Vector3, background = 'rgba(30, 32, 48, 0.85)'): CSS2DObject {
+/**
+ * A war room sign. It is a detail sign: the label controller shows it only when
+ * the camera is close or the pointer is over its room (`hoverOnly`: hover only).
+ */
+function sign(text: string, position: THREE.Vector3, rect: Rect, hoverOnly: boolean, background = 'rgba(30, 32, 48, 0.85)'): CSS2DObject {
   const element = document.createElement('div');
   element.textContent = text;
+  element.dataset.sign = 'mission';
   Object.assign(element.style, {
     background, color: '#f5f0e8', padding: '2px 8px', borderRadius: '4px',
     font: '600 12px system-ui, sans-serif', whiteSpace: 'nowrap', pointerEvents: 'none',
   });
   const label = new CSS2DObject(element);
   label.position.copy(position);
+  label.userData.detailSign = { rect: { ...rect }, hoverOnly };
   return label;
 }
 
@@ -93,7 +100,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   const key = (n: number) => `mission${index}_seat_${n}`;
   const type = `room:${room.id}`;
 
-  const floorMaterial = getToonMaterial(0x6f7f9a);
+  const floorMaterial = getToonMaterial(FLOOR_COLOR);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE), floorMaterial);
   floor.rotation.x = -Math.PI / 2;
   floor.position.copy(frame.point(0, ROOM_SIZE / 2, 0.005));
@@ -102,6 +109,9 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   const walls = buildWalls(slot.rect, [slot.door]);
   walls.name = 'room-walls';
   group.add(walls);
+  group.add(doorFrame(slot.rect, slot.door, FLOOR_COLOR));
+  const label = roomLabel(room.title, frame.point(0, ROOM_SIZE / 2, ROOM_LABEL_Y));
+  group.add(label);
 
   // The table and its seats; more agents stand around it
   const center = frame.point(0, 6.2);
@@ -136,7 +146,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   mount(boards.issues.mesh, 3.6, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
   mount(boards.kanban.mesh, ROOM_SIZE / 2 - 0.12, 6, 1.7, frame.faceDoor - Math.PI / 2);
 
-  const title = sign(room.title, frame.point(0, 0.4, 3.0));
+  const title = sign(room.title, frame.point(0, 0.4, 3.0), slot.rect, false);
   group.add(title);
   const beds = new THREE.Group();
   group.add(beds);
@@ -144,7 +154,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   door.position.copy(frame.point(slot.door.at - (slot.rect.minX + slot.rect.maxX) / 2, 0.02, 1.2));
   door.visible = false;
   group.add(door);
-  const lockSign = sign('Locked: mission closed', frame.point(0, 0.4, 2.6), 'rgba(120, 40, 40, 0.9)');
+  const lockSign = sign('Locked: mission closed', frame.point(0, 0.4, 2.6), slot.rect, false, 'rgba(120, 40, 40, 0.9)');
   lockSign.visible = false;
   group.add(lockSign);
   let sleepersSign: CSS2DObject | null = null;
@@ -154,9 +164,10 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
     update(next: WorldRoom) {
       result.locked = next.state === 'locked';
       title.element.textContent = next.title;
+      setRoomLabelText(label, next.title);
       door.visible = result.locked;
       lockSign.visible = result.locked;
-      floorMaterial.color.setHex(result.locked ? 0x4a4f5a : 0x6f7f9a);
+      floorMaterial.color.setHex(result.locked ? 0x4a4f5a : FLOOR_COLOR);
       boards.statement.draw('Mission', (next.walls.statement ?? '').match(/.{1,44}(\s|$)/g)?.map((line) => line.trim()) ?? []);
       boards.docs.draw('Documents', next.walls.docs ?? []);
       boards.issues.draw('Issues', (next.walls.issues ?? []).map((issue) => `${issue.state === 'closed' ? '✓' : '○'} #${issue.number} ${issue.title}`));
@@ -175,7 +186,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
       const extra = (next.sleepers ?? 0) - count;
       if (sleepersSign) group.remove(sleepersSign);
       sleepersSign = (next.sleepers ?? 0) > 0
-        ? sign(`${next.sleepers} past session${next.sleepers === 1 ? '' : 's'}${extra > 0 ? ` (+${extra} not shown)` : ''}`, frame.point(-ROOM_SIZE / 2 + 1.2, 1.4, 1.8))
+        ? sign(`${next.sleepers} past session${next.sleepers === 1 ? '' : 's'}${extra > 0 ? ` (+${extra} not shown)` : ''}`, frame.point(-ROOM_SIZE / 2 + 1.2, 1.4, 1.8), slot.rect, true)
         : null;
       if (sleepersSign) group.add(sleepersSign);
     },

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
-import { CSS2DObject as CSS2DObjectType } from 'three/addons/renderers/CSS2DRenderer.js';
 import { HALL, rectsOverlap, slotFor, wallPieces } from '../src/addons/building/RoomPlanner.js';
 import type { Activity } from '../src/agents/ActivityAnimations.js';
 import type { AgentExtras } from '../src/agents/AgentData.js';
@@ -214,8 +213,8 @@ test('sessions of one workspace share a desk room named after it; others keep th
   assert.equal(a1.key.split('_')[0], a2.key.split('_')[0], 'same room');
   assert.notEqual(a1.key.split('_')[0], b1.key.split('_')[0], 'another room for Beta');
   assert.match(loner.key, /^desk_/);
-  const signs = scene.children.flatMap((c) => c.children).filter((c) => c instanceof CSS2DObjectType).map((c) => (c as { element: HTMLElement }).element.textContent);
-  assert.ok(signs.includes('Desks · Alpha') && signs.includes('Desks · Beta'));
+  const labels = scene.children.flatMap((c) => c.children).filter((c) => c.userData.roomLabel !== undefined).map((c) => c.userData.roomLabel);
+  assert.ok(labels.includes('Desks · Alpha') && labels.includes('Desks · Beta'));
   assert.deepEqual(JSON.parse(storage.get(BUILDING_STORAGE_KEY)!), ['office', 'library', 'desks@Alpha', 'desks@Beta']);
 });
 
