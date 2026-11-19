@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FIGURE_PART_LAYER } from '../characters/FigureBatch.js';
 
 export type SelectionListener = (agentId: string | null) => void;
 
@@ -71,6 +72,8 @@ export interface PickTarget {
 /** The agent whose figure the ray hits first, or null. */
 export function pickAgent(raycaster: THREE.Raycaster, targets: PickTarget[]): string | null {
   if (targets.length === 0) return null;
+  // Figure parts draw through the figure batch from their own layer; the ray still hits them
+  raycaster.layers.enable(FIGURE_PART_LAYER);
   const owners = new Map<THREE.Object3D, string>(targets.map((target) => [target.object, target.id]));
   const hits = raycaster.intersectObjects(targets.map((target) => target.object), true);
   for (const hit of hits) {

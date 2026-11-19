@@ -22,7 +22,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --import tsx --test tests/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "measure": "tsx scripts/measure-scene.mts"
   },
   "keywords": [
     "claude",
