@@ -25,7 +25,7 @@ const fixedLayout: LayoutStrategy = {
   release: () => undefined,
 };
 
-function setup(hash = '') {
+function setup(hash = '', figureShiftPx?: () => number) {
   const document = dom.window.document;
   const scene = new THREE.Scene();
   const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
@@ -34,6 +34,8 @@ function setup(hash = '') {
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
   camera.position.set(-12, 5.5, 11);
   const canvas = document.createElement('canvas');
+  Object.defineProperty(canvas, 'clientWidth', { value: 1600 });
+  Object.defineProperty(canvas, 'clientHeight', { value: 900 });
   document.body.appendChild(canvas);
   const manager = new AgentManager(scene, fixedLayout);
   const selection = new SelectionState();
@@ -43,6 +45,7 @@ function setup(hash = '') {
     agents: () => manager.getAgents(),
     keys: dom.window,
     hash,
+    ...(figureShiftPx ? { figureShiftPx } : {}),
   });
   const press = (code: string) => dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { code, key: code }));
   return { view, camera, manager, selection, wall, hint, press };
@@ -127,4 +130,45 @@ test('zoomDistance reports the overview camera distance and follows the wheel', 
   const canvas = canvases[canvases.length - 1];
   canvas.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -400, cancelable: true }));
   assert.ok(view.zoomDistance < before, `zoomed in (${view.zoomDistance} < ${before})`);
+});
+
+function screenX(camera: THREE.PerspectiveCamera, point: THREE.Vector3): number {
+  camera.updateMatrixWorld();
+  return point.clone().project(camera).x;
+}
+
+for (const hash of ['#view=overview', '']) {
+  const mode = hash ? 'overview' : 'first person';
+  test(`${mode}: with an open agent card the camera frames the figure left of the card`, () => {
+    const { view, manager, selection, camera } = setup(hash, () => 300);
+    manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+    selection.select('a');
+    for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+    const target = hash ? new THREE.Vector3(4, 0, -3) : new THREE.Vector3(4, 1.1, -3);
+    // 300 px left of the center of a 1600 px canvas is -0.375 in normalized device coordinates.
+    assert.ok(Math.abs(screenX(camera, target) + 0.375) < 0.02, `figure at x=${screenX(camera, target)}`);
+  });
+
+  test(`${mode}: without a card shift the camera centers the figure (old behavior)`, () => {
+    const { view, manager, selection, camera } = setup(hash);
+    manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+    selection.select('a');
+    for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+    const target = hash ? new THREE.Vector3(4, 0, -3) : new THREE.Vector3(4, 1.1, -3);
+    assert.ok(Math.abs(screenX(camera, target)) < 0.02, `figure at x=${screenX(camera, target)}`);
+  });
+}
+
+test('first person: the card shift turns only the aim; the camera stands where the unshifted flight puts it', () => {
+  const fly = (shift?: () => number) => {
+    const { view, manager, selection, camera } = setup('', shift);
+    manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+    selection.select('a');
+    for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+    return { position: camera.position.clone(), forward: new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion) };
+  };
+  const plain = fly();
+  const shifted = fly(() => 300);
+  assert.ok(shifted.position.distanceTo(plain.position) < 1e-6, `camera moved by ${shifted.position.distanceTo(plain.position)}`);
+  assert.ok(shifted.forward.angleTo(plain.forward) > 0.05, 'the aim turns toward the screen right');
 });

@@ -28,6 +28,8 @@ export interface ViewControllerOptions {
   /** The URL hash: `#view=overview`, `#focus=<agent id>`. */
   hash?: string;
   selection?: SelectionState;
+  /** Pixels to show a selected figure left of the canvas center (the agent card covers the right). */
+  figureShiftPx?: () => number;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -203,6 +205,7 @@ export class ViewController {
     const from = this.currentPose();
     if (this.currentMode === 'overview') {
       this.overview.focusOn(point);
+      this.overview.pan(this.shiftOnScreen(this.overview.distance), 0);
       this.flyTo(from, this.overview.pose(), true);
       return;
     }
@@ -210,10 +213,24 @@ export class ViewController {
     const away = new THREE.Vector3().subVectors(from.position, lookAt);
     away.y = 0;
     if (away.lengthSq() < 1e-6) away.set(0, 0, 1);
-    const position = lookAt.clone().addScaledVector(away.normalize(), FIRST_PERSON_FOCUS_DISTANCE);
+    away.normalize();
+    const position = lookAt.clone().addScaledVector(away, FIRST_PERSON_FOCUS_DISTANCE);
     position.y += FIRST_PERSON_FOCUS_HEIGHT;
     clampToOffice(position);
+    // Turn only the aim to the screen right, so the figure shows left of the card.
+    // The camera stays where the plain flight puts it: a sideways move could end inside a wall.
+    const right = new THREE.Vector3(away.z, 0, -away.x);
+    lookAt.addScaledVector(right, this.shiftOnScreen(position.distanceTo(lookAt)));
     this.flyTo(from, { position, lookAt }, true);
+  }
+
+  /** World units at `distance` from the camera for the figure shift in pixels. */
+  private shiftOnScreen(distance: number): number {
+    const pixels = this.options.figureShiftPx?.() ?? 0;
+    const height = this.options.canvas.clientHeight;
+    if (pixels <= 0 || height <= 0) return 0;
+    const visibleHeight = 2 * distance * Math.tan(THREE.MathUtils.degToRad(this.options.camera.fov) / 2);
+    return (pixels * visibleHeight) / height;
   }
 
   private flyTo(from: CameraPose, to: CameraPose, animate: boolean): void {

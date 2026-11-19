@@ -9,6 +9,7 @@ import { chooseLayoutId, createLayout, layoutIds, rememberLayoutId } from './lay
 import { activeExtensions, setWorld, type World } from './extensions.js';
 import { tabTitleFor } from './ui/attention.js';
 import { LabelDetailController } from './ui/LabelDetail.js';
+import { AgentCard } from './ui/AgentCard.js';
 import { FrameLoop } from './scene/FrameLoop.js';
 import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
 
@@ -40,6 +41,9 @@ window.addEventListener('keydown', (event) => {
 // Agent manager
 const agentManager = new AgentManager(scene, createLayout(layoutId, scene, stations));
 
+// Agent card: opens on a selection, docked left of the triage panel. Plugins add buttons and links.
+const agentCard = new AgentCard(document.body, { anchor: document.getElementById('ui-panel')! });
+
 // Camera mode (first person by default, key O for the overview) and click to select.
 // `#view=overview` starts in the overview, `#focus=<agent id>` selects that agent once it appears.
 const view = new ViewController({
@@ -50,6 +54,7 @@ const view = new ViewController({
   keys: window,
   hint: document.getElementById('pointer-hint'),
   hash: window.location.hash,
+  figureShiftPx: () => agentCard.cameraShiftPx(),
 });
 
 // --- Triage list (side panel) ---
@@ -83,6 +88,7 @@ onSelectionChange(() => labelDetail.refresh());
 function buildUI(): void {
   const agents = agentManager.getAgents();
   panel.render(agents.map((managed) => managed.info));
+  agentCard.render(agents.map((managed) => managed.info));
   document.title = tabTitleFor(agents.map((managed) => managed.info.extras));
   view.agentsChanged(agents);
   labelDetail.sceneChanged();
