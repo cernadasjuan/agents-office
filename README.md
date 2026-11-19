@@ -216,6 +216,7 @@ AGENTS_OFFICE_PLUGINS=herdr pnpm dev   # or: pnpm dev:fork
 - **O** to switch between first person (the default) and the overview, a view from above at an angle that shows the whole floor. In the overview, drag to pan, use the mouse wheel to zoom, and use W/A/S/D to pan
 - **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on an agent name in the side panel also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
 - **Esc** clears the selection (in first person it first releases the camera)
+- `?dwell=<seconds>` in the URL (0 to 30, default 0) makes an agent in the original `activity` layout wait that long before it walks to a new station. A change back before the time cancels the walk. The figure shows the new activity at once.
 - `#view=overview` in the URL starts in the overview. `#focus=<agent id>` selects that agent when it appears (agent IDs change when the server restarts)
 
 ## Architecture
