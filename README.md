@@ -136,7 +136,7 @@ Subagents never ask; their parent does. Without a status in the session file, no
 
 ### Identity: name, color, label
 
-- **Name:** the folder name of the session. Subagents show `>>` followed by their task description.
+- **Name:** the session name from the Claude Code session file, when Claude Code or you set it (an automatic `<folder>-xx` name does not count). Otherwise the folder name of the session. Subagents show `>>` followed by their name from the meta file, else their task description, else their type. A name must have 1 to 80 characters after trimming.
 - **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads. A subagent wears its parent's color and stands at 85% of the height.
 - **Label:** the name and the activity text float over each figure. The side panel lists the same agents. Its menu lets you preview another activity until the next update.
 
