@@ -1,18 +1,12 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { createDesk } from '../../furniture/Desk.js';
-import { createWhiteboard } from '../../furniture/Whiteboard.js';
-import { createBookshelf } from '../../furniture/Bookshelf.js';
-import { createTestStation } from '../../furniture/TestStation.js';
-import { createSofa } from '../../furniture/Sofa.js';
-import { createCoffeeMachine } from '../../furniture/CoffeeMachine.js';
-import { createPlant } from '../../furniture/Decorations.js';
 import { getToonMaterial } from '../../utils/Materials.js';
 import { Colors } from '../../utils/Colors.js';
 import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
-import { DOOR_WIDTH, ROOM_SIZE, type Door, type Rect, type RoomSlot, type Side, wallPieces } from './RoomPlanner.js';
+import { DOOR_WIDTH, ROOM_SIZE, doorPoint, type Door, type Rect, type RoomSlot, type Side, wallPieces } from './RoomPlanner.js';
 import { roomLabel } from './roomLabels.js';
+import { roomFurnishing, type RoomPlan } from './furnishing.js';
 
 export * from './roomLabels.js';
 
@@ -60,6 +54,8 @@ export function roomFloorColor(kind: RoomKind): number {
 export function roomTitle(kind: RoomKind, earlierKinds: RoomKind[], tag?: string): string {
   if (kind === 'desks' && tag) return `Desks · ${tag}`;
   if (kind === 'lounge') return `Lounge ${earlierKinds.filter((earlier) => earlier === 'lounge').length + 1}`;
+  // Only the first office is the user's; later ones are overflow waiting rooms
+  if (kind === 'office' && earlierKinds.includes('office')) return `Waiting room ${earlierKinds.filter((earlier) => earlier === 'office').length + 1}`;
   return ROOM_TITLE[kind];
 }
 
@@ -103,6 +99,12 @@ export class RoomFrame {
   /** Rotation that makes a piece of furniture face away from the door. */
   get faceAway(): number {
     return Math.atan2(this.inward.x, this.inward.z);
+  }
+
+  /** Where the hall door is along the door wall (`a` of its center). */
+  get doorAlong(): number {
+    const door = doorPoint(this.rect, this.door, 0);
+    return new THREE.Vector3(door.x, 0, door.z).sub(this.doorWallCenter).dot(this.along);
   }
 }
 
@@ -194,6 +196,9 @@ export function doorFrame(rect: Rect, door: Door, color: number): THREE.Group {
   return group;
 }
 
+/** The CSS2D sign under the portrait that counts the queue; `BuildingLayout` sets its text. */
+export const QUEUE_COUNT_SIGN = 'queue-count-sign';
+
 function sign(text: string, position: THREE.Vector3): CSS2DObject {
   const element = document.createElement('div');
   element.className = 'desk-sign';
@@ -205,6 +210,37 @@ function sign(text: string, position: THREE.Vector3): CSS2DObject {
   const label = new CSS2DObject(element);
   label.position.copy(position);
   return label;
+}
+
+/**
+ * Turn a room plan into objects: each piece from the furniture library at its
+ * place (named in `userData.piece`), each spot a station, each sign a CSS2D sign.
+ */
+function furnish(group: THREE.Group, frame: RoomFrame, plan: RoomPlan, rect: Rect, stations: Map<string, Station>, key: (n: number) => string): void {
+  for (const placement of plan.pieces) {
+    const object = placement.piece.create();
+    object.userData.piece = placement.piece.name;
+    place(group, object, frame.point(placement.a, placement.d, placement.y ?? 0), frame.faceDoor + (placement.turn ?? 0));
+  }
+  plan.spots.forEach((spot, n) => {
+    stations.set(key(n), station(spot.type, frame.point(spot.a, spot.d), frame.point(...spot.look), spot.posture));
+  });
+  for (const signPlan of plan.signs) {
+    const at = frame.point(signPlan.a, signPlan.d, signPlan.y);
+    if (signPlan.role === 'you') {
+      // A detail sign: it shows when zoomed in or hovered, so it does not cover the queue in the overview
+      const you = sign('You', at);
+      you.userData.detailSign = { rect: { ...rect }, hoverOnly: false };
+      group.add(you);
+    } else {
+      // Hidden until someone waits
+      const count = sign('', at);
+      count.name = QUEUE_COUNT_SIGN;
+      count.userData.queueCount = 0;
+      count.visible = false;
+      group.add(count);
+    }
+  }
 }
 
 /** Build one room: floor, low walls, a framed door, a room label, furniture and its stations. */
@@ -233,87 +269,6 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
   group.add(doorway);
   group.add(roomLabel(title ?? roomTitle(kind, []), frame.point(0, ROOM_SIZE / 2), slot.rect));
 
-  const rows = (count: number, spacing: number) => Array.from({ length: count }, (_, i) => (i - (count - 1) / 2) * spacing);
-
-  switch (kind) {
-    case 'office': {
-      // The user's desk at the far wall, facing the door. Agents that wait for the user queue in front of it.
-      const deskDepth = ROOM_SIZE - 2.2;
-      place(group, createDesk(true), frame.point(0, deskDepth), frame.faceAway);
-      // A detail sign: it shows when zoomed in or hovered, so it does not cover the queue in the overview
-      const you = sign('You', frame.point(0, deskDepth + 0.7, 2.2));
-      you.userData.detailSign = { rect: { ...slot.rect }, hoverOnly: false };
-      group.add(you);
-      place(group, createPlant(1.2), frame.point(-5.2, ROOM_SIZE - 0.8), 0);
-      place(group, createPlant(1.2), frame.point(5.2, ROOM_SIZE - 0.8), 0);
-      const lookAt = frame.point(0, deskDepth + 0.7, 1.2);
-      let n = 0;
-      for (let row = 0; row < 6; row++) {
-        const depth = deskDepth - 1.6 - row * 1.15;
-        // Middle first, then outward, so the line fills from the front center
-        for (const along of [0, -1.15, 1.15, -2.3, 2.3, -3.45, 3.45, -4.6, 4.6]) {
-          stations.set(key(n++), station('queue', frame.point(along, depth), lookAt, 'standing'));
-        }
-      }
-      break;
-    }
-    case 'desks': {
-      for (const depth of [4, 8]) {
-        for (const along of rows(4, 2.8)) {
-          const desk = frame.point(along, depth);
-          place(group, createDesk(true), desk, frame.faceDoor);
-          stations.set(key(stations.size), station('implementing', frame.point(along, depth - 0.7), frame.point(along, depth + 0.15, 1.2)));
-        }
-      }
-      break;
-    }
-    case 'planning': {
-      for (const along of rows(3, 3.6)) {
-        place(group, createWhiteboard(), frame.point(along, ROOM_SIZE - 0.3), frame.faceDoor);
-        stations.set(key(stations.size), station('planning', frame.point(along, ROOM_SIZE - 1.1), frame.point(along, ROOM_SIZE - 0.3, 1.5)));
-      }
-      break;
-    }
-    case 'library': {
-      // Shelves on the far wall and on both side walls: the knowledge base of the office
-      for (const along of rows(4, 2.5)) {
-        place(group, createBookshelf(), frame.point(along, ROOM_SIZE - 0.5), frame.faceDoor);
-        stations.set(key(stations.size), station('researching', frame.point(along, ROOM_SIZE - 1.5), frame.point(along, ROOM_SIZE - 0.5, 1.0)));
-      }
-      for (const side of [-1, 1]) {
-        for (const depth of [3.5, 6, 8.5]) {
-          const wallAlong = side * (ROOM_SIZE / 2 - 0.5);
-          place(group, createBookshelf(), frame.point(wallAlong, depth), frame.faceDoor + side * Math.PI / 2);
-          stations.set(key(stations.size), station('researching', frame.point(wallAlong - side, depth), frame.point(wallAlong, depth, 1.0)));
-        }
-      }
-      break;
-    }
-    case 'lab': {
-      for (const along of rows(4, 2.8)) {
-        place(group, createTestStation(), frame.point(along, 7), frame.faceDoor);
-        stations.set(key(stations.size), station('testing', frame.point(along, 6.2), frame.point(along, 7, 1.4)));
-      }
-      break;
-    }
-    case 'review': {
-      for (const along of rows(4, 2.8)) {
-        place(group, createDesk(true), frame.point(along, 7), frame.faceDoor);
-        stations.set(key(stations.size), station('reviewing', frame.point(along, 6.3), frame.point(along, 7.15, 1.2)));
-      }
-      break;
-    }
-    case 'lounge': {
-      place(group, createCoffeeMachine(), frame.point(-5.2, ROOM_SIZE - 0.8), frame.faceDoor);
-      for (const along of rows(3, 3.6)) {
-        // A sofa faces the door; its back is toward the far wall
-        place(group, createSofa(0x6a5acd), frame.point(along, 7.5), frame.faceDoor);
-        for (const offset of [-0.6, 0, 0.6]) {
-          stations.set(key(stations.size), station('idle', frame.point(along + offset, 7.45), frame.point(along + offset, 6.4, 0.8), 'seated'));
-        }
-      }
-      break;
-    }
-  }
+  furnish(group, frame, roomFurnishing(kind, { doorAlong: frame.doorAlong, usersOffice: index === 0 }), slot.rect, stations, key);
   return { kind, slot, group, stations };
 }
