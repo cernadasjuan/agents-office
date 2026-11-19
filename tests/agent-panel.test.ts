@@ -73,6 +73,12 @@ test('cold waits leave needs you and your turn for a collapsed Cold group at the
   assert.equal(card(list, 'old-block').querySelector('.agent-wait')?.textContent, '2 d');
 });
 
+test('inside the Cold group, the longest wait comes first whatever the arrival order', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([waiting('cold-1d', 24 * 60), yourTurn('cold-3d', 3 * 24 * 60), waiting('cold-2d', 2 * 24 * 60)]);
+  assert.deepEqual(rowIds(list, 'cold'), ['cold-3d', 'cold-2d', 'cold-1d']);
+});
+
 test('a needs-you row shows the name, the wait and the activity', (t) => {
   const { list, panel } = makePanel(t);
   panel.render([{ id: 'n1', name: 'Fix login', activity: 'meeting', extras: { attention: 'waiting', waitMinutes: 12 } }]);

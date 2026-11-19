@@ -265,7 +265,8 @@ test('with the opt-in, agents with a pane advertise focus and the GET routes kee
   assert.deepEqual(list.find((agent) => agent.name === 'sub')?.actions, ['focus']);
   assert.equal(list.find((agent) => agent.name === 'outside')?.actions, undefined);
   const body = JSON.stringify(list);
-  for (const secret of ['w1:p1', 'w1:t1', 'raw-main', '101']) assert.equal(body.includes(secret), false);
+  // The PID (101) must not appear as a value; the bare digits can occur inside a random hex id.
+  for (const secret of ['w1:p1', 'w1:t1', 'raw-main', ':101', '"pid"']) assert.equal(body.includes(secret), false);
   assert.equal((await office.request('/api/agents', { method: 'POST', headers: { Origin: office.origin } })).status, 405);
   assert.equal((await office.request('/api/agents', { headers: { Origin: 'http://localhost:1' } })).status, 403);
   assert.equal((await office.request('/api/actions/token', { headers: { Origin: 'http://localhost:1' } })).status, 403);
