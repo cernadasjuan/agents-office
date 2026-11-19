@@ -94,6 +94,14 @@ If a Codex home exists (`CODEX_HOME`, else `~/.codex`), the app also shows Codex
 - **Label:** the floating label adds `· codex` after the activity.
 - Tested against the rollout layout of Codex 0.169.0. Unknown records are skipped. Symlinks inside the sessions folder are not followed.
 
+### Who needs you
+
+- **Blocked:** a session that waits for your permission or answer raises its right hand, shows an amber marker over its head, and its label reads "Waiting for you · 12 min".
+- **Your turn:** a session that finished its turn shows "Your turn · 5 min" in its label, with no marker.
+- **Tab title:** `(2) +5 · Agents Office` means 2 blocked and 5 waiting for your next prompt.
+
+Subagents never ask; their parent does. Without a status in the session file, nothing changes.
+
 ### Location: stations
 
 | Station | Where | Seats | Activities |
@@ -103,7 +111,8 @@ If a Codex home exists (`CODEX_HOME`, else `~/.codex`), the app also shows Codex
 | Whiteboards | Back wall | 2 | Planning |
 | Bookshelves | Left wall | 2 | Researching |
 | Test stations | Right side | 2 | Testing |
-| Coffee machine | Front left | 2 | Taking a break |
+| Coffee machine | Front left | 2 | Taking a break (standing) |
+| Lounge sofas | Front left | 6 | Taking a break (seated) |
 | Meeting table | Front right | 3 | Waiting for you |
 
 - A new agent appears directly at its seat. When its activity changes, it walks to a seat of the new type.
@@ -128,7 +137,7 @@ If a Codex home exists (`CODEX_HOME`, else `~/.codex`), the app also shows Codex
 ### Identity: name, color, label
 
 - **Name:** the folder name of the session. Subagents show `>>` followed by their task description.
-- **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads.
+- **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads. A subagent wears its parent's color and stands at 85% of the height.
 - **Label:** the name and the activity text float over each figure. The side panel lists the same agents. Its menu lets you preview another activity until the next update.
 
 ## Plugins

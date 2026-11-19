@@ -29,11 +29,15 @@ Read `docs/design-principles.md` before any feature change: it lists the design 
 1. **Server** (`server/`): Vite middleware plugin reads Claude session files, validates PIDs, infers activity from transcript `.jsonl` tool_use blocks (language-agnostic), and detects active subagents
 2. **Polling** (`AgentPoller.ts`): Fetches `/api/agents` every 3 s, one request at a time with a 5 s limit, and reconciles with AgentManager (add/remove/update). If the API fails, the current scene stays. Subagents get a `>> ` prefix in their name
 3. **Agent Management** (`AgentManager.ts`): Creates StickFigures and handles their lifecycle. Where a figure goes is the layout's decision (`src/layout/`): `LayoutStrategy.seatFor(agent, previousActivity)` returns a `Seat` (position, look-at, optional forced posture) or null to stay. `ActivityLayout` is the original behavior. `registry.ts` picks the layout from `?layout=`, then browser storage, then the default; key L cycles layouts. Optional fork add-ons in `src/addons/*.ts` register more layouts
-4. **Scene** (`Office.ts`): 22 stations across 7 types (implementing, planning, researching, testing, reviewing, idle, meeting). One agent per station. When no station of the right type is free, AgentManager opens an overflow spot on open floor; it never uses a station of another type
+4. **Scene** (`Office.ts`): 28 stations across 7 types (the 6 lounge sofa seats are seated idle seats) (implementing, planning, researching, testing, reviewing, idle, meeting). One agent per station. When no station of the right type is free, AgentManager opens an overflow spot on open floor; it never uses a station of another type
 
 ### Extension seam (server/seam.ts)
 
 Detection runs as a pipeline: the core `claudeSource` (wraps `detectAgents`), then plugin sources, then enrichers in order, then world providers for rooms and boards. A failing or slow plugin step (2 s limit) drops only its own output; a core failure is a 500. `projectAgents` and `projectWorld` are the only exit: they copy whitelisted, cleaned fields and hash every key with the per-run HMAC. `/api/world` uses the same request checks as `/api/agents`. Plugins live in `plugins/<name>/index.ts` (default export `OfficePlugin`) and load through `server.ssrLoadModule` from `AGENTS_OFFICE_PLUGINS=a,b` or `agents-office --plugin a`. Their browser parts live in `plugins/<name>/client.ts` and register an `OfficeExtension` (`src/extensions.ts`) with `plugin: '<name>'`, so they run only while the server plugin is active.
+
+### Attention (server/attention.ts, src/ui/attention.ts)
+
+A built-in enricher sets `attention` for main sessions: status `waiting` → `waiting` (blocked), `idle` → `your-turn`, with `waitMinutes` from `statusUpdatedAt`. The figure raises its right hand (the arm overrides the activity pose; the rest stays) and shows an amber beacon while waiting. The label shows "Waiting for you · N min" or "Your turn · N min". The tab title counts both.
 
 ### Activity Inference (server/agentDetector.ts)
 

@@ -17,6 +17,8 @@ function accentColorFor(agentId: string): THREE.Color {
   return Colors.accents[(hash >>> 0) % Colors.accents.length];
 }
 
+const SUBAGENT_SCALE = 0.85;
+
 export interface ManagedAgent {
   info: AgentInfo;
   figure: StickFigure;
@@ -38,7 +40,10 @@ export class AgentManager {
   }
 
   addAgent(info: AgentInfo): StickFigure {
-    const figure = new StickFigure(info.name, accentColorFor(info.id));
+    // A subagent wears its parent's color and stands a little smaller, so you see whose helper it is
+    const parentId = info.extras?.parentId;
+    const figure = new StickFigure(info.name, accentColorFor(parentId ?? info.id));
+    if (parentId) figure.group.scale.setScalar(SUBAGENT_SCALE);
     figure.setTag(info.extras?.provider);
     const managed: ManagedAgent = { info, figure, seat: null };
     this.agents.set(info.id, managed);
@@ -47,6 +52,7 @@ export class AgentManager {
     // A new agent appears at its seat (no walk from the origin)
     this.goToSeat(managed, this.layout.seatFor(info, null), true);
     figure.setActivity(info.activity);
+    figure.setAttention(info.extras?.attention, info.extras?.waitMinutes);
     return figure;
   }
 
@@ -67,12 +73,16 @@ export class AgentManager {
     if (!managed) return;
     managed.info.extras = extras;
     managed.figure.setTag(extras?.provider);
+    managed.figure.setAttention(extras?.attention, extras?.waitMinutes);
     const seat = this.layout.seatFor(managed.info, managed.info.activity);
     if (seat) this.goToSeat(managed, seat, false);
   }
 
   update(elapsed: number, delta: number): void {
-    this.layout.update?.(elapsed, delta);
+    for (const move of this.layout.update?.(elapsed, delta) ?? []) {
+      const managed = this.agents.get(move.agentId);
+      if (managed) this.goToSeat(managed, move.seat, false);
+    }
     for (const managed of this.agents.values()) {
       managed.figure.update(elapsed, delta);
     }

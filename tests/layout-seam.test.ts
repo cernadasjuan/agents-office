@@ -108,3 +108,25 @@ test('a codex agent shows a codex tag in its floating label; a Claude agent show
   manager.setActivity('c', 'idle');
   assert.match(activityText('c')!, / · codex$/);
 });
+
+test('a layout can move an agent on its own from its update hook', () => {
+  const later: Seat = { key: 'later', position: new THREE.Vector3(9, 0, 9), lookAt: new THREE.Vector3(9, 1, 8) };
+  let moved = false;
+  const layout: LayoutStrategy = {
+    id: 'mover',
+    seatFor: () => ({ key: 'start', position: new THREE.Vector3(1, 0, 1), lookAt: new THREE.Vector3(1, 1, 0) }),
+    release: () => undefined,
+    update: () => {
+      if (moved) return [];
+      moved = true;
+      return [{ agentId: 'a', seat: later }, { agentId: 'gone', seat: later }];
+    },
+  };
+  const manager = new AgentManager(new THREE.Scene(), layout);
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+
+  for (let t = 0; t < 6; t += 1 / 30) manager.update(t, 1 / 30);
+
+  assert.equal(manager.getAgents()[0].seat?.key, 'later');
+  assert.ok(manager.getAgents()[0].figure.group.position.distanceTo(later.position) < 0.1);
+});

@@ -5,6 +5,7 @@ import type { Plugin, ViteDevServer } from 'vite';
 import type { DetectedAgent } from './agentDetector.js';
 import { claudeSource } from './claudeSource.js';
 import { codexSource } from './codexSource.js';
+import { attentionEnricher } from './attention.js';
 import { isOfficePlugin, pluginEntry } from './plugins.js';
 import { describeWorld, observe, projectAgents, projectWorld, type OfficePlugin } from './seam.js';
 
@@ -78,7 +79,7 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
     // Codex is built in but runs like a plugin source: its failure drops only its own agents.
     sources: [...(settings.codexHome === null ? [] : [codexSource(settings.codexHome)]),
       ...plugins.flatMap((plugin) => plugin.sources ?? [])],
-    enrichers: plugins.flatMap((plugin) => plugin.enrichers ?? []),
+    enrichers: [attentionEnricher(), ...plugins.flatMap((plugin) => plugin.enrichers ?? [])],
     world: plugins.flatMap((plugin) => plugin.world ?? []),
   });
 

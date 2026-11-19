@@ -4,6 +4,8 @@ import { buildSkeleton, Joints } from './StickFigureParts.js';
 import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
 import { ACTIVITY_LABELS } from '../agents/AgentData.js';
+import { attentionLine } from '../ui/attention.js';
+import { getToonMaterial } from '../utils/Materials.js';
 import type { Posture } from '../layout/LayoutStrategy.js';
 
 const TRANSITION_DURATION = 0.5;
@@ -22,6 +24,9 @@ export class StickFigure {
   private isMoving = false;
   private posture: Posture | undefined;
   private tag: string | undefined;
+  private attention: string | undefined;
+  private waitMinutes: number | undefined;
+  private beacon: THREE.Mesh | null = null;
 
   constructor(name: string, accentColor: THREE.Color) {
     this.name = name;
@@ -46,18 +51,36 @@ export class StickFigure {
 
     this.targetActivity = activity;
     this.transitionProgress = 0;
-    this.refreshLabel(activity);
+    this.refreshLabel();
   }
 
   /** Optional provider mark in the floating label, for example "codex". */
   setTag(tag: string | undefined): void {
     if (tag === this.tag) return;
     this.tag = tag;
-    this.refreshLabel(this.targetActivity);
+    this.refreshLabel();
   }
 
-  private refreshLabel(activity: Activity): void {
-    updateLabel(this.label, this.name, ACTIVITY_LABELS[activity] ?? activity, this.tag);
+  /** Who needs the user: 'waiting' raises a hand and shows a beacon, 'your-turn' changes the label only. */
+  setAttention(attention: string | undefined, waitMinutes: number | undefined): void {
+    this.attention = attention;
+    this.waitMinutes = waitMinutes;
+    this.refreshLabel();
+    if (attention === 'waiting' && !this.beacon) {
+      this.beacon = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), getToonMaterial(new THREE.Color(0xffb020)));
+      this.beacon.position.set(0, 2.55, 0);
+      this.joints.root.add(this.beacon);
+    }
+    if (this.beacon) this.beacon.visible = attention === 'waiting';
+  }
+
+  get isWaiting(): boolean {
+    return this.attention === 'waiting';
+  }
+
+  private refreshLabel(): void {
+    const activityText = ACTIVITY_LABELS[this.targetActivity] ?? this.targetActivity;
+    updateLabel(this.label, this.name, attentionLine(activityText, this.attention, this.waitMinutes), this.tag);
   }
 
   /** Force a posture for the current seat, or undefined to let the activity decide. */
@@ -132,7 +155,11 @@ export class StickFigure {
     }
 
     // Animate activity
-    animateActivity(this.joints, this.activity, elapsed, delta, this.posture);
+    animateActivity(this.joints, this.activity, elapsed, delta, this.posture, this.isWaiting);
+    if (this.beacon?.visible) {
+      this.beacon.position.y = 2.55 + Math.sin(elapsed * 3) * 0.06;
+      this.beacon.rotation.y = elapsed * 1.5;
+    }
   }
 
   private saveCurrentPose(obj: THREE.Object3D): void {
