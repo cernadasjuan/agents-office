@@ -1,8 +1,8 @@
 import { ACTIVITIES, ACTIVITY_LABELS, AgentInfo } from '../agents/AgentData.js';
 import type { Activity } from '../agents/ActivityAnimations.js';
-import { formatWait } from './attention.js';
+import { attentionBand, compareWaits, formatWait } from './attention.js';
 
-export type TriageGroupId = 'needs-you' | 'your-turn' | 'working' | 'idle';
+export type TriageGroupId = 'needs-you' | 'your-turn' | 'working' | 'idle' | 'cold';
 
 interface GroupSpec {
   id: TriageGroupId;
@@ -18,6 +18,7 @@ const GROUPS: GroupSpec[] = [
   { id: 'your-turn', title: 'Your turn', chip: (n) => `${n} your turn`, openByDefault: (n) => n <= YOUR_TURN_OPEN_MAX },
   { id: 'working', title: 'Working', chip: (n) => `${n} working`, openByDefault: () => true },
   { id: 'idle', title: 'Idle', chip: (n) => `${n} idle`, openByDefault: () => false },
+  { id: 'cold', title: 'Cold', chip: (n) => `${n} cold`, openByDefault: () => false },
 ];
 
 export interface AgentPanelOptions {
@@ -56,6 +57,7 @@ export function isDemoMode(search: string): boolean {
 
 export function triageGroup(agent: AgentInfo): TriageGroupId {
   const attention = agent.extras?.attention;
+  if (attentionBand(agent.extras) === 'cold') return 'cold';
   if (attention === 'waiting') return 'needs-you';
   if (attention === 'your-turn') return 'your-turn';
   return agent.activity === 'idle' ? 'idle' : 'working';
@@ -268,9 +270,7 @@ function byName(a: AgentInfo, b: AgentInfo): number {
 }
 
 function byWait(a: AgentInfo, b: AgentInfo): number {
-  const wa = a.extras?.waitMinutes ?? -1;
-  const wb = b.extras?.waitMinutes ?? -1;
-  return wb - wa || byName(a, b);
+  return compareWaits(a.extras, b.extras) || byName(a, b);
 }
 
 /** Subagents whose parent is in the same list. */
@@ -285,7 +285,7 @@ function nestedIds(agents: AgentInfo[]): Set<string> {
 }
 
 function orderGroup(id: TriageGroupId, agents: AgentInfo[]): AgentInfo[] {
-  if (id === 'needs-you' || id === 'your-turn') return [...agents].sort(byWait);
+  if (id === 'needs-you' || id === 'your-turn' || id === 'cold') return [...agents].sort(byWait);
   if (id === 'idle') return [...agents].sort(byName);
 
   const nested = nestedIds(agents);

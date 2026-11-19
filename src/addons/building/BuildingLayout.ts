@@ -7,6 +7,7 @@ import { HALL, matchingDoor, slotFor, type Door } from './RoomPlanner.js';
 import { buildRoom, buildWalls, ROOM_STATION_TYPE, type RoomKind } from './rooms.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
 import type { WorldRoom } from '../../extensions.js';
+import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
 import { markStatic } from '../../scene/StaticMerge.js';
 
 /** Work that happens at the agent's own desk. Everything else is a trip. */
@@ -170,7 +171,8 @@ export class BuildingLayout implements LayoutStrategy {
   private targetFor(state: AgentState): Target {
     const { agent } = state;
     const parentId = agent.extras?.parentId;
-    if (!parentId && (agent.extras?.attention === 'waiting' || agent.activity === 'meeting')) return 'queue';
+    const cold = attentionBand(agent.extras) === 'cold';
+    if (!parentId && (queuesForYou(agent.extras) || (agent.activity === 'meeting' && !cold))) return 'queue';
     const room = agent.extras?.room ? this.missionRooms.get(agent.extras.room) : undefined;
     if (!parentId && room && !room.locked) return `room:${room.id}`;
     const parent = parentId ? this.agents.get(parentId) : undefined;
@@ -256,7 +258,7 @@ export class BuildingLayout implements LayoutStrategy {
   private orderQueue(): LayoutMove[] {
     const waiting = [...this.agents.values()]
       .filter((state) => state.target === 'queue')
-      .sort((a, b) => (b.agent.extras?.waitMinutes ?? 0) - (a.agent.extras?.waitMinutes ?? 0) || (a.queuedAt ?? 0) - (b.queuedAt ?? 0));
+      .sort((a, b) => compareWaits(a.agent.extras, b.agent.extras) || (a.queuedAt ?? 0) - (b.queuedAt ?? 0));
     const spots = this.keysOfType('queue');
     while (spots.length < waiting.length) {
       this.addRoom('office');

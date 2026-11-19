@@ -103,16 +103,27 @@ If a Codex home exists (`CODEX_HOME`, else `~/.codex`), the app also shows Codex
 - **Your turn:** a session that finished its turn shows "Your turn · 5 min" in its label, with no marker.
 - **Tab title:** `(2) +5 · Agents Office` means 2 blocked and 5 waiting for your next prompt.
 
+Only a fresh wait calls for you. Each wait falls in an age band:
+
+| Band | Wait | What you see |
+|---|---|---|
+| Fresh | under 15 min | Raised hand and amber marker (blocked or your turn), a spot in the queue, counted in the tab title |
+| Aging | 15 min to under 24 h | The label only, and a spot in the queue. No marker, no tab count |
+| Cold | 24 h or more | The label only, in the collapsed "Cold" group of the side panel. Not in the queue, not in the tab count |
+
+The two thresholds are one constant, `ATTENTION_BANDS` in `src/ui/attention.ts`. A session without a wait time keeps the old behavior: a block has the marker and the queue spot, and every wait counts in the tab title.
+
 Subagents never ask; their parent does. Without a status in the session file, nothing changes.
 
 ### Triage list
 
 The side panel lists the agents by what you must do:
 
-1. **Needs you:** blocked agents, the longest wait first. Each row shows the name, the wait ("12 min") and the activity.
-2. **Your turn:** agents that wait for your next prompt, the longest wait first. The group starts collapsed when it has more than 5 agents.
+1. **Needs you:** blocked agents, fresh waits first, then aging waits, the longest wait first inside each band. Each row shows the name, the wait ("12 min") and the activity.
+2. **Your turn:** agents that wait for your next prompt, in the same order. The group starts collapsed when it has more than 5 agents.
 3. **Working:** busy agents. Subagents are indented under their parent.
 4. **Idle:** the rest. The group starts collapsed.
+5. **Cold:** blocked or your-turn agents that waited 24 h or more, the longest wait first. The group starts collapsed and shows its count, so a cold wait never vanishes.
 
 The chips at the top count each group ("2 need you · 22 your turn · 9 working · 8 idle"). Click a chip to open its group. Click a group title to open or close it. Click a row to select the agent: the camera flies to it. Codex agents show a `codex` tag. Persona badges from a plugin show as small text chips. The button in the panel header hides the list so the room stays visible. The browser remembers this choice.
 
@@ -162,7 +173,7 @@ Without a status in the session file, every agent is in Working or Idle. `?demo=
 
 This fork adds a second layout, `building`, and makes it the default. `?layout=activity` or key L returns to the original layout.
 
-- **Your office:** the first room, east of the hall. Agents that wait for your permission or answer walk in and queue in front of your desk, the longest wait first. When one leaves, the line moves up.
+- **Your office:** the first room, east of the hall. Agents with a fresh or aging wait (blocked or your turn) walk in and queue in front of your desk: fresh waits first, then aging waits, the longest wait first inside each band. A cold wait leaves the queue for the lounge. When one leaves, the line moves up.
 - **Home desks:** each session gets its own desk for its whole life. Coding, debugging and deploying happen there.
 - **Trips:** planning goes to a whiteboard, research to a bookshelf, tests to a test station, reviews and docs to a writing desk, breaks to a sofa or the coffee machine. The agent walks back home when desk work starts again. A trip starts only when the new activity lasts 4 seconds, so short tool calls do not make agents walk.
 - **Workspace rooms:** with the herdr plugin, sessions of one herdr workspace get their desks in a room named after it ("Desks · <workspace>"). Sessions outside herdr keep the hall desks. A session whose workspace shows up later moves there once.
