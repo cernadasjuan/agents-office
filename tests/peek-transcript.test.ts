@@ -166,3 +166,11 @@ test('no transcript, a missing file or a non-jsonl path gives an empty peek', ()
     assert.deepEqual(reader.read(agent(transcriptPath)), { lines: [], assets: [], skills: [], repos: [] });
   }
 });
+
+test('Recent: white space before a token does not push part of it past the raw cut, and placeholders stay whole', () => {
+  const file = transcript([text(`${'\n'.repeat(3980)}${FAKE_GHP} tail`), text(`${'x'.repeat(195)} ${FAKE_GHP}`)]);
+  const peek = new PeekReader().read(agent(file));
+  assert.equal(JSON.stringify(peek).includes('ghp_'), false);
+  assert.equal(peek.lines[0].text, '[secret] tail');
+  assert.doesNotMatch(peek.lines[1].text, /\[[a-z]*$/);
+});

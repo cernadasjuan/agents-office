@@ -40,6 +40,8 @@ export interface CardPanel {
   id: string;
   available(agent: AgentInfo): boolean;
   render(agent: AgentInfo, root: HTMLElement): void;
+  /** Called when the card closes or the panel stops being available: stop timers here. */
+  hide?(): void;
 }
 
 const actions: CardAction[] = [];
@@ -232,6 +234,7 @@ export class AgentCard {
       this.renderedKey = '';
       this.shownId = null;
       this.clearStatus();
+      this.hidePanels();
       return;
     }
     this.current = agent;
@@ -260,8 +263,24 @@ export class AgentCard {
       } catch (error) {
         console.debug('card panel failed', error);
       }
-      root.hidden = true;
-      root.replaceChildren();
+      this.hidePanel(panel, root);
+    }
+  }
+
+  private hidePanels(): void {
+    for (const panel of panels) {
+      const root = this.panelRoots.get(panel.id);
+      if (root) this.hidePanel(panel, root);
+    }
+  }
+
+  private hidePanel(panel: CardPanel, root: HTMLElement): void {
+    root.hidden = true;
+    root.replaceChildren();
+    try {
+      panel.hide?.();
+    } catch (error) {
+      console.debug('card panel hide failed', error);
     }
   }
 

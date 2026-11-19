@@ -1,13 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { displayText, type Observation, type PeekInput } from '../../server/seam.js';
-import { maskSecrets } from '../../server/secrets.js';
+import { maskedLine } from '../../server/secrets.js';
 
 /**
  * Peek reader: the last lines, the assets (links) and the equipment (skills,
  * repos) of one agent, from its own transcript. Only assistant text and tool
  * calls count. A tool call shows its name and a short safe summary, never its
- * raw input. Text is masked before it is cut, so a cut never leaves half a token.
+ * raw input. Text collapses, then is masked, then cut (`maskedLine`), so a cut
+ * never leaves part of a token.
  */
 
 export const PEEK_MAX_LINES = 10;
@@ -18,7 +19,6 @@ const TAIL_BYTES = 2 * 1024 * 1024;
 const MAX_BYTES_PER_READ = 4 * 1024 * 1024;
 const READ_CHUNK = 256 * 1024;
 const MAX_LINE = 1024 * 1024;
-const MAX_TEXT_BEFORE_MASK = 4000;
 const MAX_INPUT_CHARS = 20_000;
 const MAX_CACHED_FILES = 20;
 const MAX_CACHED_DIRS = 500;
@@ -74,7 +74,7 @@ const GIT_WRITES = new Set(['commit', 'push', 'add', 'merge', 'rm', 'mv', 'am', 
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 function cleanText(value: string, max: number): string {
-  return displayText(maskSecrets(value.slice(0, MAX_TEXT_BEFORE_MASK)), max);
+  return maskedLine(value, max);
 }
 
 function unquote(token: string): string {

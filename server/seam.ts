@@ -1,4 +1,4 @@
-import { maskSecrets } from './secrets.js';
+import { maskedLine } from './secrets.js';
 
 /**
  * Extension seam. Sources find agents, enrichers add display data, world
@@ -256,7 +256,7 @@ const PEEK_TOKEN = /^[A-Za-z0-9:_.-]{1,64}$/;
 const ASSET_KINDS = new Set(['issue', 'pr', 'mr', 'jira']);
 
 function peekText(value: unknown): string {
-  return displayText(maskSecrets(String(value ?? '').slice(0, 4000)), PEEK_LINE_LENGTH);
+  return maskedLine(value, PEEK_LINE_LENGTH);
 }
 
 function httpsUrl(value: unknown): string | undefined {

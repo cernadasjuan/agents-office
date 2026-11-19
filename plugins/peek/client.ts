@@ -7,8 +7,8 @@ import { registerCardPanel, type CardPanel } from '../../src/ui/AgentCard.js';
  * "Recent" (the last lines, with the last open question pinned on top),
  * "Assets" (links from tool calls) and "Equipment" (skills, personas, repos).
  * It asks `/api/views/peek` for the selected agent only, at most every 5 s while
- * the card stays open. All text goes through textContent. `setPeekTextHidden`
- * hides the transcript text (Recent and the question) for a private mode.
+ * the card stays open (a timer that stops when the card closes). All text goes
+ * through textContent. `setPeekTextHidden` hides all peek text for a private mode.
  */
 
 export const PEEK_URL = '/api/views/peek';
@@ -30,6 +30,8 @@ export interface PeekPanelOptions {
   /** True while the server plugin is loaded. */
   isOn: () => boolean;
   now?: () => number;
+  setTimer?: (run: () => void, ms: number) => unknown;
+  clearTimer?: (timer: unknown) => void;
 }
 
 function strings(value: unknown): string[] {
@@ -67,10 +69,20 @@ export class PeekPanel implements CardPanel {
   private inFlightFor: string | null = null;
   private drawnKey = '';
   private textHidden = false;
+  private timer: unknown = null;
   private readonly now: () => number;
+  private readonly setTimer: (run: () => void, ms: number) => unknown;
+  private readonly clearTimer: (timer: unknown) => void;
 
   constructor(private readonly options: PeekPanelOptions) {
     this.now = options.now ?? (() => Date.now());
+    this.setTimer = options.setTimer ?? ((run, ms) => {
+      const timer = setTimeout(run, ms) as unknown as { unref?: () => void };
+      // Node only (tests): an open card timer must not keep the process alive.
+      timer.unref?.();
+      return timer;
+    });
+    this.clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
   }
 
   available(): boolean {
@@ -87,10 +99,36 @@ export class PeekPanel implements CardPanel {
       this.fetchedAt = -Infinity;
     }
     this.draw();
-    if (this.inFlightFor !== agent.id && this.now() - this.fetchedAt >= PEEK_REFRESH_MS) void this.load(agent.id);
+    if (this.inFlightFor === agent.id) return;
+    const wait = PEEK_REFRESH_MS - (this.now() - this.fetchedAt);
+    if (wait <= 0) void this.load(agent.id);
+    // Throttled: one trailing load when the throttle ends, so a change is never dropped.
+    else if (this.timer === null) this.schedule(wait);
   }
 
-  /** Hide or show the transcript text (Recent and the pinned question). Assets and Equipment stay. */
+  /** The card closed or the plugin went off: stop the refresh, load at once on the next show. */
+  hide(): void {
+    this.stopTimer();
+    this.agentId = null;
+    this.agent = null;
+    this.root = null;
+    this.drawnKey = '';
+  }
+
+  private schedule(ms: number): void {
+    this.stopTimer();
+    this.timer = this.setTimer(() => {
+      this.timer = null;
+      if (this.agentId !== null && this.inFlightFor !== this.agentId) void this.load(this.agentId);
+    }, ms);
+  }
+
+  private stopTimer(): void {
+    if (this.timer !== null) this.clearTimer(this.timer);
+    this.timer = null;
+  }
+
+  /** Hide or show all peek text: Recent, the pinned question, Assets and Equipment. */
   setTextHidden(hidden: boolean): void {
     this.textHidden = hidden;
     this.applyTextHidden();
@@ -112,6 +150,8 @@ export class PeekPanel implements CardPanel {
     this.data = data;
     this.failed = data === null;
     this.draw();
+    // While the card shows this agent, refresh every PEEK_REFRESH_MS.
+    this.schedule(PEEK_REFRESH_MS);
   }
 
   private draw(): void {
@@ -188,8 +228,7 @@ export class PeekPanel implements CardPanel {
   private applyTextHidden(): void {
     const root = this.root;
     if (!root) return;
-    const recent = root.querySelector<HTMLElement>('.peek-recent');
-    if (recent) recent.hidden = this.textHidden;
+    for (const section of root.querySelectorAll<HTMLElement>('.peek-recent, .peek-assets, .peek-equipment')) section.hidden = this.textHidden;
     const question = root.querySelector<HTMLElement>('.peek-question');
     if (question) question.hidden = this.textHidden || question.dataset.empty === 'true';
   }
