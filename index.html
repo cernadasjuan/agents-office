@@ -71,30 +71,68 @@
       font-family: 'Segoe UI', system-ui, sans-serif;
       font-size: 13px;
       min-width: 220px;
+      max-width: 320px;
       max-height: 80vh;
       overflow-y: auto;
       backdrop-filter: blur(8px);
       z-index: 100;
     }
-    #ui-panel h2 {
-      font-size: 14px;
-      margin-bottom: 12px;
-      color: #fff;
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
       border-bottom: 1px solid rgba(120, 120, 255, 0.2);
       padding-bottom: 8px;
+      margin-bottom: 8px;
     }
-    .agent-card {
-      margin-bottom: 10px;
-      padding: 8px;
-      background: rgba(255,255,255,0.05);
-      border-radius: 8px;
+    #ui-panel h2 { font-size: 14px; color: #fff; }
+    #ui-panel-toggle {
+      background: none;
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 4px;
+      color: #e0e0ff;
+      width: 22px;
+      height: 22px;
+      cursor: pointer;
     }
-    .agent-card .agent-name {
+    #ui-panel.collapsed { min-width: 0; }
+    #ui-panel.collapsed .triage-groups { display: none; }
+    .triage-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+    .triage-chip {
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 10px;
+      color: #e0e0ff;
+      font-size: 11px;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+    .triage-chip[data-group="needs-you"] { border-color: #ff7a59; color: #ffb199; }
+    .triage-chip[data-group="your-turn"] { border-color: #e8c547; color: #f3dc85; }
+    .triage-group { margin-bottom: 8px; }
+    .triage-group-header {
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      color: #fff;
+      font-size: 12px;
       font-weight: 600;
-      margin-bottom: 4px;
+      padding: 4px 0;
+      cursor: pointer;
     }
-    .agent-card .agent-name.selectable { cursor: pointer; }
-    .agent-card .agent-name.selectable:hover { color: #fff; text-decoration: underline; }
+    .triage-group[data-group="needs-you"] .triage-group-header { color: #ffb199; }
+    .triage-group.collapsed .triage-rows { display: none; }
+    .agent-card {
+      margin-bottom: 4px;
+      padding: 6px 8px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 6px;
+    }
+    .agent-card.subagent { margin-left: 16px; font-size: 12px; }
+    .agent-card.selectable { cursor: pointer; }
+    .agent-card.selectable:hover { background: rgba(255,255,255,0.1); }
     .agent-card.selected {
       background: rgba(120, 120, 255, 0.18);
       box-shadow: inset 0 0 0 1px rgba(160, 160, 255, 0.6);
@@ -105,6 +143,19 @@
       font-weight: 400;
       color: #8888ff;
     }
+    .agent-top { display: flex; justify-content: space-between; gap: 8px; }
+    .agent-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+    .agent-wait { color: #ffb199; font-size: 11px; white-space: nowrap; }
+    .agent-activity { color: #8888ff; font-size: 11px; }
+    .agent-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+    .agent-provider, .agent-badge {
+      font-size: 10px;
+      padding: 0 5px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .agent-provider { color: #9fe0c0; }
+    .agent-badge { color: #d0c0ff; }
     #pointer-hint {
       position: fixed;
       bottom: 20px;
@@ -123,6 +174,7 @@
     }
     .agent-card select {
       width: 100%;
+      margin-top: 4px;
       background: rgba(40, 40, 80, 0.8);
       color: #e0e0ff;
       border: 1px solid rgba(120, 120, 255, 0.3);
@@ -136,7 +188,10 @@
 <body>
   <div id="pointer-hint">Click to look around &mdash; WASD to move &mdash; Space/Q up/down &mdash; Shift = fast &mdash; ESC to release &mdash; Click a figure to select &mdash; O = overview</div>
   <div id="ui-panel">
-    <h2>Agents Office <span id="label-mode" class="label-mode"></span></h2>
+    <div class="panel-header">
+      <h2>Agents Office <span id="label-mode" class="label-mode"></span></h2>
+      <button type="button" id="ui-panel-toggle" aria-controls="agent-list"></button>
+    </div>
     <div id="agent-list"></div>
   </div>
   <script type="module" src="/src/main.ts"></script>

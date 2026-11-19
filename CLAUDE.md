@@ -49,6 +49,10 @@ A built-in enricher sets `attention` for main sessions: status `waiting` → `wa
 
 `src/addons/building.ts` registers `BuildingLayout` as the default layout (fork only, tier T3). `RoomPlanner.ts` is pure geometry: 12x12 room slots around the 30x26 hall (first ring of 7, the office first at east-center; later rings shift outward and open toward the inner room), door gaps and wall pieces. `rooms.ts` builds a room in a local frame (`RoomFrame`: depth from the door wall, position along it): floor marked `userData.floor`, low walls named `room-walls`, a CSS2D sign, furniture and stations. `BuildingLayout.ts` keeps per-agent state (home desk, current seat, target, pending trip, queue time): desk work at home, trips to station types after `dwellMs` (4 s), main sessions with attention `waiting` or activity `meeting` go to `queue` spots at once and are reordered by `waitMinutes` in `update()`, subagents use pod spots around the parent desk. An exhausted station type adds a room (`ROOM_STATION_TYPE`), saved in `localStorage` (`agents-office.building.rooms`) and rebuilt on load. The hall side walls are hidden and replaced by `building-hall-walls` with a door per first-ring room.
 
+### Mission war rooms (plugins/missions, src/addons/building/missionRooms.ts)
+
+`plugins/missions/index.ts` reads `mission.yaml` records (via the `yaml` package, 1 MB cap, 30 s cache) from `AGENTS_OFFICE_MISSION_ROOTS` and provides world rooms (`mission:<slug>`, open unless done or abandoned) with walls (destination, artifact titles, GitHub members, thread kanban) and `sleepers` (journey sessions). Its enricher scans each session transcript incrementally for tool calls that touch `missions/<slug>/` or a `mission <cmd> <slug>` command and sets `roomKey` for the session and its subagents. The building add-on registers a `building-world-rooms` extension: `BuildingLayout.syncWorldRooms` builds any world room in the mission wing (`missionSlot`: two columns north of the hall back wall, rows further north), updates walls each poll, and seats agents whose `extras.room` matches (queue still wins). Locked rooms close their door and take no agents.
+
 ### Activity Inference (server/agentDetector.ts)
 
 The session file `status` comes first (`combineWithSessionStatus`): `waiting` → `meeting` (label "Waiting for you"), `idle` → `idle`, `busy` with a text-only tail → `planning`. Any other status, or none, uses the transcript alone.
@@ -71,15 +75,20 @@ A built-in source registered in `vitePlugin.ts` with the plugin sources (not as 
 
 Subagents (spawned via the Agent tool) are detected only from the parent's own `~/.claude/projects/<encoded-cwd>/<sessionId>/subagents/`. Each subagent has a `.meta.json` (with `agentType` and `description`) and its own `.jsonl` transcript. A subagent is considered active if its transcript was modified within the last 30 seconds, or if its newest message is a tool call without a result (up to 10 minutes). Their activity is inferred from their own transcript, independently from the parent session.
 
+### Agent names (server/agentDetector.ts)
+
+`sessionName`: a main session uses the session file `name` when `nameSource` is a string other than `derived` (seen: `auto`; `derived` is an automatic `<folder>-xx` name). Otherwise, or when the name is not 1 to 80 characters after trimming, it uses `path.basename(cwd)`. `subagentName`: the meta `name` (Claude Code writes it for team agents), else `description`, else `agentType`, else `subagent`. The herdr enricher runs later and can still replace a main session name with its tab label. `projectAgents` caps the name at 60 characters.
+
 ### Key Patterns
 
 - **Toon shading**: All meshes use `MeshToonMaterial` with a 4-step gradient map, cached in `Materials.ts`
 - **Station occupancy**: `Station.occupied` flag prevents multiple agents at one location. On activity change, old station is released before new one is claimed
 - **Teleport vs walk**: `addAgent()` teleports to station instantly; `setActivity()` triggers a walk animation (4.5 units/sec) with leg/arm swing
+- **Dwell time (activity layout)**: `ActivityLayout` takes `{ dwellMs, now }` (default 0 = move at once). With `dwellMs > 0`, `seatFor` keeps the seat on a station type change and records a pending trip; `update()` returns the `LayoutMove` once the new type lasted `dwellMs`. A change back to the seat type cancels it, a third type restarts the timer, `release` drops it. `registry.ts` reads `?dwell=<seconds>` (`dwellMsFromSearch`, 0 to 30). The figure switches its activity pose at once; the building layout keeps its own dwell
 - **Same-type station stickiness**: If an activity change maps to the same station type (e.g. implementing→debugging), the agent stays at its current desk
 - **Skeleton animation**: Hierarchical joints (root→body→shoulders/hips→limbs) animated per-activity with sine waves and `approach()` easing
 - **Colors**: Centralized palette in `Colors.ts` with 8 accent colors for agents; an agent's color comes from an FNV-1a hash of its ID
-- **Side panel**: `src/ui/AgentPanel.ts` updates cards in place; it rebuilds nothing on an activity change. A click on a card name selects the agent; the selected card is marked
+- **Triage list (side panel)**: `src/ui/AgentPanel.ts` groups agents into Needs you (attention `waiting`), Your turn (attention `your-turn`), Working (subagents nested under `extras.parentId`) and Idle, with count chips on top. Rows are created once per agent and moved or edited in place on each poll; the scroll position, the groups the user opened or closed and a focused menu survive. Your turn starts collapsed above 5 rows, Idle always starts collapsed. A click on a row calls `selectAgent`; the selected row is marked. The activity menu (P14) appears only with `?demo=1` (`isDemoMode`). `setupPanelCollapse` hides the panel body and stores the choice in localStorage (`agents-office.panel-collapsed`). All text goes through `textContent`
 
 ### Office Layout
 
@@ -96,3 +105,5 @@ Two modes, owned by `src/scene/ViewController.ts`. First person stays the defaul
 ### Label detail (src/ui/LabelDetail.ts)
 
 `labelDetail(facts, view)` is pure: mode `all` → full; attention `waiting`, selected or hovered → full; overview → full when `zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM` (14), else compact; first person → full within `FIRST_PERSON_FULL_LABEL_DISTANCE` (8) of the camera, else compact. `LabelDetailController` recomputes every `LABEL_DETAIL_INTERVAL_MS` (150 ms), on a selection change and after each poll. It only toggles the `compact` class on the label element (`applyLabelDetail`), so the label text, the BMAD persona names and the Codex tag stay as they are; the CSS hides `.activity` and shows a dot from `--agent-color` (set by `StickFigure`). Hover reuses `ViewController.pickAt` at the last pointer position, or the canvas center while the pointer is locked. The zoom comes from `ViewController.zoomDistance`. Key V cycles `smart` → `all` → `smart`; `#labels=all` starts in `all`; `#label-mode` in the side panel header shows the mode.
+
+`src/scene/Selection.ts` holds the shared selection: `selectAgent(id)`, `clearSelection()`, `selectedAgentId()`, `onSelectionChange(cb)` (returns an unsubscribe function). Extensions and other UI (for example a triage list) use it. A click on a figure (raycast against the figure meshes) or on a row in the triage list selects; Esc clears; an agent that leaves is deselected. On a new selection the camera flies to the agent in 0.6 s and `SelectionMarker.ts` draws a ring in the agent's color under it. `#focus=<agent id>` selects that agent once it appears.
