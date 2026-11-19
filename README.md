@@ -180,7 +180,7 @@ This fork adds a second layout, `building`, and makes it the default. `?layout=a
 - **Subagents** stand around their parent's desk.
 - **Library:** the building opens a Library room right after your office. Research trips go there first. With the `library` plugin, librarian subagents (types in `AGENTS_OFFICE_LIBRARIAN_TYPES`, default `bibliotheque-librarian`) carry a book and walk between the Library, while they research, and the agent they serve.
 - **Growth:** when a kind of station runs out, the building adds a room of that kind next to the others: desks, planning room, library, test lab, writing room, lounge, or another waiting room. Rooms are never removed, and the browser remembers them.
-- **Wayfinding:** each room has a large name label above its center ("LIBRARY", "LOUNGE 2"). The label is part of the 3D scene: it gets smaller with distance, and walls hide it in first person. Lounges are numbered in the order the building adds them. Each door has a frame (two posts and a lintel) in the room's floor color, so you find the doors from the hall.
+- **Wayfinding:** each room has a large name label above its center ("LIBRARY", "LOUNGE 2"). The label is part of the 3D scene: it gets smaller with distance, and walls hide it in first person. Lounges are numbered in the order the building adds them. Each door has a frame (two posts and a lintel) in the room's floor color, so you find the doors from the hall. In first person the label of the room you stand in hides, so it does not block your view.
 - **Cut-away walls:** in the overview, the room and hall walls drop to 0.5 m, so you see each room floor and the figures in it. First person keeps the full walls.
 
 ## Plugins
@@ -304,7 +304,7 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 
 - **Server**: Vite plugin reads Claude session files, validates PIDs, combines the session status with the newest tool call of the session's own transcript, and detects that session's active subagents
 - **Client**: Three.js scene with toon-shaded stick figures, station-based layout, walking animations, and per-activity poses
-- **Rendering**: static furniture draws merged (one mesh per material), figure parts draw instanced, and shadow maps redraw only when a caster changes. Frames render on demand, at most 30 per second, and once per second when nothing moves. The overview uses at most 1.5 pixels per CSS pixel and hard shadows. At 25 rooms and 40 agents a frame takes about 340 draw calls (shadow pass included) instead of about 10,000. `pnpm measure` prints the count; `?debug=1` exposes `window.__officeStats` (renders, draw calls, render times)
+- **Rendering**: static furniture draws merged (one mesh per material), figure parts draw instanced, and shadow maps redraw only when a caster changes. Frames render on demand, at most 30 per second, and once per second when nothing moves. The overview uses at most 1.5 pixels per CSS pixel and hard shadows. At 25 rooms and 40 agents a frame takes about 370 draw calls (shadow pass and room labels included) instead of about 10,000. `pnpm measure` prints the count; `?debug=1` exposes `window.__officeStats` (renders, draw calls, render times)
 
 ## Requirements
 
