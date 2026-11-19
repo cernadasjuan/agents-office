@@ -7,12 +7,14 @@ import { AgentPoller } from './agents/AgentPoller.js';
 import { AgentPanel, isDemoMode, setupPanelCollapse } from './ui/AgentPanel.js';
 import { chooseLayoutId, confirmLayoutSwitch, createLayout, defaultViewFor, isLayoutSwitchKey, layoutName, rememberLayoutId, reloadForLayoutSwitch } from './layout/registry.js';
 import { chooseViewMode, rememberViewMode, viewStatusText } from './scene/ViewMemory.js';
-import { activeExtensions, setWorld, type World } from './extensions.js';
+import { activeExtensions, currentWorld, setWorld, type World } from './extensions.js';
 import { tabTitleFor } from './ui/attention.js';
 import { LabelDetailController } from './ui/LabelDetail.js';
 import { AgentCard } from './ui/AgentCard.js';
 import { FrameLoop } from './scene/FrameLoop.js';
 import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
+import { FreshnessFooter } from './ui/freshness.js';
+import { Legend } from './ui/Legend.js';
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
@@ -71,6 +73,9 @@ const panel = new AgentPanel(document.getElementById('agent-list')!, {
 });
 setupPanelCollapse(document.getElementById('ui-panel')!, document.getElementById('ui-panel-toggle')!, window.localStorage);
 onSelectionChange((agentId) => panel.setSelected(agentId));
+// Footer: "Updated N s ago", amber after 2 failed polls, red after 5. "?" opens the legend.
+const freshness = new FreshnessFooter(document.getElementById('panel-footer')!);
+new Legend({ parent: document.body, button: document.getElementById('legend-button')!, keys: window, layout: layoutId, plugins: () => currentWorld().plugins });
 
 // Label detail: full labels only for waiting, selected, hovered or near agents. Key V or `#labels=all` shows all.
 // War room signs show only when zoomed in, near or hovered.
@@ -126,7 +131,7 @@ window.setInterval(() => void pollWorld(), 10_000);
 
 // Start polling for real agents (an empty office when none are found)
 const poller = new AgentPoller(agentManager);
-poller.start(3000, buildUI);
+poller.start(3000, buildUI, (health) => freshness.show(health));
 
 // --- Render loop ---
 // On demand, at most 30 fps, once a second when nothing moves. `?debug=1` exposes `window.__officeStats`.

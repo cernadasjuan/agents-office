@@ -1,4 +1,4 @@
-import { ACTIVITY_LABELS, type AgentExtras, type AgentInfo } from '../agents/AgentData.js';
+import { activityLabel, type AgentExtras, type AgentInfo } from '../agents/AgentData.js';
 import { officeSelection, type SelectionState } from '../scene/Selection.js';
 import { attentionBand, attentionLine } from './attention.js';
 
@@ -235,11 +235,11 @@ export class AgentCard {
 
   private fill(agent: AgentInfo): void {
     const extras = agent.extras ?? {};
-    const activityLabel = ACTIVITY_LABELS[agent.activity] ?? agent.activity;
+    const activityText = activityLabel(agent);
     this.name.textContent = agent.name;
-    this.activity.textContent = activityLabel;
+    this.activity.textContent = activityText;
     const waits = extras.attention !== undefined;
-    this.wait.textContent = waits ? attentionLine(activityLabel, extras.attention, extras.waitMinutes) : '';
+    this.wait.textContent = waits ? attentionLine(activityText, extras.attention, extras.waitMinutes) : '';
     this.wait.hidden = !waits;
     const band = attentionBand(extras);
     this.band.textContent = band ?? '';
@@ -253,7 +253,7 @@ export class AgentCard {
     const parent = extras.parentId ? this.agents.find((candidate) => candidate.id === extras.parentId) : undefined;
     const available = actions.filter((action) => action.available(agent));
     const key = JSON.stringify([agent.id, extras.badges, extras.issues?.slice(0, CARD_MAX_ISSUES),
-      children.map((child) => [child.id, child.name, child.activity]), parent?.id, parent?.name, available.map((a) => a.id)]);
+      children.map((child) => [child.id, child.name, activityLabel(child)]), parent?.id, parent?.name, available.map((a) => a.id)]);
     if (agent.id !== this.shownId) {
       this.shownId = agent.id;
       this.clearStatus();
@@ -264,7 +264,7 @@ export class AgentCard {
     this.fillList(this.personas.body, extras.badges ?? [], 'No personas', (badge) => this.text('li', badge));
     this.fillList(this.subagents.body, children, 'No subagents', (child) => {
       const item = this.text('li', '');
-      item.appendChild(this.selectButton(child.id, `${child.name} · ${ACTIVITY_LABELS[child.activity] ?? child.activity}`));
+      item.appendChild(this.selectButton(child.id, `${child.name} · ${activityLabel(child)}`));
       return item;
     });
     this.fillList(this.issues.body, (extras.issues ?? []).slice(0, CARD_MAX_ISSUES), 'No linked issues', (issue) => this.issueItem(issue));

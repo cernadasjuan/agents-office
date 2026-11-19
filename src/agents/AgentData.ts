@@ -49,6 +49,19 @@ export const ACTIVITY_LABELS: Record<Activity, string> = {
   meeting: 'Waiting for you',
 };
 
+/** A subagent at rest gave its final answer: it has finished, it is not on a break. */
+export const DONE_LABEL = 'Done';
+
+export function activityLabelFor(activity: Activity, isSubagent: boolean): string {
+  if (isSubagent && activity === 'idle') return DONE_LABEL;
+  return ACTIVITY_LABELS[activity] ?? activity;
+}
+
+/** The activity text of an agent: "Done" for a finished subagent, else the activity label. */
+export function activityLabel(agent: Pick<AgentInfo, 'activity' | 'extras'>): string {
+  return activityLabelFor(agent.activity, agent.extras?.parentId !== undefined);
+}
+
 const AGENT_NAMES = [
   'Agent Alpha',
   'Agent Beta',

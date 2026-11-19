@@ -320,3 +320,28 @@ test('the collapse works without storage', (t) => {
   button.click();
   assert.equal(root.classList.contains('collapsed'), true);
 });
+
+test('before the first answer the panel shows a loading text, and the first render removes it', (t) => {
+  const { list, panel } = makePanel(t);
+  const loading = list.querySelector<HTMLElement>('.triage-loading')!;
+  assert.equal(loading.textContent, 'Loading agents…');
+  assert.equal(loading.hidden, false);
+
+  panel.render([]);
+  assert.equal(loading.hidden, true, 'an empty office after the first answer is a real empty office');
+});
+
+test('a finished subagent reads "Done"; an idle main agent keeps "Taking a break"', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([idle('main'), { id: 'sub', name: 'sub', activity: 'idle', extras: { parentId: 'main' } }]);
+
+  assert.equal(card(list, 'sub').querySelector('.agent-activity')!.textContent, 'Done');
+  assert.equal(card(list, 'main').querySelector('.agent-activity')!.textContent, 'Taking a break');
+});
+
+test('a working subagent keeps its activity label', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('main'), working('sub', 'main')]);
+
+  assert.equal(card(list, 'sub').querySelector('.agent-activity')!.textContent, 'Implementing');
+});

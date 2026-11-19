@@ -19,19 +19,34 @@ function extrasOf(agent: DetectedAgent): AgentExtras | undefined {
 
 const POLL_TIMEOUT_MS = 5000;
 
+/** How the polls go: the first answer arrived, the time of the last good answer, failed polls in a row. */
+export interface PollHealth {
+  loaded: boolean;
+  lastSuccessAt: number | null;
+  failures: number;
+}
+
 export class AgentPoller {
   private agentManager: AgentManager;
   private intervalId: number | null = null;
   private knownIds = new Set<string>();
   private onUpdate: (() => void) | null = null;
+  private onHealth: ((health: PollHealth) => void) | null = null;
   private pollInFlight = false;
+  private health: PollHealth = { loaded: false, lastSuccessAt: null, failures: 0 };
 
-  constructor(agentManager: AgentManager) {
+  constructor(agentManager: AgentManager, private now: () => number = () => Date.now()) {
     this.agentManager = agentManager;
   }
 
-  start(intervalMs = 3000, onUpdate?: () => void): void {
+  get pollHealth(): PollHealth {
+    return { ...this.health };
+  }
+
+  /** `onHealth` runs after every finished poll, good or failed. */
+  start(intervalMs = 3000, onUpdate?: () => void, onHealth?: (health: PollHealth) => void): void {
     this.onUpdate = onUpdate ?? null;
+    this.onHealth = onHealth ?? null;
     this.poll();
     this.intervalId = window.setInterval(() => this.poll(), intervalMs);
   }
@@ -51,17 +66,23 @@ export class AgentPoller {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const agents: DetectedAgent[] = await res.json();
-      this.reconcile(agents);
-    } catch {
-      // API not available or too slow: keep the current state
+      const firstAnswer = !this.health.loaded;
+      this.health = { loaded: true, lastSuccessAt: this.now(), failures: 0 };
+      this.reconcile(agents, firstAnswer);
+    } catch (error) {
+      // API not available, too slow or broken: keep the current state and count the failure
+      console.debug('agent poll failed', error);
+      this.health = { ...this.health, failures: this.health.failures + 1 };
     } finally {
       this.pollInFlight = false;
     }
+    this.onHealth?.(this.pollHealth);
   }
 
-  private reconcile(agents: DetectedAgent[]): void {
+  /** The first answer always counts as a change, so an empty office replaces the loading text. */
+  private reconcile(agents: DetectedAgent[], firstAnswer = false): void {
     const currentIds = new Set(agents.map((a) => a.id));
-    let changed = false;
+    let changed = firstAnswer;
 
     // Add new agents
     for (const agent of agents) {

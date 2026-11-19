@@ -47,6 +47,7 @@ export class AgentManager {
     const parentId = info.extras?.parentId;
     const figure = new StickFigure(info.name, accentColorFor(parentId ?? info.id));
     if (parentId) figure.group.scale.setScalar(SUBAGENT_SCALE);
+    figure.setSubagent(parentId !== undefined);
     figure.setTag(info.extras?.provider);
     const managed: ManagedAgent = { info, figure, seat: null };
     this.agents.set(info.id, managed);

@@ -107,3 +107,17 @@ test('a block without a wait time keeps the beacon, as before', () => {
   figure.setAttention('waiting', undefined);
   assert.equal(beaconOf(figure)?.visible, true);
 });
+
+test('a finished subagent figure reads "Done"; a main figure at rest keeps "Taking a break"', () => {
+  const sub = new StickFigure('helper', new THREE.Color(0x4a90d9));
+  sub.setSubagent(true);
+  sub.setActivity('idle');
+  assert.equal(activityText(sub), 'Done');
+  sub.setActivity('researching');
+  assert.equal(activityText(sub), 'Researching');
+
+  const main = new StickFigure('main', new THREE.Color(0x4a90d9));
+  main.setActivity('implementing');
+  main.setActivity('idle');
+  assert.equal(activityText(main), 'Taking a break');
+});
