@@ -70,7 +70,8 @@ export function compactLabelLines(text: string): string[] {
 
 /** What the label controller tells a room label each refresh. */
 export interface RoomLabelView {
-  viewMode: 'overview' | 'first-person';
+  /** First person, or a view from above (the overview, the isometric view). */
+  viewMode: 'overview' | 'first-person' | 'isometric';
   zoomDistance: number;
   /** Zoomed in, pointed at or labels: all: the full name. */
   detail: boolean;
@@ -144,7 +145,7 @@ export function roomLabel(text: string, position: THREE.Vector3, rect: Rect): TH
   label.userData.applyView = (next: RoomLabelView) => {
     view = next;
     const faces = label.userData.faces as { full: LabelFace; compact: LabelFace };
-    const face = next.viewMode === 'overview' && !next.detail ? faces.compact : faces.full;
+    const face = next.viewMode !== 'first-person' && !next.detail ? faces.compact : faces.full;
     label.userData.face = face;
     label.userData.labelLines = face.lines;
     const pose = roomLabelPose(next, face.width / face.height);

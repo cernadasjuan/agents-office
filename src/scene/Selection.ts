@@ -104,7 +104,18 @@ export function isClick(down: ScreenPoint | null, up: ScreenPoint): boolean {
   return Math.hypot(up.x - down.x, up.y - down.y) <= CLICK_TOLERANCE_PX;
 }
 
-export type ViewMode = 'first-person' | 'overview';
+export type ViewMode = 'first-person' | 'overview' | 'isometric';
+
+/** A view name from a URL or the browser storage: `overview`, `first-person`, `iso` or `isometric`; else null. */
+export function viewModeFromName(value: string | null | undefined): ViewMode | null {
+  if (value === 'overview' || value === 'first-person' || value === 'isometric') return value;
+  return value === 'iso' ? 'isometric' : null;
+}
+
+/** The overview and the isometric view look down on the building: cutaway walls, no ceiling, zoom-based labels. */
+export function isViewFromAbove(mode: ViewMode): boolean {
+  return mode !== 'first-person';
+}
 
 export interface ViewHash {
   view: ViewMode;
@@ -113,12 +124,12 @@ export interface ViewHash {
 
 const PUBLIC_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
-/** `#view=overview` starts in the overview. `#focus=<agent id>` selects that agent once it appears. */
+/** `#view=overview` starts in the overview, `#view=iso` in the isometric view. `#focus=<agent id>` selects that agent once it appears. */
 export function parseViewHash(hash: string): ViewHash {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const focus = params.get('focus');
   return {
-    view: params.get('view') === 'overview' ? 'overview' : 'first-person',
+    view: viewModeFromName(params.get('view')) ?? 'first-person',
     focus: focus && PUBLIC_ID.test(focus) ? focus : null,
   };
 }
