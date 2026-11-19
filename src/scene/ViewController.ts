@@ -70,6 +70,11 @@ export class ViewController {
     return this.currentMode;
   }
 
+  /** Overview camera distance (the zoom). Label detail reads it. */
+  get zoomDistance(): number {
+    return this.overview.distance;
+  }
+
   toggleMode(): void {
     this.setMode(this.currentMode === 'overview' ? 'first-person' : 'overview', true);
   }

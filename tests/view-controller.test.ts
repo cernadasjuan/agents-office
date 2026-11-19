@@ -118,3 +118,13 @@ test('selecting in first person flies there and keeps first person', () => {
   assert.equal(view.mode, 'first-person');
   assert.ok(camera.position.distanceTo(new THREE.Vector3(4, 0, -3)) < 7);
 });
+
+test('zoomDistance reports the overview camera distance and follows the wheel', () => {
+  const { view } = setup('#view=overview');
+  const before = view.zoomDistance;
+  assert.ok(Number.isFinite(before) && before > 0);
+  const canvases = dom.window.document.querySelectorAll('canvas');
+  const canvas = canvases[canvases.length - 1];
+  canvas.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -400, cancelable: true }));
+  assert.ok(view.zoomDistance < before, `zoomed in (${view.zoomDistance} < ${before})`);
+});

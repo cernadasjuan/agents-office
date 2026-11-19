@@ -151,6 +151,8 @@ Without a status in the session file, every agent is in Working or Idle. `?demo=
 
 - **Name:** the session name from the Claude Code session file, when Claude Code or you set it (an automatic `<folder>-xx` name does not count). Otherwise the folder name of the session. Subagents show `>>` followed by their name from the meta file, else their task description, else their type. A name must have 1 to 80 characters after trimming.
 - **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads. A subagent wears its parent's color and stands at 85% of the height.
+- **Label detail:** with many agents, full labels overlap. By default (mode `smart`) a label is full only when it matters: the agent waits for you (blocked), it is selected, the pointer is on it (in first person with the camera engaged, the screen center), or it is within 8 units of the camera in first person. In the overview, all labels become full when you zoom in close (camera distance 14 or less). Other agents show a compact label: a dot in the agent color and the name, shortened if long, with no activity line. "Your turn" alone does not make a label full, because most idle sessions have it. Key **V** or `#labels=all` shows all full labels (the original behavior). The side panel header shows the mode.
+
 - **Label:** the name and the activity text float over each figure. The side panel lists the same agents (see [Triage list](#triage-list)).
 
 ## Fork layout: the growing building
@@ -243,6 +245,8 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 - **O** to switch between first person (the default) and the overview, a view from above at an angle that shows the whole floor. In the overview, drag to pan, use the mouse wheel to zoom, and use W/A/S/D to pan
 - **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on a row in the triage list also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
 - **Esc** clears the selection (in first person it first releases the camera)
+- **V** to switch the labels between `smart` (the default) and `all` full labels. `#labels=all` in the URL starts with all labels
+
 - `?dwell=<seconds>` in the URL (0 to 30, default 0) makes an agent in the original `activity` layout wait that long before it walks to a new station. A change back before the time cancels the walk. The figure shows the new activity at once.
 - `#view=overview` in the URL starts in the overview. `#focus=<agent id>` selects that agent when it appears (agent IDs change when the server restarts)
 

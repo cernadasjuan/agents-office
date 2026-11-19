@@ -31,6 +31,7 @@
 - The side panel updates in place, so an open menu stays open
 - README explains how status, stations, poses and identity work
 - Test suite: `pnpm test`
+- Label detail: full labels only for waiting, selected, hovered or near agents; compact labels (color dot and name) for the others. Key V or `#labels=all` shows all full labels
 
 ## 1.1.0
 
