@@ -41,19 +41,36 @@ test('agents go to the group of what the user must do, in a fixed group order', 
   panel.render([idle('i1'), working('w1'), yourTurn('y1', 3), waiting('n1', 12)]);
 
   const groups = [...list.querySelectorAll<HTMLElement>('.triage-group')].map((group) => group.dataset.group);
-  assert.deepEqual(groups, ['needs-you', 'your-turn', 'working', 'idle']);
+  assert.deepEqual(groups, ['needs-you', 'your-turn', 'working', 'idle', 'cold']);
   assert.deepEqual(rowIds(list, 'needs-you'), ['n1']);
   assert.deepEqual(rowIds(list, 'your-turn'), ['y1']);
   assert.deepEqual(rowIds(list, 'working'), ['w1']);
   assert.deepEqual(rowIds(list, 'idle'), ['i1']);
 });
 
-test('needs you and your turn sort by wait, the longest first', (t) => {
+test('needs you and your turn sort fresh before aging, the longest wait first inside each band', (t) => {
   const { list, panel } = makePanel(t);
-  panel.render([waiting('n1', 2), waiting('n2', 30), waiting('n3'), waiting('n4', 12), yourTurn('y1', 1), yourTurn('y2', 40)]);
+  panel.render([waiting('n1', 2), waiting('n2', 30), waiting('n3'), waiting('n4', 12), waiting('n5', 90), yourTurn('y1', 1), yourTurn('y2', 40)]);
 
-  assert.deepEqual(rowIds(list, 'needs-you'), ['n2', 'n4', 'n1', 'n3']);
-  assert.deepEqual(rowIds(list, 'your-turn'), ['y2', 'y1']);
+  assert.deepEqual(rowIds(list, 'needs-you'), ['n4', 'n1', 'n3', 'n5', 'n2']);
+  assert.deepEqual(rowIds(list, 'your-turn'), ['y1', 'y2']);
+});
+
+test('cold waits leave needs you and your turn for a collapsed Cold group at the bottom, with a count', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([waiting('n1', 5), waiting('old-block', 2 * 24 * 60), yourTurn('old-turn', 24 * 60), yourTurn('y1', 30), idle('i1')]);
+
+  const groups = [...list.querySelectorAll<HTMLElement>('.triage-group')].map((group) => group.dataset.group);
+  assert.equal(groups[groups.length - 1], 'cold');
+  assert.deepEqual(rowIds(list, 'needs-you'), ['n1']);
+  assert.deepEqual(rowIds(list, 'your-turn'), ['y1']);
+  assert.deepEqual(rowIds(list, 'cold'), ['old-block', 'old-turn']);
+  const cold = groupOf(list, 'cold');
+  assert.equal(cold.hidden, false, 'a cold wait never vanishes');
+  assert.equal(cold.classList.contains('collapsed'), true);
+  assert.equal(cold.querySelector('.triage-group-header')?.textContent, '▸ Cold · 2');
+  assert.equal(list.querySelector<HTMLElement>('.triage-chip[data-group="cold"]')?.textContent, '2 cold');
+  assert.equal(card(list, 'old-block').querySelector('.agent-wait')?.textContent, '2 d');
 });
 
 test('a needs-you row shows the name, the wait and the activity', (t) => {
