@@ -231,3 +231,78 @@ test('plugins get the transcript path and subagent type on the server, and the A
   assert.equal(json.includes('.jsonl'), false);
   assert.equal(json.includes('Explore'), false);
 });
+
+function writeNamedSession(file: string, sessionId: string, extra: Record<string, unknown>): void {
+  fs.writeFileSync(path.join(sessions, file), JSON.stringify({ pid: 101, sessionId, cwd, startedAt: 1, ...extra }));
+}
+
+function mainName(): string | undefined {
+  return detectAgents().find((agent) => !agent.parentId)?.name;
+}
+
+test('a session name that Claude Code did not derive from the folder is the agent name', () => {
+  writeNamedSession('a.json', 'session-a', { name: '  Fix the login bug  ', nameSource: 'auto' });
+
+  assert.equal(mainName(), 'Fix the login bug');
+});
+
+test('a user-set session name is the agent name', () => {
+  writeNamedSession('a.json', 'session-a', { name: 'release prep', nameSource: 'user' });
+
+  assert.equal(mainName(), 'release prep');
+});
+
+test('a derived session name keeps the folder name', () => {
+  writeNamedSession('a.json', 'session-a', { name: 'shared-project-e7', nameSource: 'derived' });
+
+  assert.equal(mainName(), 'shared-project');
+});
+
+test('a session without a name source keeps the folder name', () => {
+  writeNamedSession('a.json', 'session-a', { name: 'something' });
+
+  assert.equal(mainName(), 'shared-project');
+});
+
+test('an empty, too long or non-text session name keeps the folder name', () => {
+  for (const name of ['   ', 'x'.repeat(81), 42, null]) {
+    writeNamedSession('a.json', 'session-a', { name, nameSource: 'auto' });
+    assert.equal(mainName(), 'shared-project', `name ${JSON.stringify(name)}`);
+  }
+});
+
+function writeSubagentMeta(meta: Record<string, unknown>): void {
+  writeSession('a.json', 'session-a', 101);
+  const subagentsDir = path.join(projectDir, 'session-a', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(subagentsDir, 'agent-1.meta.json'), JSON.stringify(meta));
+  writeTranscript(path.join('session-a', 'subagents', 'agent-1.jsonl'), toolUseLine('Grep', {}), new Date());
+}
+
+function subagentName(): string | undefined {
+  return detectAgents().find((agent) => agent.parentId)?.name;
+}
+
+test('a subagent meta name is the subagent name', () => {
+  writeSubagentMeta({ name: 'reviewer', description: 'Review the diff', agentType: 'general-purpose' });
+
+  assert.equal(subagentName(), 'reviewer');
+});
+
+test('a subagent without a meta name uses its description, then its type', () => {
+  writeSubagentMeta({ description: 'Review the diff', agentType: 'Explore' });
+  assert.equal(subagentName(), 'Review the diff');
+
+  writeSubagentMeta({ agentType: 'Explore' });
+  assert.equal(subagentName(), 'Explore');
+
+  writeSubagentMeta({});
+  assert.equal(subagentName(), 'subagent');
+});
+
+test('an empty or too long subagent meta name falls back to the description', () => {
+  for (const name of ['  ', 'x'.repeat(81), 7]) {
+    writeSubagentMeta({ name, description: 'Review the diff' });
+    assert.equal(subagentName(), 'Review the diff', `name ${JSON.stringify(name)}`);
+  }
+});
