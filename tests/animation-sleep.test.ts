@@ -189,3 +189,19 @@ test('a near figure in view keeps its idle sway and the loop keeps rendering for
   assert.equal(manager.getAgents().filter((managed) => !isAnimationAsleep(managed.figure.group)).length, 1);
   assert.ok(renderer.renders >= 55, `${renderer.renders} renders in 2 s`);
 });
+
+test('a sleeping figure that stays in place still raises its hand when it starts waiting', () => {
+  // The layout seats the agent once and keeps it there, so no walk can settle the pose.
+  const placeOnce = { seatFor: (_info: unknown, previous: unknown) => (previous === null ? seat(0, 0) : null), release: () => undefined };
+  const manager = new AgentManager(new THREE.Scene(), placeOnce as never);
+  manager.addAgent({ id: 'far', name: 'far', activity: 'implementing' });
+  const [managed] = manager.getAgents();
+  setAnimationAsleep(managed.figure.group, true);
+  for (let tick = 1; tick <= 5; tick++) manager.update(tick / 30, 1 / 30);
+
+  manager.setExtras('far', { attention: 'waiting', waitMinutes: 3 });
+  manager.update(6 / 30, 1 / 30);
+
+  assert.equal(managed.figure.walking, false, 'no walk happened');
+  assert.ok(Math.abs(managed.figure.joints.rightUpperArm.rotation.x - RAISED_ARM) < 0.05, `raises the hand: ${managed.figure.joints.rightUpperArm.rotation.x}`);
+});
