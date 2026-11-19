@@ -84,6 +84,24 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 | Only read-only programs: `ls`, `cat`, `rg`, `grep`, `find`, `git status`... | Researching (bookshelf) |
 | Anything else | Implementing (desk) |
 
+### Codex agents
+
+If a Codex home exists (`CODEX_HOME`, else `~/.codex`), the app also shows Codex threads. It reads only the rollout files in `sessions/YYYY/MM/DD/rollout-*.jsonl`. It does not read `auth.json`, `config.toml`, `history.jsonl` or the memory files. Without a Codex home, nothing changes.
+
+- **Presence:** a thread is shown when its rollout file changed in the last 10 minutes. This is recent activity, not proof of a running process. A long silent command, or an open thread that waits for you, can disappear. A closed thread can stay for up to 10 minutes.
+- **Activity:** from the newest record in the last 256 KB of the rollout. Shell commands use the Bash rules above. A file change is implementing, a read-only MCP call or a web search is researching, a plan or subagent step is planning, and a question for you is waiting. A completed or aborted turn, or a final assistant message, is taking a break. A wrapped script (`exec`) is implementing; the app never runs or evaluates it.
+- **Name and parent:** the folder name of the thread's working directory, else `codex`. A spawned child links to its parent only when the parent is also shown. Records that a child copies from its parent are ignored.
+- **Label:** the floating label adds `· codex` after the activity.
+- Tested against the rollout layout of Codex 0.169.0. Unknown records are skipped. Symlinks inside the sessions folder are not followed.
+
+### Who needs you
+
+- **Blocked:** a session that waits for your permission or answer raises its right hand, shows an amber marker over its head, and its label reads "Waiting for you · 12 min".
+- **Your turn:** a session that finished its turn shows "Your turn · 5 min" in its label, with no marker.
+- **Tab title:** `(2) +5 · Agents Office` means 2 blocked and 5 waiting for your next prompt.
+
+Subagents never ask; their parent does. Without a status in the session file, nothing changes.
+
 ### Location: stations
 
 | Station | Where | Seats | Activities |
@@ -93,7 +111,8 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 | Whiteboards | Back wall | 2 | Planning |
 | Bookshelves | Left wall | 2 | Researching |
 | Test stations | Right side | 2 | Testing |
-| Coffee machine | Front left | 2 | Taking a break |
+| Coffee machine | Front left | 2 | Taking a break (standing) |
+| Lounge sofas | Front left | 6 | Taking a break (seated) |
 | Meeting table | Front right | 3 | Waiting for you |
 
 - A new agent appears directly at its seat. When its activity changes, it walks to a seat of the new type.
@@ -118,7 +137,7 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 ### Identity: name, color, label
 
 - **Name:** the folder name of the session. Subagents show `>>` followed by their task description.
-- **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads.
+- **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads. A subagent wears its parent's color and stands at 85% of the height.
 - **Label:** the name and the activity text float over each figure. The side panel lists the same agents. Its menu lets you preview another activity until the next update.
 
 ## Plugins

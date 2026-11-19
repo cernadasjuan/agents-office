@@ -60,3 +60,13 @@ test('ordinary labels retain text and update without accumulating child elements
   updateLabel(label, 'worker two', 'idle');
   assertPlainLabel(label.element, 'worker two', 'idle');
 });
+
+test('a provider tag is appended to the activity line as text', (t) => {
+  installDocument(t);
+  const label = createLabel('billing-service', 'Testing', 'codex');
+  assertPlainLabel(label.element, 'billing-service', 'Testing · codex');
+  updateLabel(label, 'billing-service', 'Idle', '<b>codex</b>');
+  assertPlainLabel(label.element, 'billing-service', 'Idle · <b>codex</b>');
+  updateLabel(label, 'claude-agent', 'Idle');
+  assertPlainLabel(label.element, 'claude-agent', 'Idle');
+});

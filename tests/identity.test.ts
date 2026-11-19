@@ -37,3 +37,15 @@ test('the floating label shows the same friendly text as the panel', () => {
 
   assert.equal(figure.label.element.querySelector('.activity')?.textContent, 'Writing docs');
 });
+
+test('a subagent wears its parent color and stands smaller', () => {
+  const manager = new AgentManager(new THREE.Scene(), new Map());
+  manager.addAgent({ id: 'parent-session', name: 'parent', activity: 'idle' });
+  manager.addAgent({ id: 'child-1', name: '>> child', activity: 'researching', extras: { parentId: 'parent-session' } });
+
+  assert.equal(torsoColor(manager, 'child-1'), torsoColor(manager, 'parent-session'));
+  const child = manager.getAgents().find((managed) => managed.info.id === 'child-1')!;
+  const parent = manager.getAgents().find((managed) => managed.info.id === 'parent-session')!;
+  assert.equal(child.figure.group.scale.y, 0.85);
+  assert.equal(parent.figure.group.scale.y, 1);
+});
