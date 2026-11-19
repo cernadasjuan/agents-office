@@ -3,11 +3,14 @@ import type { ManagedAgent } from '../../src/agents/AgentManager.js';
 import { registerExtension, type OfficeExtension, type World, type WorldBoard } from '../../src/extensions.js';
 import { IssueCardBatch } from './cards.js';
 import { canvas, fitted } from './text.js';
+import { installIssueLineStyle, MAX_IDS, showIssueIds } from './labelIds.js';
 
 /**
  * Browser part of the GitHub plugin: kanban boards on the walls and issue
- * badges on the agents' shoulders and upper arms (see `cards.ts`). Every drawn
- * text comes from the projected API data and goes to a canvas through fillText.
+ * badges on the agents' shoulders and upper arms (see `cards.ts`), plus one
+ * line of issue IDs in each floating label (see `labelIds.ts`). Every drawn text
+ * comes from the projected API data and goes to a canvas through fillText or
+ * to the label through textContent.
  */
 
 /** Wall spots for up to 4 boards. The first is the right part of the back wall, between the whiteboard at x=5 and the wall art at x=9. */
@@ -83,8 +86,10 @@ export class GithubOfficeExtension implements OfficeExtension {
   readonly cards = new IssueCardBatch();
 
   start(scene: THREE.Scene): void {
+    if (this.scene) return;
     this.scene = scene;
     this.cards.attach(scene);
+    installIssueLineStyle(document);
   }
 
   worldChanged(world: World): void {
@@ -103,6 +108,7 @@ export class GithubOfficeExtension implements OfficeExtension {
 
   agentsChanged(agents: ManagedAgent[]): void {
     this.cards.sync(agents);
+    for (const agent of agents) showIssueIds(agent.figure.label.element, (agent.info.extras?.issues ?? []).slice(0, MAX_IDS));
   }
 
   private mountBoard(index: number): MountedBoard {

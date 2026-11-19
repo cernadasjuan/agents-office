@@ -298,3 +298,28 @@ test('a card border takes the wayfinder label color, else the first label color,
   const text = JSON.stringify(projectAgents(observations, (raw) => raw)[0].issues);
   assert.equal(text.includes('wayfinder') || text.includes('enhancement'), false, 'no label text leaves the server');
 });
+
+test('the agents call gets titles and colors without a world call first', async () => {
+  const labeled = [ghIssue(5, { labels: [{ name: 'wayfinder:implementation', color: '1D76DB' }] })];
+  const { plugin: p, calls } = plugin('gabriel-amyot/agents-office', () => JSON.stringify(labeled));
+  const observations = [observation(writeTranscript([bash('gh issue view 5')]))];
+
+  await enrich(p, observations);
+
+  assert.deepEqual(observations[0].display.issues, [{ number: 5, title: 'Issue 5', column: 'To do', repo: 'agents-office', color: '1d76db' }]);
+  assert.equal(calls.length, 1);
+  await world(p);
+  assert.equal(calls.length, 1, 'the world call reuses the cache');
+});
+
+test('a slow gh does not hold the agents call: the cards come without titles', async () => {
+  let release: () => void = () => undefined;
+  const p = createGithubPlugin({ repos: 'o/alpha', now: () => NOW,
+    run: () => new Promise((resolve) => { release = () => resolve(JSON.stringify([ghIssue(7)])); }) });
+  const observations = [observation(writeTranscript([bash('gh issue view 7')]))];
+  const started = Date.now();
+  await enrich(p, observations);
+  assert.ok(Date.now() - started < 1900, 'stays under the 2 s step limit');
+  assert.deepEqual(observations[0].display.issues, [{ number: 7, title: '' }]);
+  release();
+});

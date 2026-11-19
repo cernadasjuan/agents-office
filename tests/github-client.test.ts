@@ -20,6 +20,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { StickFigure } = await import('../src/characters/StickFigure.js');
 const { GithubOfficeExtension, KANBAN_BOARD_SLOTS } = await import('../plugins/github/client.js');
 const { CARD_NEUTRAL_BORDER, VERTICES_PER_CARD } = await import('../plugins/github/cards.js');
+const { issueIdsLine, ISSUE_LINE_MAX_CHARACTERS } = await import('../plugins/github/labelIds.js');
 const { countDrawCalls } = await import('../src/scene/RenderBudget.js');
 after(() => {
   dom.window.close();
@@ -206,8 +207,8 @@ for (const [name, pose, armMoves] of POSES) {
         const tilt = degreesBetween(card.up, WORLD_UP);
         assert.ok(tilt <= MAX_DEGREES, `${name} t=${t.toFixed(2)}: card ${index} tilts ${tilt.toFixed(1)} degrees`);
         const toArm = Math.min(distanceToUpperArm(card.center, joints.rightUpperArm), distanceToUpperArm(card.center, joints.leftUpperArm));
-        // A card is 0.2 wide: within 0.25 of the arm axis its edge still touches the arm
-        assert.ok(toArm <= 0.25, `${name}: card ${index} is ${toArm.toFixed(2)} from an upper arm`);
+        // The farthest card is the fifth one stacked up a raised arm, at 0.21: outward and lifted toward the camera
+        assert.ok(toArm <= 0.22, `${name}: card ${index} is ${toArm.toFixed(2)} from an upper arm`);
         const toHand = Math.min(worldPoint(joints.rightHand).distanceTo(card.center), worldPoint(joints.leftHand).distanceTo(card.center));
         assert.ok(toHand >= 0.15, `${name}: card ${index} is ${toHand.toFixed(2)} from a hand`);
       }
@@ -334,4 +335,64 @@ test('markup in a repository name stays text on the card canvas', () => {
   extension.agentsChanged([agent('a', [{ number: 3, title: '<b>x</b>', repo: '<img>' }])]);
   assert.ok(drawn.some((text) => text.includes('<img>')), 'drawn as plain text through fillText');
   assert.equal(document.body.innerHTML, '');
+});
+
+// --- Issue IDs in the floating label, readable from the overview (issue #77) ---
+
+const issue = (number: number, repo?: string) => ({ number, title: '', ...(repo ? { repo } : {}) });
+
+test('the IDs line names a shared repository once and keeps the newest first', () => {
+  assert.equal(issueIdsLine([issue(77, 'agents-office'), issue(79, 'agents-office')]), 'agents-office#77 · #79');
+  assert.equal(issueIdsLine([issue(12), issue(4)]), '#12 · #4');
+  assert.equal(issueIdsLine([issue(77, 'agents-office'), issue(4), issue(3, 'wb')]), 'agents-office#77 · #4 · wb#3');
+  assert.equal(issueIdsLine([]), '');
+});
+
+test('the IDs line shows at most 5 IDs and cuts whole IDs when long', () => {
+  const many = Array.from({ length: 7 }, (_, i) => issue(i + 1, 'ao'));
+  assert.equal(issueIdsLine(many), 'ao#1 · #2 · #3 · #4 · #5');
+  const long = [issue(1, 'a'.repeat(30)), issue(2, 'b'.repeat(30)), issue(3, 'c'.repeat(30))];
+  const line = issueIdsLine(long);
+  assert.equal(line, `${'a'.repeat(30)}#1 +2`, 'whole IDs only, then the count of the rest');
+  const cut = issueIdsLine([issue(82, 'agents-office'), issue(98, 'agents-office'), issue(75, 'agents-office'), issue(92, 'agents-office'), issue(76, 'agents-office')]);
+  assert.ok(cut.length <= ISSUE_LINE_MAX_CHARACTERS, cut);
+  assert.ok(line.startsWith(`${'a'.repeat(30)}#1`), line);
+  assert.equal(issueIdsLine([issue(82, 'agents-office'), issue(98, 'agents-office'), issue(75, 'agents-office'), issue(92, 'agents-office'), issue(76, 'agents-office')]),
+    'agents-office#82 · #98 · #75 +2');
+  const first = issueIdsLine([issue(1, 'x'.repeat(40)), issue(2)]);
+  assert.equal(first, `${'x'.repeat(40)}#1 +1`, 'the first ID stays whole even when long');
+});
+
+function idsLine(managed: Managed): HTMLElement[] {
+  return [...managed.figure.label.element.querySelectorAll<HTMLElement>('.github-issues')];
+}
+
+test('the floating label gets one IDs line, through textContent, and loses it with the issues', () => {
+  const extension = new GithubOfficeExtension();
+  extension.start(new THREE.Scene());
+  const a = agent('a', [issue(77, 'agents-office'), { number: 79, title: '<img src=x>', repo: 'agents-office' }]);
+  extension.agentsChanged([a]);
+  assert.equal(idsLine(a).length, 1);
+  assert.equal(idsLine(a)[0].textContent, 'agents-office#77 · #79');
+  assert.equal(idsLine(a)[0].children.length, 0, 'plain text, no markup');
+
+  // The core rewrites the label on a new activity; the next poll puts the line back once
+  a.figure.setActivity('testing');
+  extension.agentsChanged([a]);
+  assert.equal(idsLine(a).length, 1);
+
+  a.info.extras = undefined;
+  extension.agentsChanged([a]);
+  assert.equal(idsLine(a).length, 0);
+});
+
+test('compact labels keep the IDs line, so the overview shows the IDs', () => {
+  const extension = new GithubOfficeExtension();
+  extension.start(new THREE.Scene());
+  const style = [...document.head.querySelectorAll('style')].map((element) => element.textContent ?? '').join('\n');
+  assert.ok(style.includes('.agent-label.compact .github-issues'), 'a compact rule exists');
+  const compactRule = style.slice(style.indexOf('.agent-label.compact .github-issues'));
+  assert.equal(compactRule.slice(0, compactRule.indexOf('}')).includes('display: none'), false);
+  extension.start(new THREE.Scene());
+  assert.equal(document.head.querySelectorAll('style#github-issue-ids').length, 1, 'one style element');
 });

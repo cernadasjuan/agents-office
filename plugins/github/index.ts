@@ -19,6 +19,15 @@ export interface GithubPluginOptions {
 
 type IssueCard = NonNullable<DisplayExtras['issues']>[number];
 
+/** Under the 2 s seam step limit: a slow gh gives cards without titles and colors, not no cards. */
+const ENRICH_WAIT_MS = 1500;
+
+async function withinMs(work: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([work, new Promise((resolve) => { timer = setTimeout(resolve, ms); })]);
+  clearTimeout(timer);
+}
+
 const shortName = (repo: string): string => repo.slice(repo.indexOf('/') + 1);
 
 export function createGithubPlugin(options: GithubPluginOptions = {}): OfficePlugin {
@@ -63,13 +72,18 @@ export function createGithubPlugin(options: GithubPluginOptions = {}): OfficePlu
     }],
     enrichers: [{
       id: 'github-issue-cards',
-      enrich(observations) {
+      async enrich(observations) {
+        const found: Array<{ observation: (typeof observations)[number]; refs: IssueRef[] }> = [];
         for (const observation of observations) {
           const transcriptPath = observation.internal.transcriptPath;
           if (typeof transcriptPath !== 'string' || observation.display.issues) continue;
           const refs = transcripts.refs(transcriptPath);
-          if (refs.length > 0) observation.display.issues = refs.map(card);
+          if (refs.length > 0) found.push({ observation, refs });
         }
+        if (found.length === 0) return;
+        // Titles and colors come from the board data: fill a cold cache, but never wait past the seam step limit
+        await withinMs(Promise.all(repos.map((repo) => cache.refresh(repo))), ENRICH_WAIT_MS);
+        for (const { observation, refs } of found) observation.display.issues = refs.map(card);
       },
     }],
   };
