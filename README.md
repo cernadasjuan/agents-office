@@ -133,6 +133,14 @@ npx agents-office --plugin name1 --plugin name2
 
 A plugin is a folder `plugins/<name>/` with an `index.ts` (server: sources, enrichers, rooms and boards) and an optional `client.ts` (browser rendering). The server copies only whitelisted, cleaned fields to the browser.
 
+`pnpm dev:fork` starts the office with the plugins of this fork.
+
+### bmad: persona hats
+
+The `bmad` plugin shows which BMAD personas an agent plays. Each persona the agent loaded gets a toon hat on the figure's head. The hats stack in the order the agent loaded the personas: Sally wears a beret, Winston a hard hat, Amelia a beanie, Quinn a detective cap, John a top hat, Mary a graduation cap, Bob a baseball cap, Dexter a deerstalker, Leo a crown and Atlas a miner helmet. Other personas get a colored party hat. The figure shows up to 4 hats and a `+N` marker for the others. The label adds the persona names to the activity line, for example "Researching · Sally, Winston".
+
+Only tool calls count: a Bash call to `bmad.py agent <name>`, a Skill call for a persona (or `bmad` with the persona as the first word), or a subagent whose type is a persona. Text in prompts or answers never counts, and `bmad.py resolve` or `list` does not count. The plugin reads only the bytes that the transcript added since the last poll (at most 4 MB per poll). The API gets only the persona ids as badges.
+
 ## Controls
 
 - **Click** to engage camera

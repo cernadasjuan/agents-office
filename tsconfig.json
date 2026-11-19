@@ -18,6 +18,7 @@
   "include": [
     "src/**/*.ts",
     "server/**/*.ts",
+    "plugins/**/*.ts",
     "tests/**/*.test.ts",
     "vite.config.ts"
   ]
