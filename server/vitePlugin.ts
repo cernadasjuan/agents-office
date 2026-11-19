@@ -7,7 +7,8 @@ import { claudeSource } from './claudeSource.js';
 import { codexSource } from './codexSource.js';
 import { attentionEnricher } from './attention.js';
 import { isOfficePlugin, pluginEntry } from './plugins.js';
-import { describeWorld, observe, projectAgents, projectWorld, type OfficePlugin } from './seam.js';
+import { describeWorld, observe, projectAgents, projectWorld, type Observation, type OfficePlugin } from './seam.js';
+import { defaultAuditLogPath, WriteActions } from './actions.js';
 
 function isLoopback(address: string | undefined): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
@@ -23,13 +24,17 @@ export interface AgentDetectorOptions {
   pluginsDir?: string;
   /** Codex home for the built-in Codex source. Default: CODEX_HOME, else ~/.codex. null turns the source off. */
   codexHome?: string | null;
+  /** Audit log for write actions. Default: AGENTS_OFFICE_AUDIT_LOG, else a file in the OS temp folder. */
+  auditLogPath?: string;
 }
 
 /**
- * Same checks for every endpoint: loopback socket, local Host, same Origin, GET only.
+ * Same checks for every endpoint: loopback socket, local Host, same Origin, one method.
+ * GET is the default. A POST (opt-in write actions only) must also send an Origin
+ * equal to this server, and a same-origin Sec-Fetch-Site when the browser sends one.
  * Returns false after it has answered the request with an error.
  */
-function admit(server: ViteDevServer, req: IncomingMessage, res: ServerResponse): boolean {
+function admit(server: ViteDevServer, req: IncomingMessage, res: ServerResponse, method: 'GET' | 'POST' = 'GET'): boolean {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -59,12 +64,23 @@ function admit(server: ViteDevServer, req: IncomingMessage, res: ServerResponse)
   // requires a stricter boundary: browser callers must use this origin.
   const origin = req.headers.origin;
   if (origin !== undefined && origin !== expectedOrigin) return reject(403, 'Same-origin access only');
+  if (method === 'POST') {
+    if (origin === undefined) return reject(403, 'Same-origin access only');
+    const fetchSite = req.headers['sec-fetch-site'];
+    if (fetchSite !== undefined && fetchSite !== 'same-origin') return reject(403, 'Same-origin access only');
+  }
 
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
+  if (req.method !== method) {
+    res.setHeader('Allow', method);
     return reject(405, 'Method not allowed');
   }
   return true;
+}
+
+/** True when the request names the mounted path itself, not a sub path. */
+function isExactPath(req: IncomingMessage): boolean {
+  const pathname = (req.url ?? '').split('?')[0];
+  return pathname === '' || pathname === '/';
 }
 
 export function agentDetectorPlugin(options: AgentDetectorOptions | (() => DetectedAgent[]) = {}): Plugin {
@@ -103,11 +119,56 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
         else server.config.logger.warn(`agents-office: plugin "${name}" has no valid default export, skipped`);
       }
 
+      // Write actions exist only when a loaded plugin offers one (its own opt-in). Without
+      // one, no POST route and no token exist, and every API request but GET gets 405.
+      const offered = plugins.flatMap((plugin) => plugin.actions ?? []);
+      let agentsByPublicId = new Map<string, Observation>();
+      const writeActions = offered.length > 0 ? new WriteActions({
+        actions: offered,
+        lookup: (id) => agentsByPublicId.get(id),
+        auditLogPath: settings.auditLogPath ?? defaultAuditLogPath(),
+      }) : undefined;
+      const enabledActions: ReadonlySet<string> = writeActions?.names ?? new Set();
+
+      if (writeActions) {
+        server.middlewares.use((_req, res, next) => {
+          res.setHeader('X-Frame-Options', 'DENY');
+          res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+          next();
+        });
+        server.middlewares.use('/api/actions/token', (req, res) => {
+          if (!admit(server, req, res)) return;
+          if (!isExactPath(req)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: 'Not found' }));
+            return;
+          }
+          res.end(JSON.stringify({ token: writeActions.token }));
+        });
+        for (const action of writeActions.actions) {
+          server.middlewares.use(`/api/actions/${action.name}`, async (req, res) => {
+            if (!admit(server, req, res, 'POST')) {
+              await writeActions.audit(action.name, undefined, `refused-${res.statusCode}`);
+              return;
+            }
+            if (!isExactPath(req)) {
+              res.statusCode = 404;
+              res.end(JSON.stringify({ error: 'Not found' }));
+              return;
+            }
+            await writeActions.handle(action, req, res);
+          });
+        }
+        server.config.logger.info(`agents-office: write actions on: ${[...writeActions.names].join(', ')}`);
+      }
+
       server.middlewares.use('/api/agents', async (req, res) => {
         if (!admit(server, req, res)) return;
         try {
           const { core, sources, enrichers } = pipeline();
-          res.end(JSON.stringify(projectAgents(await observe(core, sources, enrichers), publicId)));
+          const observations = await observe(core, sources, enrichers);
+          if (writeActions) agentsByPublicId = new Map(observations.map((agent) => [publicId(agent.id), agent]));
+          res.end(JSON.stringify(projectAgents(observations, publicId, enabledActions)));
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: 'Unable to detect agents' }));

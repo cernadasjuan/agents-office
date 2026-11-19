@@ -37,7 +37,7 @@ Two sources:
 | S4 | **Minimal API fields.** | Add only display enums and short display text. Never paths, PIDs, prompts, question text or tool input. |
 | S5 | **Text, not HTML.** | Render every name, persona and label with `textContent`. |
 | S6 | **Validate input files.** | Every new reader checks the shape and caps the size of what it reads. |
-| S7 | **Read-only toward the machine.** | The API answers GET only. A write action (focus a pane, send a reply) needs its own opt-in and its own security review. |
+| S7 | **Read-only toward the machine.** | The API answers GET only, except opt-in write actions that follow the write-action rules in CLAUDE.md. |
 | S8 | **Tests for every change.** | Add fixture tests. One test must show that a missing new field gives the old behavior. |
 
 ## Rules for every change

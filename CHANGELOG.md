@@ -9,6 +9,7 @@
 - Restrict the API to loopback, with Host and Origin checks, minimal fields and opaque IDs
 - Update Vite to 8.3.8 and refresh vulnerable dependency resolutions
 - See `docs/security-validation.md`
+- herdr plugin: opt-in focus action (`AGENTS_OFFICE_HERDR_FOCUS=1`), the first write route, with token, Origin, rate limit and audit log
 
 ### Fixes
 
