@@ -102,6 +102,19 @@ If a Codex home exists (`CODEX_HOME`, else `~/.codex`), the app also shows Codex
 
 Subagents never ask; their parent does. Without a status in the session file, nothing changes.
 
+### Triage list
+
+The side panel lists the agents by what you must do:
+
+1. **Needs you:** blocked agents, the longest wait first. Each row shows the name, the wait ("12 min") and the activity.
+2. **Your turn:** agents that wait for your next prompt, the longest wait first. The group starts collapsed when it has more than 5 agents.
+3. **Working:** busy agents. Subagents are indented under their parent.
+4. **Idle:** the rest. The group starts collapsed.
+
+The chips at the top count each group ("2 need you · 22 your turn · 9 working · 8 idle"). Click a chip to open its group. Click a group title to open or close it. Click a row to select the agent: the camera flies to it. Codex agents show a `codex` tag. Persona badges from a plugin show as small text chips. The button in the panel header hides the list so the room stays visible. The browser remembers this choice.
+
+Without a status in the session file, every agent is in Working or Idle. `?demo=1` in the URL adds the prototype activity menu to each row. It previews an activity until the next update.
+
 ### Location: stations
 
 | Station | Where | Seats | Activities |
@@ -138,7 +151,7 @@ Subagents never ask; their parent does. Without a status in the session file, no
 
 - **Name:** the folder name of the session. Subagents show `>>` followed by their task description.
 - **Color:** one of 8 shirt colors, from a hash of the agent ID, so an agent keeps its color across reloads. A subagent wears its parent's color and stands at 85% of the height.
-- **Label:** the name and the activity text float over each figure. The side panel lists the same agents. Its menu lets you preview another activity until the next update.
+- **Label:** the name and the activity text float over each figure. The side panel lists the same agents (see [Triage list](#triage-list)).
 
 ## Fork layout: the growing building
 
@@ -204,6 +217,20 @@ Enable it:
 AGENTS_OFFICE_PLUGINS=herdr pnpm dev   # or: pnpm dev:fork
 ```
 
+### missions: war rooms
+
+The `missions` plugin turns each mission record (`<root>/missions/<slug>/mission.yaml`) into a war room in the building's mission wing, north of the hall.
+
+```bash
+AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
+```
+
+- **Who works there:** a session joins a mission's room when its own tool calls touch that mission (a `mission` script command with the slug, or a file under `missions/<slug>/`). Its subagents stand near it. A session that waits for you still goes to your office first.
+- **Walls:** the mission statement, the documents, the GitHub issues and a kanban of the mission's threads (needs you, open, done).
+- **Past sessions:** one bed with a sleeping agent per finished session (up to 12), and a count.
+- **Closed missions:** the room locks, its door closes and no agent goes in. The room stays.
+- Without `AGENTS_OFFICE_MISSION_ROOTS`, the plugin adds nothing. It reads files only, with a size cap.
+
 ## Controls
 
 - **Click** to engage camera
@@ -214,7 +241,7 @@ AGENTS_OFFICE_PLUGINS=herdr pnpm dev   # or: pnpm dev:fork
 - **Esc** to release camera
 - **L** to switch the layout, when more than one is installed (also `?layout=<id>` in the URL)
 - **O** to switch between first person (the default) and the overview, a view from above at an angle that shows the whole floor. In the overview, drag to pan, use the mouse wheel to zoom, and use W/A/S/D to pan
-- **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on an agent name in the side panel also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
+- **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on a row in the triage list also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
 - **Esc** clears the selection (in first person it first releases the camera)
 - `?dwell=<seconds>` in the URL (0 to 30, default 0) makes an agent in the original `activity` layout wait that long before it walks to a new station. A change back before the time cancels the walk. The figure shows the new activity at once.
 - `#view=overview` in the URL starts in the overview. `#focus=<agent id>` selects that agent when it appears (agent IDs change when the server restarts)
