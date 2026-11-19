@@ -1,12 +1,13 @@
-// Measure the static weight of the office scene at the real size (25 rooms, 40 agents), without a browser.
-// Run: pnpm measure   (prints the draw calls before and after the static merge and the figure batch)
+// Measure the static weight of the office scene at the real size (25 rooms, 40 agents, hats and cards), without a browser.
+// Run: pnpm measure   (prints the draw calls before and after the static merge and the figure batch;
+// `views` culls like the renderer from the first-person start pose and the overview)
 import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
 Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true, writable: true });
 dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, { get: () => () => undefined, set: () => true })) as never;
-const { buildRealSizeOffice, REAL_SIZE } = await import('../tests/real-size-office.js');
+const { buildRealSizeOffice, realSizeCameras, REAL_SIZE } = await import('../tests/real-size-office.js');
 const { countDrawCalls } = await import('../src/scene/RenderBudget.js');
 const { StaticBatch } = await import('../src/scene/StaticMerge.js');
 const { FigureBatch } = await import('../src/characters/FigureBatch.js');
@@ -40,5 +41,8 @@ new StaticBatch(scene).update();
 const mergeMs = performance.now() - started;
 new FigureBatch(scene).sync(manager.getAgents().map((managed) => managed.figure.group));
 const after = weight(scene);
-console.log(JSON.stringify({ size: { rooms: REAL_SIZE.buildingRooms + REAL_SIZE.missionRooms, agents: REAL_SIZE.agents }, before, after, mergeMs: Math.round(mergeMs) }, null, 1));
+const cameras = realSizeCameras(scene);
+const views = { firstPerson: countDrawCalls(scene, cameras.firstPerson), overview: countDrawCalls(scene, cameras.overview) };
+const size = { rooms: REAL_SIZE.buildingRooms + REAL_SIZE.missionRooms, agents: REAL_SIZE.agents, hatWearers: REAL_SIZE.hatWearers, cardHolders: REAL_SIZE.cardHolders };
+console.log(JSON.stringify({ size, before, after, views, mergeMs: Math.round(mergeMs) }, null, 1));
 dom.window.close();

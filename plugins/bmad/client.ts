@@ -56,8 +56,8 @@ function buildStack(badges: string[]): THREE.Group {
 
 function removeStack(entry: Worn): void {
   if (!entry.stack) return;
+  // Hat shapes are shared by every hat of the kind (see hats.ts): only the marker goes
   entry.stack.traverse((object) => {
-    if (object instanceof THREE.Mesh) object.geometry.dispose();
     if (object instanceof CSS2DObject) object.element.remove();
   });
   entry.stack.removeFromParent();

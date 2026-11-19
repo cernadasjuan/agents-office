@@ -85,6 +85,9 @@ export interface MissionRoom {
   update(room: WorldRoom): void;
 }
 
+const FLOOR_OPEN = 0x6f7f9a;
+const FLOOR_LOCKED = 0x4a4f5a;
+
 export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   const slot = missionSlot(index);
   const frame = new RoomFrame(slot.rect, slot.door);
@@ -95,8 +98,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   const key = (n: number) => `mission${index}_seat_${n}`;
   const type = `room:${room.id}`;
 
-  const floorMaterial = getToonMaterial(0x6f7f9a);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE), floorMaterial);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE), getToonMaterial(FLOOR_OPEN));
   floor.rotation.x = -Math.PI / 2;
   floor.position.copy(frame.point(0, ROOM_SIZE / 2, 0.005));
   floor.userData.floor = true;
@@ -158,7 +160,8 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
       title.element.textContent = next.title;
       door.visible = result.locked;
       lockSign.visible = result.locked;
-      floorMaterial.color.setHex(result.locked ? 0x4a4f5a : 0x6f7f9a);
+      // Swap the cached material, never recolor it: every open mission floor shares it
+      floor.material = getToonMaterial(result.locked ? FLOOR_LOCKED : FLOOR_OPEN);
       boards.statement.draw('Mission', (next.walls.statement ?? '').match(/.{1,44}(\s|$)/g)?.map((line) => line.trim()) ?? []);
       boards.docs.draw('Documents', next.walls.docs ?? []);
       boards.issues.draw('Issues', (next.walls.issues ?? []).map((issue) => `${issue.state === 'closed' ? '✓' : '○'} #${issue.number} ${issue.title}`));

@@ -10,6 +10,8 @@ import { getToonMaterial } from '../utils/Materials.js';
 import type { Posture } from '../layout/LayoutStrategy.js';
 
 const TRANSITION_DURATION = 0.5;
+/** One update this long finishes the activity transition and every eased joint (the slowest eases at 8 per second). */
+const SETTLE_DELTA = 1;
 const WALK_SPEED = 4.5;
 
 export class StickFigure {
@@ -78,6 +80,26 @@ export class StickFigure {
       this.joints.root.add(this.beacon);
     }
     if (this.beacon) this.beacon.visible = this.callsForYou;
+  }
+
+  /** True while the figure walks to its station; the walk ends with a snap and a turn to the station. */
+  get walking(): boolean {
+    return this.isMoving;
+  }
+
+  /** Changes when the pose to show changes: the activity, the posture or the raised hand. */
+  get poseKey(): string {
+    return `${this.targetActivity}|${this.posture ?? ''}|${this.callsForYou ? 1 : 0}`;
+  }
+
+  /**
+   * Show the target pose at once: one update long enough to finish the
+   * transition and every eased joint. A sleeping figure (far or out of view)
+   * settles once per pose change instead of running its sway. Not for a walk.
+   */
+  settle(elapsed: number): void {
+    if (this.isMoving) return;
+    this.update(elapsed, SETTLE_DELTA);
   }
 
   /** True while the wait calls for the user: the right hand stays up. */
