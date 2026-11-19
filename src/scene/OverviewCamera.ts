@@ -80,6 +80,24 @@ export function floorBounds(scene: THREE.Object3D): THREE.Box3 | null {
   return box.isEmpty() ? null : box;
 }
 
+/** The box of the smallest floor object (`userData.floor`) whose area holds the point, or null. */
+export function floorUnder(scene: THREE.Object3D, point: THREE.Vector3): THREE.Box3 | null {
+  scene.updateMatrixWorld(true);
+  let best: THREE.Box3 | null = null;
+  let bestArea = Infinity;
+  scene.traverse((object) => {
+    if (!object.userData.floor) return;
+    const box = new THREE.Box3().expandByObject(object);
+    const holds = point.x >= box.min.x && point.x <= box.max.x && point.z >= box.min.z && point.z <= box.max.z;
+    const area = (box.max.x - box.min.x) * (box.max.z - box.min.z);
+    if (holds && area < bestArea) {
+      best = box;
+      bestArea = area;
+    }
+  });
+  return best;
+}
+
 const ROOM_BOUNDS = new THREE.Box3(
   new THREE.Vector3(-OFFICE.halfX, 0, -OFFICE.halfZ),
   new THREE.Vector3(OFFICE.halfX, 0, OFFICE.halfZ),

@@ -38,6 +38,7 @@
 - Agent card: a click on a figure or a triage row opens a card left of the triage panel with name, activity, attention band and wait, workspace, provider, personas, subagents and up to 10 linked issues. Esc or the close button closes it. The camera keeps the figure clear of the card. The herdr "Focus in herdr" button moved into the card, and `pnpm dev:fork` turns herdr focus on
 
 - Wayfinding (building layout): a name label above each room, numbered lounges, door frames in the room floor color, walls cut away in the overview, and mission room signs only when you zoom in or point at the room
+- Navigation: the building layout opens in the overview, the last view comes back after a reload (`#view=` wins), Shift+L with a confirmation switches the layout (one L does nothing), and the panel header shows the layout and the view. First person has no bounding box: you can walk into every room and fly above the building. The ceiling hides above 6 m and in the overview. Fly-to in first person keeps the camera inside the figure's room
 
 ## 1.1.0
 

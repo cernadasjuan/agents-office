@@ -5,7 +5,8 @@ import { ViewController } from './scene/ViewController.js';
 import { onSelectionChange, selectAgent, selectedAgentId } from './scene/Selection.js';
 import { AgentPoller } from './agents/AgentPoller.js';
 import { AgentPanel, isDemoMode, setupPanelCollapse } from './ui/AgentPanel.js';
-import { chooseLayoutId, createLayout, layoutIds, rememberLayoutId } from './layout/registry.js';
+import { chooseLayoutId, confirmLayoutSwitch, createLayout, defaultViewFor, isLayoutSwitchKey, layoutName, rememberLayoutId, reloadForLayoutSwitch } from './layout/registry.js';
+import { chooseViewMode, rememberViewMode, viewStatusText } from './scene/ViewMemory.js';
 import { activeExtensions, setWorld, type World } from './extensions.js';
 import { tabTitleFor } from './ui/attention.js';
 import { LabelDetailController } from './ui/LabelDetail.js';
@@ -24,18 +25,15 @@ const stations = createOffice(scene);
 import.meta.glob('./addons/*.ts', { eager: true });
 import.meta.glob('../plugins/*/client.ts', { eager: true });
 
-// Layout: ?layout= in the URL, then the last choice, then the default. Key L cycles layouts.
+// Layout: ?layout= in the URL, then the last choice, then the default. Shift+L, then a confirmation, cycles layouts.
 const layoutId = chooseLayoutId(window.location.search, window.localStorage);
 rememberLayoutId(layoutId, window.localStorage);
 window.addEventListener('keydown', (event) => {
-  if (event.key !== 'l' && event.key !== 'L') return;
-  if (document.pointerLockElement || event.target instanceof HTMLSelectElement) return;
-  const ids = layoutIds();
-  const next = ids[(ids.indexOf(layoutId) + 1) % ids.length];
+  if (!isLayoutSwitchKey(event) || document.pointerLockElement) return;
+  const next = confirmLayoutSwitch(layoutId, (question) => window.confirm(question));
+  if (!next) return;
   rememberLayoutId(next, window.localStorage);
-  const url = new URL(window.location.href);
-  url.searchParams.delete('layout');
-  window.location.assign(url);
+  reloadForLayoutSwitch(window.location);
 });
 
 // Agent manager
@@ -44,8 +42,10 @@ const agentManager = new AgentManager(scene, createLayout(layoutId, scene, stati
 // Agent card: opens on a selection, docked left of the triage panel. Plugins add buttons and links.
 const agentCard = new AgentCard(document.body, { anchor: document.getElementById('ui-panel')! });
 
-// Camera mode (first person by default, key O for the overview) and click to select.
-// `#view=overview` starts in the overview, `#focus=<agent id>` selects that agent once it appears.
+// Camera mode (key O toggles first person and the overview) and click to select.
+// Start view: `#view=overview|first-person`, then the last view, then the layout default.
+// `#focus=<agent id>` selects that agent once it appears. The panel header shows the layout and the view.
+const viewStatus = document.getElementById('view-status');
 const view = new ViewController({
   camera,
   canvas: renderer.domElement,
@@ -54,6 +54,11 @@ const view = new ViewController({
   keys: window,
   hint: document.getElementById('pointer-hint'),
   hash: window.location.hash,
+  view: chooseViewMode(window.location.hash, window.localStorage, defaultViewFor(layoutId)),
+  modeChanged: (mode) => {
+    rememberViewMode(mode, window.localStorage);
+    if (viewStatus) viewStatus.textContent = viewStatusText(layoutName(layoutId), mode);
+  },
   figureShiftPx: () => agentCard.cameraShiftPx(),
 });
 
@@ -144,5 +149,5 @@ const frameLoop = new FrameLoop({
   devicePixelRatio: () => window.devicePixelRatio,
   stats,
 });
-if (stats) Object.assign(window, { __officeStats: Object.assign(stats, { drawCalls: () => frameLoop.drawCalls() }) });
+if (stats) Object.assign(window, { __officeStats: Object.assign(stats, { drawCalls: () => frameLoop.drawCalls(), cameraPosition: () => camera.position.toArray() }) });
 frameLoop.start((callback) => requestAnimationFrame(callback));
