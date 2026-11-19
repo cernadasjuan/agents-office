@@ -73,9 +73,15 @@ export interface PickTarget {
 export function pickAgent(raycaster: THREE.Raycaster, targets: PickTarget[]): string | null {
   if (targets.length === 0) return null;
   // Figure parts draw through the figure batch from their own layer; the ray still hits them
+  const mask = raycaster.layers.mask;
   raycaster.layers.enable(FIGURE_PART_LAYER);
   const owners = new Map<THREE.Object3D, string>(targets.map((target) => [target.object, target.id]));
-  const hits = raycaster.intersectObjects(targets.map((target) => target.object), true);
+  let hits: THREE.Intersection[];
+  try {
+    hits = raycaster.intersectObjects(targets.map((target) => target.object), true);
+  } finally {
+    raycaster.layers.mask = mask;
+  }
   for (const hit of hits) {
     for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) {
       const id = owners.get(node);
