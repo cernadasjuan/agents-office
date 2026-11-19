@@ -1,10 +1,12 @@
 import * as THREE from 'three';
+import type { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { Activity } from '../../agents/ActivityAnimations.js';
 import { OFFICE_WALLS, type Station } from '../../scene/Office.js';
 import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, Seat } from '../../layout/LayoutStrategy.js';
 import { HALL, matchingDoor, slotFor, type Door } from './RoomPlanner.js';
-import { buildRoom, buildWalls, ROOM_STATION_TYPE, roomTitle, type RoomKind } from './rooms.js';
+import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, roomTitle, type RoomKind } from './rooms.js';
+import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
 import type { WorldRoom } from '../../extensions.js';
@@ -266,6 +268,8 @@ export class BuildingLayout implements LayoutStrategy {
       this.addRoom('office');
       spots.splice(0, spots.length, ...this.keysOfType('queue'));
     }
+    // A meeting without a wait also queues, but only fresh and aging waits count for you
+    this.showQueueCount(waiting.filter((state) => queuesForYou(state.agent.extras)).length);
     const moves: LayoutMove[] = [];
     for (const state of waiting) this.free(state.seat);
     waiting.forEach((state, i) => {
@@ -277,6 +281,15 @@ export class BuildingLayout implements LayoutStrategy {
       }
     });
     return moves;
+  }
+
+  /** The sign under the portrait of the first office: "N waiting", hidden when nobody waits. */
+  private showQueueCount(count: number): void {
+    const sign = this.rooms.find((room) => room.kind === 'office')?.group.getObjectByName(QUEUE_COUNT_SIGN) as CSS2DObject | undefined;
+    if (!sign || sign.userData.queueCount === count) return;
+    sign.userData.queueCount = count;
+    sign.element.textContent = `${count} waiting`;
+    sign.visible = count > 0;
   }
 
   // --- Stations and rooms ---
@@ -334,6 +347,7 @@ export class BuildingLayout implements LayoutStrategy {
     const record: RoomRecord = { kind, index, group: built.group, extraDoors: [], ...(tag ? { tag } : {}) };
     this.rooms.push(record);
     this.scene.add(built.group);
+    if (kind === 'office') showLoadedPortrait(built.group);
     // Every room label of the scene draws in one call
     roomLabelBatchFor(this.scene).collect(built.group);
     for (const [key, station] of built.stations) this.stations.set(key, station);

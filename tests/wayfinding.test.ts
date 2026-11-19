@@ -598,3 +598,10 @@ test('the "You" sign at the user desk is a detail sign too, so it does not cover
   const you = room.group.children.find((child): child is CSS2DObject => child instanceof CSS2DObject && child.element.textContent === 'You')!;
   assert.deepEqual(you.userData.detailSign, { rect: slot.rect, hoverOnly: false });
 });
+
+test('only the first office is "Your office"; a later one is a numbered waiting room', async () => {
+  const { roomTitle } = await import('../src/addons/building/rooms.js');
+  assert.equal(roomTitle('office', []), 'Your office');
+  assert.equal(roomTitle('office', ['office', 'library']), 'Waiting room 2');
+  assert.equal(roomTitle('office', ['office', 'library', 'office']), 'Waiting room 3');
+});

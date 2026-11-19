@@ -38,6 +38,9 @@ login. Run it only on a trusted machine.
 The API is read-only by default: it answers GET only. The one exception is an
 opt-in write action, see [herdr focus (write action)](#herdr-focus-write-action).
 
+`GET /api/portrait` has the same checks. It serves one local picture only when you
+set `AGENTS_OFFICE_PORTRAIT`, see [Your portrait](#your-portrait).
+
 ## How It Works
 
 The app reads the Claude Code session files in `~/.claude/sessions/` on your machine. For each live session it reads that session's own transcript and the status that Claude Code writes in the session file. From those it computes one value, the **activity**. Everything you see derives from it: where the agent stands, how it moves, and what its label says.
@@ -173,7 +176,8 @@ Without a status in the session file, every agent is in Working or Idle. `?demo=
 
 This fork adds a second layout, `building`, and makes it the default. It opens in the overview when the URL and the saved view say nothing. `?layout=activity` or **Shift+L** (then Enter in the confirmation box) returns to the original layout. One L alone does nothing.
 
-- **Your office:** the first room, east of the hall. Agents with a fresh or aging wait (blocked or your turn) walk in and queue in front of your desk: fresh waits first, then aging waits, the longest wait first inside each band. A cold wait leaves the queue for the lounge. When one leaves, the line moves up.
+- **Your office:** the first room, east of the hall. Agents with a fresh or aging wait (blocked or your turn) walk in and queue in front of your desk: fresh waits first, then aging waits, the longest wait first inside each band. A cold wait leaves the queue for the lounge. When one leaves, the line moves up. The queue has 23 spots in five staggered rows (2.3 m between the spots of a row), so queued agents and their labels stand apart; a 24th wait opens a second waiting room. The office is furnished: a rug under the desk, a credenza and a display shelf behind it, a floor lamp, wall art, a lounge corner (a sofa, two armchairs and a low table) in the front corner away from the door, and eight plants. Nothing stands on a queue spot or in a door path. Over the door of your office (not a second waiting room), on the hall side, hangs your portrait, with "N waiting" under it when agents wait for you.
+- **Lounges:** three sofas, a coffee machine and ten plants, tall and small, in the corners and between the sofas.
 - **Home desks:** each session gets its own desk for its whole life. Coding, debugging and deploying happen there.
 - **Trips:** planning goes to a whiteboard, research to a bookshelf, tests to a test station, reviews and docs to a writing desk, breaks to a sofa or the coffee machine. The agent walks back home when desk work starts again. A trip starts only when the new activity lasts 4 seconds, so short tool calls do not make agents walk.
 - **Workspace rooms:** with the herdr plugin, sessions of one herdr workspace get their desks in a room named after it ("Desks · <workspace>"). Sessions outside herdr keep the hall desks. A session whose workspace shows up later moves there once.
@@ -181,7 +185,20 @@ This fork adds a second layout, `building`, and makes it the default. It opens i
 - **Library:** the building opens a Library room right after your office. Research trips go there first. With the `library` plugin, librarian subagents (types in `AGENTS_OFFICE_LIBRARIAN_TYPES`, default `bibliotheque-librarian`) carry a book and walk between the Library, while they research, and the agent they serve.
 - **Growth:** when a kind of station runs out, the building adds a room of that kind next to the others: desks, planning room, library, test lab, writing room, lounge, or another waiting room. Rooms are never removed, and the browser remembers them.
 - **Wayfinding:** each room has a name label above its center ("LIBRARY", "LOUNGE 2"). In the overview the label keeps a readable size on screen and draws on top, with short lines ("DESKS" / "WS10"); zoom in or point at the room for the full name. In first person it is a small plate high in the room: walls hide it, and the label of the room you stand in hides. Lounges are numbered in the order the building adds them. Each door has a frame (two posts and a lintel) in the room's floor color.
+- **Furniture library:** code builds every piece; nothing is loaded from a file. `src/furniture/index.ts` lists each piece (`PIECES`), and `src/addons/building/furnishing.ts` holds one plan per room kind with the pieces and their positions.
 - **Cut-away walls:** in the overview and the isometric view, the room and hall walls drop to 0.5 m and the door frames to 1.2 m, so you see each room floor, the figures in it and the doors. First person keeps the full walls.
+
+### Your portrait
+
+A framed picture hangs over your office door. Without a picture it shows a neutral silhouette.
+
+```bash
+AGENTS_OFFICE_PORTRAIT=/path/to/me.png pnpm dev:fork
+```
+
+- **One manual step:** save your picture (for example your Slack photo) to a local file once. The office makes no network call for it: the browser asks only this server (`GET /api/portrait`), and the server reads only that file.
+- The file must be a PNG, JPEG, WebP or GIF of at most 2 MB, and its first bytes must match its extension. SVG is never served. Any other file, a folder or a missing file gives the placeholder (the route answers 204).
+- Do not commit a personal picture to the repository.
 
 ## Plugins
 
