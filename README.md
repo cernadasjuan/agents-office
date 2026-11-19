@@ -217,6 +217,20 @@ Enable it:
 AGENTS_OFFICE_PLUGINS=herdr pnpm dev   # or: pnpm dev:fork
 ```
 
+### missions: war rooms
+
+The `missions` plugin turns each mission record (`<root>/missions/<slug>/mission.yaml`) into a war room in the building's mission wing, north of the hall.
+
+```bash
+AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
+```
+
+- **Who works there:** a session joins a mission's room when its own tool calls touch that mission (a `mission` script command with the slug, or a file under `missions/<slug>/`). Its subagents stand near it. A session that waits for you still goes to your office first.
+- **Walls:** the mission statement, the documents, the GitHub issues and a kanban of the mission's threads (needs you, open, done).
+- **Past sessions:** one bed with a sleeping agent per finished session (up to 12), and a count.
+- **Closed missions:** the room locks, its door closes and no agent goes in. The room stays.
+- Without `AGENTS_OFFICE_MISSION_ROOTS`, the plugin adds nothing. It reads files only, with a size cap.
+
 ## Controls
 
 - **Click** to engage camera
