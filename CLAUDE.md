@@ -35,6 +35,8 @@ Read `docs/design-principles.md` before any feature change: it lists the design 
 
 Detection runs as a pipeline: the core `claudeSource` (wraps `detectAgents`), then plugin sources, then enrichers in order, then world providers for rooms and boards. A failing or slow plugin step (2 s limit) drops only its own output; a core failure is a 500. `projectAgents` and `projectWorld` are the only exit: they copy whitelisted, cleaned fields and hash every key with the per-run HMAC. `/api/world` uses the same request checks as `/api/agents`. Plugins live in `plugins/<name>/index.ts` (default export `OfficePlugin`) and load through `server.ssrLoadModule` from `AGENTS_OFFICE_PLUGINS=a,b` or `agents-office --plugin a`. Their browser parts live in `plugins/<name>/client.ts` and register an `OfficeExtension` (`src/extensions.ts`) with `plugin: '<name>'`, so they run only while the server plugin is active.
 
+`plugins/herdr/` (enricher, `pnpm dev:fork`): reads only the three `HERDR_*_ID` variables from one batched `ps eww` for new session PIDs, then `herdr tab list` and `herdr workspace list` (cached 10 s, `execFile`, 1.5 s timeout); sets a main session name to its tab label and the workspace as group for the session and its subagents; any failure changes nothing. The command runner is injectable for tests.
+
 ### Activity Inference (server/agentDetector.ts)
 
 The session file `status` comes first (`combineWithSessionStatus`): `waiting` → `meeting` (label "Waiting for you"), `idle` → `idle`, `busy` with a text-only tail → `planning`. Any other status, or none, uses the transcript alone.
