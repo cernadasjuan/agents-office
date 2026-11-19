@@ -14,6 +14,7 @@ const { buildRealSizeOffice } = await import('./real-size-office.js');
 const { countDrawCalls, DRAW_CALL_BUDGET } = await import('../src/scene/RenderBudget.js');
 const { StaticBatch, STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
 const { FigureBatch } = await import('../src/characters/FigureBatch.js');
+const { IssueCardBatch } = await import('../plugins/github/cards.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -38,6 +39,25 @@ test('at the real size (25 rooms, 40 agents) one frame stays under the draw-call
   console.log(`draw calls before ${JSON.stringify(before)} after ${JSON.stringify(after)}`);
   assert.equal(after.shadowLights, 3);
   assert.ok(after.total < DRAW_CALL_BUDGET, `batched ${JSON.stringify(after)}`);
+});
+
+test('with 5 issue cards on each of the 40 agents the frame stays under the draw-call budget', () => {
+  const { scene, manager } = buildRealSizeOffice();
+  const agents = manager.getAgents();
+  agents.forEach((managed, a) => {
+    managed.info.extras = { ...managed.info.extras, issues: Array.from({ length: 5 }, (_, i) => ({ number: a * 10 + i + 1, title: '', repo: 'agents-office', color: '0e8a16' })) };
+  });
+  const cards = new IssueCardBatch();
+  cards.attach(scene);
+  cards.sync(agents);
+  scene.updateMatrixWorld();
+  new StaticBatch(scene).update();
+  new FigureBatch(scene).sync(agents.map((managed) => managed.figure.group));
+  const after = countDrawCalls(scene);
+
+  console.log(`draw calls with 200 cards ${JSON.stringify(after)}`);
+  assert.equal(cards.placements.length, 200);
+  assert.ok(after.total < DRAW_CALL_BUDGET, `with cards ${JSON.stringify(after)}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

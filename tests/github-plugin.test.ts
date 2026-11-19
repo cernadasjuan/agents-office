@@ -279,3 +279,22 @@ test('the enricher reads only transcripts under ~/.claude/projects and caches by
   readSpy.mock.restore();
   assert.equal(observations[0].display.issues![0].number, 6);
 });
+
+test('a card border takes the wayfinder label color, else the first label color, else none', async () => {
+  const labeled = [
+    ghIssue(1, { labels: [{ name: 'bug', color: 'D73A4A' }, { name: 'wayfinder:research', color: '0e8a16' }] }),
+    ghIssue(2, { labels: [{ name: 'enhancement', color: 'a2eeef' }, { name: 'doing', color: 'fbca04' }] }),
+    ghIssue(3),
+    ghIssue(4, { labels: [{ name: 'odd', color: 'not-a-color' }] }),
+  ];
+  const { plugin: p } = plugin('gabriel-amyot/agents-office', () => JSON.stringify(labeled));
+  await world(p);
+  const file = writeTranscript([4, 3, 2, 1].map((number) => bash(`gh issue view ${number}`)));
+  const observations = [observation(file)];
+  await enrich(p, observations);
+
+  const colors = observations[0].display.issues!.map((issue) => [issue.number, issue.color]);
+  assert.deepEqual(colors, [[1, '0e8a16'], [2, 'a2eeef'], [3, undefined], [4, undefined]]);
+  const text = JSON.stringify(projectAgents(observations, (raw) => raw)[0].issues);
+  assert.equal(text.includes('wayfinder') || text.includes('enhancement'), false, 'no label text leaves the server');
+});

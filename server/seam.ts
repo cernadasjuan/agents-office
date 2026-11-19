@@ -19,8 +19,11 @@ export interface DisplayExtras {
   groupKey?: string;
   groupLabel?: string;
   badges?: string[];
-  /** `repo` is the short repository name (after the slash). The projection keeps it only as a plain token. */
-  issues?: Array<{ number: number; title: string; column?: string; repo?: string }>;
+  /**
+   * `repo` is the short repository name (after the slash). The projection keeps it only as a plain token.
+   * `color` is the card border color, a 6-hex label color. The projection keeps it only as `rrggbb`.
+   */
+  issues?: Array<{ number: number; title: string; column?: string; repo?: string; color?: string }>;
   roomKey?: string;
   /** Write actions this agent supports. Projected only when the server enabled the action. */
   actions?: ActionName[];
@@ -160,13 +163,22 @@ function repoShortName(value: unknown): string | undefined {
   return REPO_SHORT.test(short) && short !== '.' && short !== '..' ? short : undefined;
 }
 
+const HEX_COLOR = /^#?([0-9A-Fa-f]{6})$/;
+
+/** A 6-hex color as lowercase `rrggbb`, or undefined. */
+function hexColor(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return HEX_COLOR.exec(value)?.[1].toLowerCase();
+}
+
 function issueList(issues: DisplayExtras['issues'], max: number) {
   if (!Array.isArray(issues)) return undefined;
   const list = issues
     .map((issue) => {
       const repo = repoShortName(issue?.repo);
+      const color = hexColor(issue?.color);
       return { number: wholeNumber(issue?.number, 10_000_000), title: displayText(issue?.title, 80),
-        ...(issue?.column ? { column: displayText(issue.column, 24) } : {}), ...(repo ? { repo } : {}) };
+        ...(issue?.column ? { column: displayText(issue.column, 24) } : {}), ...(repo ? { repo } : {}), ...(color ? { color } : {}) };
     })
     .filter((issue) => issue.number !== undefined)
     .slice(0, max);
