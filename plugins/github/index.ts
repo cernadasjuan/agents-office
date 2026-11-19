@@ -19,6 +19,17 @@ export interface GithubPluginOptions {
 
 type IssueCard = NonNullable<DisplayExtras['issues']>[number];
 
+/** Under the 2 s seam step limit: a slow gh gives cards without titles and colors, not no cards. */
+const ENRICH_WAIT_MS = 1500;
+
+async function withinMs(work: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([work, new Promise((resolve) => { timer = setTimeout(resolve, ms); })]);
+  clearTimeout(timer);
+}
+
+const shortName = (repo: string): string => repo.slice(repo.indexOf('/') + 1);
+
 export function createGithubPlugin(options: GithubPluginOptions = {}): OfficePlugin {
   const repos = parseRepos(options.repos);
   if (repos.length === 0) return { name: 'github' };
@@ -26,15 +37,23 @@ export function createGithubPlugin(options: GithubPluginOptions = {}): OfficePlu
   const cache = new IssueCache(options.run ?? runFile, now);
   const transcripts = new TranscriptIssues();
 
+  /**
+   * The card names a repository only when it is a configured one and the issue
+   * was found there or the call named it (`-R`, URL). A bare number from an agent
+   * in another repository gets no name: the card then reads `#N`. The border
+   * color comes from the issue's labels on the board data (see `cardColor` in gh.ts).
+   */
   function card(ref: IssueRef): IssueCard {
     const candidates = ref.repo ? [ref.repo].filter((repo) => repos.includes(repo)) : repos;
     for (const repo of candidates) {
       const issue = cache.issues(repo)?.find((item) => item.number === ref.number);
       if (!issue) continue;
       const column = columnOf(issue, now());
-      return { number: issue.number, title: issue.title, ...(column ? { column } : {}) };
+      return { number: issue.number, title: issue.title, ...(column ? { column } : {}), repo: shortName(repo),
+        ...(issue.labelColor ? { color: issue.labelColor } : {}) };
     }
-    return { number: ref.number, title: '' };
+    const named = ref.repo && candidates.length === 1 ? candidates[0] : undefined;
+    return { number: ref.number, title: '', ...(named ? { repo: shortName(named) } : {}) };
   }
 
   return {
@@ -53,13 +72,18 @@ export function createGithubPlugin(options: GithubPluginOptions = {}): OfficePlu
     }],
     enrichers: [{
       id: 'github-issue-cards',
-      enrich(observations) {
+      async enrich(observations) {
+        const found: Array<{ observation: (typeof observations)[number]; refs: IssueRef[] }> = [];
         for (const observation of observations) {
           const transcriptPath = observation.internal.transcriptPath;
           if (typeof transcriptPath !== 'string' || observation.display.issues) continue;
           const refs = transcripts.refs(transcriptPath);
-          if (refs.length > 0) observation.display.issues = refs.map(card);
+          if (refs.length > 0) found.push({ observation, refs });
         }
+        if (found.length === 0) return;
+        // Titles and colors come from the board data: fill a cold cache, but never wait past the seam step limit
+        await withinMs(Promise.all(repos.map((repo) => cache.refresh(repo))), ENRICH_WAIT_MS);
+        for (const { observation, refs } of found) observation.display.issues = refs.map(card);
       },
     }],
   };

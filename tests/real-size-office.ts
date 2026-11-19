@@ -11,7 +11,7 @@ import { frameForBounds, overviewBounds, overviewDirection } from '../src/scene/
 /**
  * Gabriel's real size: the hall, 16 building rooms, 9 mission rooms (one locked)
  * and 40 agents. Half of the agents wear BMAD hats (one to four) and a quarter
- * hold GitHub cards (one to five), as with the fork plugins on.
+ * wear GitHub cards (one to five), as with the fork plugins on.
  */
 export const REAL_SIZE = { buildingRooms: 16, missionRooms: 9, agents: 40, hatWearers: 20, cardHolders: 10 } as const;
 
@@ -31,7 +31,7 @@ function issuesFor(i: number): Array<{ number: number; title: string }> | undefi
  * Build the office at the real size without a browser. The caller sets up a
  * jsdom `document` with a canvas stub first (toon gradients, signs, boards, cards).
  */
-export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManager; layout: BuildingLayout } {
+export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManager; layout: BuildingLayout; github: GithubOfficeExtension } {
   const scene = new THREE.Scene();
   addLighting(scene);
   const rooms = ['office', 'library', 'lounge', 'lounge', 'lounge', ...Array.from({ length: 11 }, (_, i) => `desks@ws${i}`)];
@@ -54,7 +54,7 @@ export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManag
   github.start(scene);
   bmadHats.agentsChanged?.(manager.getAgents());
   github.agentsChanged(manager.getAgents());
-  return { scene, manager, layout };
+  return { scene, manager, layout, github };
 }
 
 /** The two cameras the browser starts with: first person at its start pose, and the overview of the whole building. */

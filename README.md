@@ -205,7 +205,7 @@ Only tool calls count: a Bash call to `bmad.py agent <name>`, a Skill call for a
 
 ### GitHub: kanban board and issue cards
 
-The `github` plugin hangs a kanban board for each repository on the office wall. An agent holds a card for each issue it works on.
+The `github` plugin hangs a kanban board for each repository on the office wall. An agent wears a card for each issue it works on, like a badge on its shoulders and upper arms.
 
 ```bash
 AGENTS_OFFICE_GITHUB_REPOS=gabriel-amyot/agents-office pnpm dev:fork
@@ -213,11 +213,13 @@ AGENTS_OFFICE_GITHUB_REPOS=owner/one,owner/two npx agents-office --plugin github
 ```
 
 - **Opt in twice:** the plugin must be loaded, and `AGENTS_OFFICE_GITHUB_REPOS` must name one or more `owner/name` repositories. Without the variable, the plugin adds nothing and runs nothing.
-- **Data:** the plugin runs `gh issue list` (the [GitHub CLI](https://cli.github.com/)) with fixed arguments, a 5 s limit and no shell. gh handles the login, so Agents Office never reads a token. Results stay in a cache for 60 s per repository. If gh is missing or fails, the board keeps the last good data, or does not appear.
+- **Data:** the plugin runs `gh issue list` (the [GitHub CLI](https://cli.github.com/)) with fixed arguments, a 5 s limit and no shell. gh handles the login, so Agents Office never reads a token. Results stay in a cache for 60 s per repository. The agents call fills a cold cache too, but waits at most 1.5 s for it. If gh is missing or fails, the board keeps the last good data, or does not appear.
 - **Columns:** "To do" holds open issues with no assignee and no in-progress label. "In progress" holds open issues that have an assignee or an `in-progress` or `doing` label. "Done" holds up to 8 issues closed in the last 7 days. Each column is newest first.
 - **Board:** up to 4 boards. The first hangs on the right part of the back wall, the next ones on the right wall (`KANBAN_BOARD_SLOTS` in `plugins/github/client.ts`).
-- **Cards in hand:** the plugin reads the agent's own tool calls, never the prompt text: `gh issue view|comment|edit N`, a git branch that starts with `N-` (`git switch -c`, `git checkout -b`, `git worktree add -b`), and `#N` or `owner/repo#N` in a `git commit` message. The agent holds the 5 most recent issues. A card shows the issue number. The title comes from the board data when the issue belongs to a configured repository.
-- **What leaves the server:** issue numbers, titles (60 to 80 characters) and column names only.
+- **Issue cards:** the plugin reads the agent's own tool calls, never the prompt text: `gh issue view|comment|edit N`, a git branch that starts with `N-` (`git switch -c`, `git checkout -b`, `git worktree add -b`), and `#N` or `owner/repo#N` in a `git commit` message. The agent wears the 5 most recent issues. The newest sits on the shoulder nearest the camera, the next on the other shoulder, then the upper arms. The hands stay free. A card shows `<repo>#N`, for example `agents-office#77`, when the issue belongs to a configured repository (found on its board, or named with `-R` or a URL). Otherwise it shows `#N`. The cards stay upright and turn to the camera in every pose: typing, walking, idle and with the hand raised.
+- **IDs in the label:** a card is small from the overview, so the floating label of the agent adds one line with its issue IDs, for example `agents-office#77 · #79`. The repository shows once while it stays the same. The line shows at most 5 IDs and ends with `+N` when it is too long. Compact labels keep this line, so the overview shows the IDs.
+- **Border color:** the color of the issue's label. With several labels, a `wayfinder:*` label wins, else the first label. An issue without labels gets a neutral border.
+- **What leaves the server:** issue numbers, titles (60 to 80 characters), column names, the short repository name and the label color as `rrggbb`. Label names never leave the server.
 
 
 ### herdr plugin
