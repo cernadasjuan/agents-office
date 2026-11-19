@@ -5,6 +5,8 @@ import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, Seat } from '../../layout/LayoutStrategy.js';
 import { HALL, matchingDoor, slotFor, type Door } from './RoomPlanner.js';
 import { buildRoom, buildWalls, ROOM_STATION_TYPE, type RoomKind } from './rooms.js';
+import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
+import type { WorldRoom } from '../../extensions.js';
 
 /** Work that happens at the agent's own desk. Everything else is a trip. */
 const DESK_WORK = new Set<Activity>(['implementing', 'debugging', 'deploying']);
@@ -24,7 +26,7 @@ export const BUILDING_STORAGE_KEY = 'agents-office.building.rooms';
 const DEFAULT_DWELL_MS = 4000;
 const QUEUE_REFRESH_MS = 500;
 
-type Target = 'home' | 'pod' | 'queue' | `trip:${string}`;
+type Target = 'home' | 'pod' | 'queue' | `trip:${string}` | `room:${string}`;
 
 interface AgentState {
   agent: LayoutAgent;
@@ -60,6 +62,7 @@ export class BuildingLayout implements LayoutStrategy {
   private agents = new Map<string, AgentState>();
   private rooms: RoomRecord[] = [];
   private hallWalls: THREE.Group | null = null;
+  private missionRooms = new Map<string, MissionRoom & { extraDoors: Door[] }>();
   private now: () => number;
   private dwellMs: number;
   private storage: BuildingOptions['storage'];
@@ -77,6 +80,41 @@ export class BuildingLayout implements LayoutStrategy {
 
   get roomKinds(): RoomKind[] {
     return this.rooms.map((room) => room.kind);
+  }
+
+  /**
+   * Rooms from server plugins (mission war rooms). A new room gets the next slot in
+   * the mission wing; a known room updates its walls. A locked room keeps standing,
+   * and its agents leave.
+   */
+  syncWorldRooms(rooms: WorldRoom[]): LayoutMove[] {
+    for (const room of rooms) {
+      const known = this.missionRooms.get(room.id);
+      if (known) {
+        known.update(room);
+        continue;
+      }
+      const index = this.missionRooms.size;
+      const built = Object.assign(buildMissionRoom(room, index), { extraDoors: [] as Door[] });
+      this.missionRooms.set(room.id, built);
+      this.scene.add(built.group);
+      for (const [key, station] of built.stations) this.stations.set(key, station);
+      if (built.slot.ring === 0) this.rebuildHallWalls();
+      else {
+        const inner = [...this.missionRooms.values()][index - 2];
+        inner.extraDoors.push(matchingDoor(built.slot));
+        const old = inner.group.getObjectByName('room-walls');
+        if (old) inner.group.remove(old);
+        const walls = buildWalls(missionSlot(inner.index).rect, [missionSlot(inner.index).door, ...inner.extraDoors]);
+        walls.name = 'room-walls';
+        inner.group.add(walls);
+      }
+    }
+    return [];
+  }
+
+  get missionRoomCount(): number {
+    return this.missionRooms.size;
   }
 
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
@@ -122,7 +160,10 @@ export class BuildingLayout implements LayoutStrategy {
     const { agent } = state;
     const parentId = agent.extras?.parentId;
     if (!parentId && (agent.extras?.attention === 'waiting' || agent.activity === 'meeting')) return 'queue';
-    if (parentId && this.agents.get(parentId)?.home) return 'pod';
+    const room = agent.extras?.room ? this.missionRooms.get(agent.extras.room) : undefined;
+    if (!parentId && room && !room.locked) return `room:${room.id}`;
+    const parent = parentId ? this.agents.get(parentId) : undefined;
+    if (parent && (parent.home || parent.target?.startsWith('room:'))) return 'pod';
     if (DESK_WORK.has(agent.activity)) return 'home';
     return `trip:${TRIP_STATION[agent.activity] ?? 'idle'}`;
   }
@@ -136,6 +177,7 @@ export class BuildingLayout implements LayoutStrategy {
     let key: string;
     if (target === 'home') key = this.homeOf(state);
     else if (target === 'pod') key = this.claim(this.podKeys(this.agents.get(state.agent.extras!.parentId!)!), 'pod');
+    else if (target.startsWith('room:')) key = this.claimInRoom(target.slice('room:'.length));
     else if (target === 'queue') key = this.claimOfType('queue');
     else key = this.claimOfType(target.slice('trip:'.length));
     state.seat = key;
@@ -147,15 +189,22 @@ export class BuildingLayout implements LayoutStrategy {
     return state.home;
   }
 
-  /** Four spots around a desk for the subagents of its owner, more in a second ring when needed. */
+  /** A seat in a war room, or a lounge seat when the room is full. */
+  private claimInRoom(roomId: string): string {
+    const free = this.keysOfType(`room:${roomId}`).find((key) => !this.stations.get(key)!.occupied);
+    return free ? this.claim([free], 'room') : this.claimOfType('idle');
+  }
+
+  /** Spots around the parent's anchor (its war room seat, else its home desk) for its subagents. */
   private podKeys(parent: AgentState): string[] {
-    const desk = this.stations.get(parent.home!)!;
+    const anchorKey = parent.target?.startsWith('room:') && parent.seat ? parent.seat : parent.home!;
+    const desk = this.stations.get(anchorKey)!;
     const facing = new THREE.Vector3().subVectors(desk.lookAt, desk.position).setY(0).normalize();
     const side = new THREE.Vector3(-facing.z, 0, facing.x);
     const keys: string[] = [];
     const offsets: Array<[number, number]> = [[1.0, 0.1], [-1.0, 0.1], [0.55, -0.9], [-0.55, -0.9], [1.4, -0.9], [-1.4, -0.9]];
     offsets.forEach(([across, ahead], i) => {
-      const key = `${parent.home}_pod${i}`;
+      const key = `${anchorKey}_pod${i}`;
       if (!this.stations.has(key)) {
         const position = desk.position.clone().addScaledVector(side, across).addScaledVector(facing, ahead);
         this.stations.set(key, { type: 'pod', position, lookAt: desk.lookAt.clone(), occupied: false, posture: 'standing' });
@@ -272,7 +321,10 @@ export class BuildingLayout implements LayoutStrategy {
 
   private rebuildHallWalls(): void {
     if (this.hallWalls) this.scene.remove(this.hallWalls);
-    const doors = this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0).map(matchingDoor);
+    const doors = [
+      ...this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0),
+      ...[...this.missionRooms.values()].map((room) => room.slot).filter((slot) => slot.ring === 0),
+    ].map(matchingDoor);
     this.hallWalls = buildWalls(HALL, doors, OFFICE.height, ['south', 'west']);
     this.hallWalls.name = 'building-hall-walls';
     this.scene.add(this.hallWalls);
