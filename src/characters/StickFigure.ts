@@ -34,6 +34,7 @@ export class StickFigure {
     this.accentColor = accentColor.clone();
     this.joints = buildSkeleton(accentColor);
     this.label = createLabel(name, ACTIVITY_LABELS.idle);
+    this.label.element.style.setProperty('--agent-color', `#${this.accentColor.getHexString()}`);
     this.joints.root.add(this.label);
 
     // Apply rest pose

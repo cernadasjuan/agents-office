@@ -3,12 +3,13 @@ import { createScene } from './scene/SceneSetup.js';
 import { createOffice } from './scene/Office.js';
 import { AgentManager } from './agents/AgentManager.js';
 import { ViewController } from './scene/ViewController.js';
-import { onSelectionChange, selectAgent } from './scene/Selection.js';
+import { onSelectionChange, selectAgent, selectedAgentId } from './scene/Selection.js';
 import { AgentPoller } from './agents/AgentPoller.js';
 import { AgentPanel } from './ui/AgentPanel.js';
 import { chooseLayoutId, createLayout, layoutIds, rememberLayoutId } from './layout/registry.js';
 import { activeExtensions, setWorld, type World } from './extensions.js';
 import { tabTitle } from './ui/attention.js';
+import { LabelDetailController } from './ui/LabelDetail.js';
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
@@ -58,12 +59,28 @@ const panel = new AgentPanel(
 );
 onSelectionChange((agentId) => panel.setSelected(agentId));
 
+// Label detail: full labels only for waiting, selected, hovered or near agents. Key V or `#labels=all` shows all.
+const labelDetail = new LabelDetailController({
+  agents: () => agentManager.getAgents(),
+  camera,
+  canvas: renderer.domElement,
+  keys: window,
+  viewMode: () => view.mode,
+  zoomDistance: () => view.zoomDistance,
+  pick: (x, y) => view.pickAt(x, y),
+  selected: () => selectedAgentId(),
+  hash: window.location.hash,
+  indicator: document.getElementById('label-mode'),
+});
+onSelectionChange(() => labelDetail.refresh());
+
 function buildUI(): void {
   const agents = agentManager.getAgents();
   panel.render(agents.map((managed) => managed.info));
   const count = (attention: string) => agents.filter((managed) => managed.info.extras?.attention === attention).length;
   document.title = tabTitle(count('waiting'), count('your-turn'));
   view.agentsChanged(agents);
+  labelDetail.refresh();
   for (const extension of activeExtensions(scene)) extension.agentsChanged?.(agentManager.getAgents());
 }
 
@@ -102,6 +119,7 @@ function animate(): void {
 
   view.update(elapsed, delta);
   agentManager.update(elapsed, delta);
+  labelDetail.update(performance.now());
   for (const extension of activeExtensions(scene)) extension.update?.(elapsed, delta);
 
   renderer.render(scene, camera);

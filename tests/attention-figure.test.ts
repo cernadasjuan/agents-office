@@ -62,3 +62,9 @@ test('waits read in minutes, hours, then days', () => {
   assert.deepEqual([formatWait(5), formatWait(59), formatWait(60), formatWait(47 * 60), formatWait(3 * 24 * 60)],
     ['5 min', '59 min', '1 h', '47 h', '3 d']);
 });
+
+test('the label carries the agent color for the compact dot, and the label keeps its plain class', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  assert.equal(figure.label.element.style.getPropertyValue('--agent-color'), '#4a90d9');
+  assert.equal(figure.label.element.className, 'agent-label');
+});
