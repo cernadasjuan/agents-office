@@ -93,7 +93,8 @@ Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule t
 | Whiteboards | Back wall | 2 | Planning |
 | Bookshelves | Left wall | 2 | Researching |
 | Test stations | Right side | 2 | Testing |
-| Coffee machine | Front left | 2 | Taking a break |
+| Coffee machine | Front left | 2 | Taking a break (standing) |
+| Lounge sofas | Front left | 6 | Taking a break (seated) |
 | Meeting table | Front right | 3 | Waiting for you |
 
 - A new agent appears directly at its seat. When its activity changes, it walks to a seat of the new type.

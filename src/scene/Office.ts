@@ -204,6 +204,21 @@ export function createOffice(scene: THREE.Scene): Map<string, Station> {
   sofa2.rotation.y = Math.PI;
   scene.add(sofa2);
 
+  // Three seats per sofa for agents taking a break. They sit, facing the room.
+  const SOFA_SEAT_OFFSETS = [-0.6, 0, 0.6];
+  [-6, -3].forEach((sofaX, sofa) => {
+    SOFA_SEAT_OFFSETS.forEach((offset, seat) => {
+      const x = sofaX + offset;
+      stations.set(`sofa_${sofa * SOFA_SEAT_OFFSETS.length + seat}`, {
+        type: 'idle',
+        position: new THREE.Vector3(x, 0, 10.05),
+        lookAt: new THREE.Vector3(x, 0.8, 9),
+        occupied: false,
+        posture: 'seated',
+      });
+    });
+  });
+
   // --- Second bookshelf against back wall (right side) ---
   const bookshelf3 = createBookshelf();
   bookshelf3.position.set(11, 0, -12);
