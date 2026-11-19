@@ -54,6 +54,8 @@ export function roomFloorColor(kind: RoomKind): number {
 export function roomTitle(kind: RoomKind, earlierKinds: RoomKind[], tag?: string): string {
   if (kind === 'desks' && tag) return `Desks · ${tag}`;
   if (kind === 'lounge') return `Lounge ${earlierKinds.filter((earlier) => earlier === 'lounge').length + 1}`;
+  // Only the first office is the user's; later ones are overflow waiting rooms
+  if (kind === 'office' && earlierKinds.includes('office')) return `Waiting room ${earlierKinds.filter((earlier) => earlier === 'office').length + 1}`;
   return ROOM_TITLE[kind];
 }
 
