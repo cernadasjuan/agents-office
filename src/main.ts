@@ -5,7 +5,7 @@ import { AgentManager } from './agents/AgentManager.js';
 import { ViewController } from './scene/ViewController.js';
 import { onSelectionChange, selectAgent } from './scene/Selection.js';
 import { AgentPoller } from './agents/AgentPoller.js';
-import { AgentPanel } from './ui/AgentPanel.js';
+import { AgentPanel, isDemoMode, setupPanelCollapse } from './ui/AgentPanel.js';
 import { chooseLayoutId, createLayout, layoutIds, rememberLayoutId } from './layout/registry.js';
 import { activeExtensions, setWorld, type World } from './extensions.js';
 import { tabTitle } from './ui/attention.js';
@@ -50,12 +50,14 @@ const view = new ViewController({
   hash: window.location.hash,
 });
 
-// --- UI Panel ---
-const panel = new AgentPanel(
-  document.getElementById('agent-list')!,
-  (agentId, activity) => agentManager.setActivity(agentId, activity),
-  (agentId) => selectAgent(agentId),
-);
+// --- Triage list (side panel) ---
+// `?demo=1` adds the prototype activity menu to each row. Live polls overwrite a choice.
+const panel = new AgentPanel(document.getElementById('agent-list')!, {
+  onSelect: (agentId) => selectAgent(agentId),
+  onPick: (agentId, activity) => agentManager.setActivity(agentId, activity),
+  demo: isDemoMode(window.location.search),
+});
+setupPanelCollapse(document.getElementById('ui-panel')!, document.getElementById('ui-panel-toggle')!, window.localStorage);
 onSelectionChange((agentId) => panel.setSelected(agentId));
 
 function buildUI(): void {

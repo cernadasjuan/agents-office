@@ -49,6 +49,10 @@ A built-in enricher sets `attention` for main sessions: status `waiting` → `wa
 
 `src/addons/building.ts` registers `BuildingLayout` as the default layout (fork only, tier T3). `RoomPlanner.ts` is pure geometry: 12x12 room slots around the 30x26 hall (first ring of 7, the office first at east-center; later rings shift outward and open toward the inner room), door gaps and wall pieces. `rooms.ts` builds a room in a local frame (`RoomFrame`: depth from the door wall, position along it): floor marked `userData.floor`, low walls named `room-walls`, a CSS2D sign, furniture and stations. `BuildingLayout.ts` keeps per-agent state (home desk, current seat, target, pending trip, queue time): desk work at home, trips to station types after `dwellMs` (4 s), main sessions with attention `waiting` or activity `meeting` go to `queue` spots at once and are reordered by `waitMinutes` in `update()`, subagents use pod spots around the parent desk. An exhausted station type adds a room (`ROOM_STATION_TYPE`), saved in `localStorage` (`agents-office.building.rooms`) and rebuilt on load. The hall side walls are hidden and replaced by `building-hall-walls` with a door per first-ring room.
 
+### Mission war rooms (plugins/missions, src/addons/building/missionRooms.ts)
+
+`plugins/missions/index.ts` reads `mission.yaml` records (via the `yaml` package, 1 MB cap, 30 s cache) from `AGENTS_OFFICE_MISSION_ROOTS` and provides world rooms (`mission:<slug>`, open unless done or abandoned) with walls (destination, artifact titles, GitHub members, thread kanban) and `sleepers` (journey sessions). Its enricher scans each session transcript incrementally for tool calls that touch `missions/<slug>/` or a `mission <cmd> <slug>` command and sets `roomKey` for the session and its subagents. The building add-on registers a `building-world-rooms` extension: `BuildingLayout.syncWorldRooms` builds any world room in the mission wing (`missionSlot`: two columns north of the hall back wall, rows further north), updates walls each poll, and seats agents whose `extras.room` matches (queue still wins). Locked rooms close their door and take no agents.
+
 ### Activity Inference (server/agentDetector.ts)
 
 The session file `status` comes first (`combineWithSessionStatus`): `waiting` → `meeting` (label "Waiting for you"), `idle` → `idle`, `busy` with a text-only tail → `planning`. Any other status, or none, uses the transcript alone.
@@ -83,7 +87,7 @@ Subagents (spawned via the Agent tool) are detected only from the parent's own `
 - **Same-type station stickiness**: If an activity change maps to the same station type (e.g. implementing→debugging), the agent stays at its current desk
 - **Skeleton animation**: Hierarchical joints (root→body→shoulders/hips→limbs) animated per-activity with sine waves and `approach()` easing
 - **Colors**: Centralized palette in `Colors.ts` with 8 accent colors for agents; an agent's color comes from an FNV-1a hash of its ID
-- **Side panel**: `src/ui/AgentPanel.ts` updates cards in place; it rebuilds nothing on an activity change. A click on a card name selects the agent; the selected card is marked
+- **Triage list (side panel)**: `src/ui/AgentPanel.ts` groups agents into Needs you (attention `waiting`), Your turn (attention `your-turn`), Working (subagents nested under `extras.parentId`) and Idle, with count chips on top. Rows are created once per agent and moved or edited in place on each poll; the scroll position, the groups the user opened or closed and a focused menu survive. Your turn starts collapsed above 5 rows, Idle always starts collapsed. A click on a row calls `selectAgent`; the selected row is marked. The activity menu (P14) appears only with `?demo=1` (`isDemoMode`). `setupPanelCollapse` hides the panel body and stores the choice in localStorage (`agents-office.panel-collapsed`). All text goes through `textContent`
 
 ### Office Layout
 
@@ -95,4 +99,4 @@ Two modes, owned by `src/scene/ViewController.ts`. First person stays the defaul
 
 ### Selection
 
-`src/scene/Selection.ts` holds the shared selection: `selectAgent(id)`, `clearSelection()`, `selectedAgentId()`, `onSelectionChange(cb)` (returns an unsubscribe function). Extensions and other UI (for example a triage list) use it. A click on a figure (raycast against the figure meshes) or on an agent name in the side panel selects; Esc clears; an agent that leaves is deselected. On a new selection the camera flies to the agent in 0.6 s and `SelectionMarker.ts` draws a ring in the agent's color under it. `#focus=<agent id>` selects that agent once it appears.
+`src/scene/Selection.ts` holds the shared selection: `selectAgent(id)`, `clearSelection()`, `selectedAgentId()`, `onSelectionChange(cb)` (returns an unsubscribe function). Extensions and other UI (for example a triage list) use it. A click on a figure (raycast against the figure meshes) or on a row in the triage list selects; Esc clears; an agent that leaves is deselected. On a new selection the camera flies to the agent in 0.6 s and `SelectionMarker.ts` draws a ring in the agent's color under it. `#focus=<agent id>` selects that agent once it appears.
