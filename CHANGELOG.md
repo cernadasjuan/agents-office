@@ -35,6 +35,7 @@
 - Test suite: `pnpm test`
 - Label detail: full labels only for waiting, selected, hovered or near agents; compact labels (color dot and name) for the others. Key V or `#labels=all` shows all full labels
 - Attention age bands: only a wait under 15 min gets the beacon, the raised hand and the tab count. A wait up to 24 h stays in the queue. An older wait moves to a collapsed "Cold" group. The thresholds are one constant
+- Wayfinding (building layout): a name label above each room, numbered lounges, door frames in the room floor color, walls cut away in the overview, and mission room signs only when you zoom in or point at the room
 
 ## 1.1.0
 

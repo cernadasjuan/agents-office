@@ -6,6 +6,7 @@ import { FrameStats, RenderScheduler, inShadowReach, renderOnScreenLabels, rende
 import type { ViewMode } from './Selection.js';
 import { sleepUnseenFigures } from './AnimationSleep.js';
 import { StaticBatch } from './StaticMerge.js';
+import { applyCutaway } from './Cutaway.js';
 
 export interface FrameLoopOptions {
   scene: THREE.Scene;
@@ -107,16 +108,17 @@ export class FrameLoop {
     const modeChanged = this.applyQuality();
     scene.updateMatrixWorld();
     const rebuilt = this.staticBatch.update();
+    const cut = applyCutaway(scene, this.options.mode() === 'overview');
     const figures = this.figureBatch.sync(this.options.figures());
     camera.updateMatrixWorld();
     const cameraMoved = !this.lastView.equals(camera.matrixWorld) || !this.lastProjection.equals(camera.projectionMatrix);
-    const active = rebuilt || modeChanged || cameraMoved || figures.changed || figures.moved.length > 0 || Boolean(this.options.animating?.());
+    const active = rebuilt || cut || modeChanged || cameraMoved || figures.changed || figures.moved.length > 0 || Boolean(this.options.animating?.());
     if (!this.scheduler.shouldRender(now, active)) return false;
 
     const casterMoves = this.castersMoved(figures.moved);
     if (casterMoves.idle) this.idleShadowPending = true;
     const idleShadowDue = this.idleShadowPending && now - this.lastShadowAt >= IDLE_SHADOW_INTERVAL_MS;
-    const shadows = rebuilt || modeChanged || figures.changed || this.shadowsDirty || casterMoves.real || idleShadowDue;
+    const shadows = rebuilt || cut || modeChanged || figures.changed || this.shadowsDirty || casterMoves.real || idleShadowDue;
     if (shadows) {
       renderer.shadowMap.needsUpdate = true;
       this.lastShadowAt = now;

@@ -11,7 +11,10 @@ import { getToonMaterial } from '../../utils/Materials.js';
 import { Colors } from '../../utils/Colors.js';
 import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
-import { ROOM_SIZE, type Door, type Rect, type RoomSlot, type Side, wallPieces } from './RoomPlanner.js';
+import { DOOR_WIDTH, ROOM_SIZE, type Door, type Rect, type RoomSlot, type Side, wallPieces } from './RoomPlanner.js';
+import { roomLabel } from './roomLabels.js';
+
+export * from './roomLabels.js';
 
 export type RoomKind = 'office' | 'desks' | 'planning' | 'library' | 'lab' | 'review' | 'lounge';
 
@@ -46,8 +49,29 @@ const FLOOR_TINT: Record<RoomKind, number> = {
   lounge: 0x9a8ab0,
 };
 
-const WALL_HEIGHT = 2.6;
+export function roomFloorColor(kind: RoomKind): number {
+  return FLOOR_TINT[kind];
+}
+
+/**
+ * The room name: lounges are numbered in the order they are rented, a workspace
+ * desk room carries its workspace name.
+ */
+export function roomTitle(kind: RoomKind, earlierKinds: RoomKind[], tag?: string): string {
+  if (kind === 'desks' && tag) return `Desks · ${tag}`;
+  if (kind === 'lounge') return `Lounge ${earlierKinds.filter((earlier) => earlier === 'lounge').length + 1}`;
+  return ROOM_TITLE[kind];
+}
+
+export const WALL_HEIGHT = 2.6;
 const WALL_THICKNESS = 0.15;
+const DOOR_FRAME_HEIGHT = 2.35;
+const DOOR_POST_WIDTH = 0.2;
+/** Top of the lintel. */
+export const DOOR_FRAME_TOP = DOOR_FRAME_HEIGHT + DOOR_POST_WIDTH;
+/** Overview: door frames drop to this height, above the 0.5 walls. */
+export const OVERVIEW_DOOR_HEIGHT = 1.2;
+const DOOR_FRAME_DEPTH = 0.3;
 
 /**
  * A room's local frame. `d` is the depth from the door wall into the room
@@ -99,9 +123,31 @@ function station(type: string, position: THREE.Vector3, lookAt: THREE.Vector3, p
   return { type, position, lookAt, occupied: false, ...(posture ? { posture } : {}) };
 }
 
+/**
+ * Put walls and door frames in the shared cutaway zone: they draw merged, and
+ * the overview lowers the zone so the room floors show (`applyCutaway`).
+ */
+export function markCutaway(root: THREE.Object3D): void {
+  markStatic(root, { zone: 'room-walls', castShadow: false, overviewLower: WALL_HEIGHT });
+}
+
+/**
+ * Door frames get their own cutaway zone: in the overview they drop to
+ * `OVERVIEW_DOOR_HEIGHT`, so the posts and the lintel stand above the low walls
+ * and a doorway reads from above.
+ */
+export function markDoorCutaway(root: THREE.Object3D): void {
+  markStatic(root, { zone: 'door-frames', castShadow: false, overviewLower: DOOR_FRAME_TOP, overviewHeight: OVERVIEW_DOOR_HEIGHT });
+}
+
 /** Low walls with gaps at the doors, so the overview can see in. */
 export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hideSides: Side[] = []): THREE.Group {
   const group = new THREE.Group();
+  // Pieces on hidden sides go in one group the overview hides. It merges in place: one draw call, hidden with it
+  const hidden = new THREE.Group();
+  hidden.name = 'overview-hidden-walls';
+  hidden.userData.overviewHidden = true;
+  markStatic(hidden);
   const material = getToonMaterial(Colors.wall);
   for (const piece of wallPieces(rect, doors)) {
     const length = piece.to - piece.from;
@@ -116,15 +162,41 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
     wall.position.set(horizontal ? middle : fixed, height / 2, horizontal ? fixed : middle);
     wall.castShadow = true;
     wall.receiveShadow = true;
-    if (hideSides.includes(piece.side)) wall.userData.overviewHidden = true;
-    group.add(wall);
+    (hideSides.includes(piece.side) ? hidden : group).add(wall);
   }
+  if (hidden.children.length > 0) group.add(hidden);
+  return group;
+}
+
+/** Two posts and a lintel around a doorway, in the room floor color, so doors stand out from the walls. */
+export function doorFrame(rect: Rect, door: Door, color: number): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'door-frame';
+  group.userData.door = { ...door };
+  const material = getToonMaterial(color);
+  const horizontal = door.side === 'north' || door.side === 'south';
+  const wallLine = { north: rect.minZ, south: rect.maxZ, west: rect.minX, east: rect.maxX }[door.side];
+  const box = (along: number, across: number, height: number) =>
+    (horizontal ? new THREE.BoxGeometry(along, height, across) : new THREE.BoxGeometry(across, height, along));
+  const put = (mesh: THREE.Mesh, along: number, y: number) => {
+    mesh.position.set(horizontal ? along : wallLine, y, horizontal ? wallLine : along);
+    mesh.castShadow = true;
+    group.add(mesh);
+  };
+  for (const side of [-1, 1]) {
+    const post = new THREE.Mesh(box(DOOR_POST_WIDTH, DOOR_FRAME_DEPTH, DOOR_FRAME_HEIGHT), material);
+    post.name = 'door-post';
+    put(post, door.at + side * (DOOR_WIDTH / 2 + DOOR_POST_WIDTH / 2 - 0.05), DOOR_FRAME_HEIGHT / 2);
+  }
+  const lintel = new THREE.Mesh(box(DOOR_WIDTH + DOOR_POST_WIDTH * 2 - 0.1, DOOR_FRAME_DEPTH, DOOR_POST_WIDTH), material);
+  lintel.name = 'door-lintel';
+  put(lintel, door.at, DOOR_FRAME_HEIGHT + DOOR_POST_WIDTH / 2);
   return group;
 }
 
 function sign(text: string, position: THREE.Vector3): CSS2DObject {
   const element = document.createElement('div');
-  element.className = 'room-sign';
+  element.className = 'desk-sign';
   element.textContent = text;
   Object.assign(element.style, {
     background: 'rgba(30, 32, 48, 0.85)', color: '#f5f0e8', padding: '2px 8px', borderRadius: '4px',
@@ -135,7 +207,7 @@ function sign(text: string, position: THREE.Vector3): CSS2DObject {
   return label;
 }
 
-/** Build one room: floor, low walls, furniture, a door sign and its stations. */
+/** Build one room: floor, low walls, a framed door, a room label, furniture and its stations. */
 export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDoors: Door[], title?: string): BuiltRoom {
   const group = new THREE.Group();
   group.name = `room-${index}-${kind}`;
@@ -154,8 +226,12 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
   group.add(floor);
   const walls = buildWalls(slot.rect, [slot.door, ...extraDoors]);
   walls.name = 'room-walls';
+  markCutaway(walls);
   group.add(walls);
-  group.add(sign(title ?? ROOM_TITLE[kind], frame.point(0, 0.4, WALL_HEIGHT + 0.4)));
+  const doorway = doorFrame(slot.rect, slot.door, FLOOR_TINT[kind]);
+  markDoorCutaway(doorway);
+  group.add(doorway);
+  group.add(roomLabel(title ?? roomTitle(kind, []), frame.point(0, ROOM_SIZE / 2), slot.rect));
 
   const rows = (count: number, spacing: number) => Array.from({ length: count }, (_, i) => (i - (count - 1) / 2) * spacing);
 
@@ -164,7 +240,10 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
       // The user's desk at the far wall, facing the door. Agents that wait for the user queue in front of it.
       const deskDepth = ROOM_SIZE - 2.2;
       place(group, createDesk(true), frame.point(0, deskDepth), frame.faceAway);
-      group.add(sign('You', frame.point(0, deskDepth + 0.7, 2.2)));
+      // A detail sign: it shows when zoomed in or hovered, so it does not cover the queue in the overview
+      const you = sign('You', frame.point(0, deskDepth + 0.7, 2.2));
+      you.userData.detailSign = { rect: { ...slot.rect }, hoverOnly: false };
+      group.add(you);
       place(group, createPlant(1.2), frame.point(-5.2, ROOM_SIZE - 0.8), 0);
       place(group, createPlant(1.2), frame.point(5.2, ROOM_SIZE - 0.8), 0);
       const lookAt = frame.point(0, deskDepth + 0.7, 1.2);

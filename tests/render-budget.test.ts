@@ -126,3 +126,12 @@ test('a second update with no change rebuilds nothing', () => {
   assert.equal(statics.update(), true);
   assert.equal(statics.update(), false);
 });
+
+test('a sprite (a room label) counts as one camera draw call and casts no shadow', () => {
+  const scene = new THREE.Scene();
+  const before = countDrawCalls(scene).main;
+  scene.add(new THREE.Sprite(new THREE.SpriteMaterial()));
+  const after = countDrawCalls(scene);
+  assert.equal(after.main, before + 1);
+  assert.equal(after.shadowCasters, 0);
+});
