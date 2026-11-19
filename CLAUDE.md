@@ -61,7 +61,7 @@ Subagents (spawned via the Agent tool) are detected only from the parent's own `
 - **Same-type station stickiness**: If an activity change maps to the same station type (e.g. implementing→debugging), the agent stays at its current desk
 - **Skeleton animation**: Hierarchical joints (root→body→shoulders/hips→limbs) animated per-activity with sine waves and `approach()` easing
 - **Colors**: Centralized palette in `Colors.ts` with 8 accent colors for agents; an agent's color comes from an FNV-1a hash of its ID
-- **Side panel**: `src/ui/AgentPanel.ts` updates cards in place; it rebuilds nothing on an activity change
+- **Side panel**: `src/ui/AgentPanel.ts` updates cards in place; it rebuilds nothing on an activity change. A click on a card name selects the agent; the selected card is marked
 
 ### Office Layout
 
@@ -69,4 +69,8 @@ Subagents (spawned via the Agent tool) are detected only from the parent's own `
 
 ### Camera
 
-Pointer lock + WASD free camera. Shift for speed. Clamped to office bounds.
+Two modes, owned by `src/scene/ViewController.ts`. First person stays the default: pointer lock + WASD free camera (`FreeCamera.ts`), Shift for speed, clamped to office bounds. Key O switches to the overview (`OverviewCamera.ts`): a fixed angle from above, mouse wheel to zoom, drag or WASD to pan. The overview frames the box from `setOverviewBounds(box)` when a layout sets one, else the union of every object with `userData.floor`, else the fixed room. A layout that adds floor outside the room marks it with `userData.floor` or calls `setOverviewBounds`. Objects with `userData.overviewHidden` (the front and left walls, the ceiling lamps) are hidden while the overview is on. `#view=overview` starts in the overview.
+
+### Selection
+
+`src/scene/Selection.ts` holds the shared selection: `selectAgent(id)`, `clearSelection()`, `selectedAgentId()`, `onSelectionChange(cb)` (returns an unsubscribe function). Extensions and other UI (for example a triage list) use it. A click on a figure (raycast against the figure meshes) or on an agent name in the side panel selects; Esc clears; an agent that leaves is deselected. On a new selection the camera flies to the agent in 0.6 s and `SelectionMarker.ts` draws a ring in the agent's color under it. `#focus=<agent id>` selects that agent once it appears.

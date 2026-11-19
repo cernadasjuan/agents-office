@@ -141,6 +141,10 @@ A plugin is a folder `plugins/<name>/` with an `index.ts` (server: sources, enri
 - **Mouse** to look around
 - **Esc** to release camera
 - **L** to switch the layout, when more than one is installed (also `?layout=<id>` in the URL)
+- **O** to switch between first person (the default) and the overview, a view from above at an angle that shows the whole floor. In the overview, drag to pan, use the mouse wheel to zoom, and use W/A/S/D to pan
+- **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on an agent name in the side panel also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
+- **Esc** clears the selection (in first person it first releases the camera)
+- `#view=overview` in the URL starts in the overview. `#focus=<agent id>` selects that agent when it appears (agent IDs change when the server restarts)
 
 ## Architecture
 
