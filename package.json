@@ -10,13 +10,14 @@
     "bin",
     "src",
     "server",
+    "plugins",
     "index.html",
     "vite.config.ts",
     "tsconfig.json"
   ],
   "scripts": {
     "dev": "vite",
-    "dev:fork": "AGENTS_OFFICE_PLUGINS=herdr vite",
+    "dev:fork": "AGENTS_OFFICE_PLUGINS=herdr,github vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --import tsx --test tests/*.test.ts",
