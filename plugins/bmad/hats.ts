@@ -20,12 +20,14 @@ function assemble(kind: string, height: number, parts: Part[], emissive?: Part):
     mesh.position.set(...position);
     mesh.scale.set(...scale);
     mesh.castShadow = true;
+    mesh.userData.figurePart = true;
     group.add(mesh);
   }
   if (emissive) {
     const [geometry, color, position = ORIGIN] = emissive;
     const mesh = new THREE.Mesh(geometry, getEmissiveMaterial(color, color, 0.8));
     mesh.position.set(...position);
+    mesh.userData.figurePart = true;
     group.add(mesh);
   }
   return { kind, group, height };
@@ -108,11 +110,32 @@ function partyColor(badge: string): number {
   return PARTY_COLORS[(hash >>> 0) % PARTY_COLORS.length];
 }
 
-/** The hat for a persona badge. Personas without their own hat get a colored party hat. */
+const PARTY = 'party';
+const templates = new Map<string, Hat>();
+
+function template(kind: string): Hat {
+  let hat = templates.get(kind);
+  if (!hat) {
+    hat = kind === PARTY
+      ? assemble('party-hat', 0.24, [
+        [new THREE.ConeGeometry(0.1, 0.22, 12), PARTY_COLORS[0], [0, 0.11, 0]],
+        [new THREE.SphereGeometry(0.03, 6, 4), 0xecf0f1, [0, 0.23, 0]],
+      ])
+      : BUILDERS[kind]();
+    templates.set(kind, hat);
+  }
+  return hat;
+}
+
+/**
+ * The hat for a persona badge. Personas without their own hat get a colored party hat.
+ * Hats of a kind share their shapes and colors (never dispose them), and their
+ * meshes are figure parts: the figure batch draws all hats of a kind in one call.
+ */
 export function buildHat(badge: string): Hat {
-  if (Object.prototype.hasOwnProperty.call(BUILDERS, badge)) return BUILDERS[badge]();
-  return assemble('party-hat', 0.24, [
-    [new THREE.ConeGeometry(0.1, 0.22, 12), partyColor(badge), [0, 0.11, 0]],
-    [new THREE.SphereGeometry(0.03, 6, 4), 0xecf0f1, [0, 0.23, 0]],
-  ]);
+  const own = Object.prototype.hasOwnProperty.call(BUILDERS, badge);
+  const source = template(own ? badge : PARTY);
+  const group = source.group.clone();
+  if (!own) (group.children[0] as THREE.Mesh).material = getToonMaterial(partyColor(badge));
+  return { kind: source.kind, group, height: source.height };
 }

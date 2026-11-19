@@ -6,6 +6,7 @@ import { Station } from '../scene/Office.js';
 import { Colors } from '../utils/Colors.js';
 import { ActivityLayout } from '../layout/ActivityLayout.js';
 import type { LayoutStrategy, Seat } from '../layout/LayoutStrategy.js';
+import { isAnimationAsleep } from '../scene/AnimationSleep.js';
 
 // FNV-1a hash of the agent ID, so an agent keeps its color across polls and reloads
 function accentColorFor(agentId: string): THREE.Color {
@@ -18,6 +19,8 @@ function accentColorFor(agentId: string): THREE.Color {
 }
 
 const SUBAGENT_SCALE = 0.85;
+/** A figure this close to its seat has arrived (StickFigure snaps at 0.05). */
+const ARRIVED_SQUARED = 0.05 * 0.05;
 
 export interface ManagedAgent {
   info: AgentInfo;
@@ -84,8 +87,14 @@ export class AgentManager {
       if (managed) this.goToSeat(managed, move.seat, false);
     }
     for (const managed of this.agents.values()) {
+      // Out of view or far: no idle animation, but a walk goes on
+      if (isAnimationAsleep(managed.figure.group) && !this.isWalking(managed)) continue;
       managed.figure.update(elapsed, delta);
     }
+  }
+
+  private isWalking(managed: ManagedAgent): boolean {
+    return managed.seat !== null && managed.figure.group.position.distanceToSquared(managed.seat.position) > ARRIVED_SQUARED;
   }
 
   removeAgent(agentId: string): void {

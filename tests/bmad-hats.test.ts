@@ -95,14 +95,21 @@ test('hats follow badge changes and leave with the badge or the agent', () => {
   assert.equal(hatsOn(second).length, 0);
   assert.equal(activityText(second), 'Planning');
 
+  // Hats share one geometry per shape: a new stack reuses it, so nothing is disposed
   const disposed: string[] = [];
+  const shapes = new Set<THREE.BufferGeometry>();
   hatsOn(first)[0].traverse((object) => {
-    if (object instanceof THREE.Mesh) object.geometry.addEventListener('dispose', () => disposed.push(object.uuid));
+    if (!(object instanceof THREE.Mesh)) return;
+    shapes.add(object.geometry);
+    object.geometry.addEventListener('dispose', () => disposed.push(object.uuid));
   });
   manager.setExtras('a', { badges: ['debugger', 'spec-coach'] });
   bmadHats.agentsChanged!(manager.getAgents());
   assert.equal(hatsOn(first).length, 2);
-  assert.ok(disposed.length > 0);
+  assert.deepEqual(disposed, []);
+  hatsOn(first)[0].traverse((object) => {
+    if (object instanceof THREE.Mesh) assert.ok(shapes.has(object.geometry), 'the new debugger hat reuses the shape');
+  });
 
   manager.setExtras('a', undefined);
   bmadHats.agentsChanged!(manager.getAgents());
@@ -126,4 +133,30 @@ test('the label text stays plain text', () => {
 
   assert.equal(managed.figure.label.element.querySelector('img'), null);
   assert.equal(activityText(managed), 'Taking a break · b-img-src-x-onerror');
+});
+
+test('hats are figure parts that share shapes and colors, so the figure batch draws all hats of a kind in one call', async () => {
+  const { FigureBatch } = await import('../src/characters/FigureBatch.js');
+  const { countDrawCalls } = await import('../src/scene/RenderBudget.js');
+  const { scene, manager } = setup();
+  for (let i = 0; i < 6; i++) manager.addAgent({ id: `h${i}`, name: `H${i}`, activity: 'planning', extras: { badges: i % 2 ? ['dev'] : ['party-x', 'qa'] } });
+  bmadHats.agentsChanged!(manager.getAgents());
+  const hatMeshes: THREE.Mesh[] = [];
+  for (const managed of manager.getAgents()) {
+    managed.figure.joints.head.getObjectByName('bmad-hats')!.traverse((object) => {
+      if (object instanceof THREE.Mesh) hatMeshes.push(object);
+    });
+  }
+  assert.ok(hatMeshes.every((mesh) => mesh.userData.figurePart === true));
+  const geometries = new Set(hatMeshes.map((mesh) => mesh.geometry));
+  // beanie 3 + party hat 2 + fedora 3 shapes for 24 hat meshes
+  assert.equal(geometries.size, 8);
+  scene.updateMatrixWorld();
+  const batch = new FigureBatch(scene);
+  batch.sync(manager.getAgents().map((managed) => managed.figure.group));
+  const withHats = countDrawCalls(scene).main;
+  for (const managed of manager.getAgents()) managed.figure.joints.head.getObjectByName('bmad-hats')!.visible = false;
+  scene.updateMatrixWorld();
+  batch.sync(manager.getAgents().map((managed) => managed.figure.group));
+  assert.equal(withHats - countDrawCalls(scene).main, 8);
 });

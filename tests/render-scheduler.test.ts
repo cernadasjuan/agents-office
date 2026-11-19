@@ -84,7 +84,8 @@ interface FakeRenderer {
   shadowUpdates: number;
   pixelRatio: number;
   render(): void;
-  info: { render: { calls: number; triangles: number } };
+  info: { render: { calls: number; triangles: number }; autoReset: boolean; resets: number; reset(): void };
+  domElement: EventTarget;
   shadowMap: { needsUpdate: boolean; type: THREE.ShadowMapType };
   getPixelRatio(): number;
   setPixelRatio(value: number): void;
@@ -95,9 +96,12 @@ function fakeRenderer(): FakeRenderer {
     renders: 0,
     shadowUpdates: 0,
     pixelRatio: 2,
-    info: { render: { calls: 0, triangles: 0 } },
+    info: { render: { calls: 0, triangles: 0 }, autoReset: true, resets: 0, reset() { renderer.info.resets++; } },
+    domElement: new EventTarget(),
     shadowMap: { needsUpdate: false, type: THREE.PCFShadowMap },
     render() {
+      // The real renderer resets its info after the shadow pass: the loop must reset it itself
+      if (renderer.info.autoReset) renderer.info.reset();
       renderer.renders++;
       if (renderer.shadowMap.needsUpdate) renderer.shadowUpdates++;
       renderer.shadowMap.needsUpdate = false;
@@ -145,11 +149,43 @@ test('an idle office renders once a second and never redraws its shadow maps aft
   assert.equal(renderer.shadowUpdates, 1);
 });
 
-test('a moving figure under the hall lamps renders at 30 fps and redraws the shadows', () => {
+test('a figure that only sways under the hall lamps renders at 30 fps but redraws the shadows at most twice a second', () => {
   const { renderer, run } = officeLoop({ animate: (figure, elapsed) => { figure.joints.rightUpperArm.rotation.x = Math.sin(elapsed * 8); } });
+  run(10);
+  assert.ok(renderer.renders >= 295 && renderer.renders <= 300, `${renderer.renders} renders in 10 s`);
+  // The first frame, then at most 2 a second
+  assert.ok(renderer.shadowUpdates <= 21, `${renderer.shadowUpdates} shadow updates in 10 s`);
+  assert.ok(renderer.shadowUpdates >= 15, `the sway still shows in the shadows: ${renderer.shadowUpdates}`);
+});
+
+test('a figure that walks under the hall lamps redraws the shadows on every frame', () => {
+  const { renderer, run } = officeLoop({ animate: (figure, elapsed) => { figure.group.position.x = -2 + elapsed; } });
   run(2);
-  assert.ok(renderer.renders >= 58 && renderer.renders <= 60, `${renderer.renders} renders in 2 s`);
-  assert.ok(renderer.shadowUpdates >= 58, `${renderer.shadowUpdates} shadow updates`);
+  assert.ok(renderer.shadowUpdates >= 58, `${renderer.shadowUpdates} shadow updates in 2 s`);
+});
+
+test('a figure that turns on the spot under the hall lamps redraws the shadows on every frame', () => {
+  const { renderer, run } = officeLoop({ animate: (figure, elapsed) => { figure.group.rotation.y = elapsed; } });
+  run(2);
+  assert.ok(renderer.shadowUpdates >= 58, `${renderer.shadowUpdates} shadow updates in 2 s`);
+});
+
+test('after a WebGL context restore the next frame renders and redraws the shadow maps', () => {
+  const { renderer, run } = officeLoop();
+  run(2);
+  const renders = renderer.renders;
+  const shadows = renderer.shadowUpdates;
+  renderer.domElement.dispatchEvent(new Event('webglcontextrestored'));
+  run(0.1, 2000);
+  assert.equal(renderer.renders, renders + 1);
+  assert.equal(renderer.shadowUpdates, shadows + 1);
+});
+
+test('the stats count the shadow pass too: the loop resets the renderer info before each render, not after the shadows', () => {
+  const { renderer, run } = officeLoop();
+  run(2);
+  assert.equal(renderer.info.autoReset, false);
+  assert.equal(renderer.info.resets, renderer.renders);
 });
 
 test('a figure moving in a far room renders but leaves the hall shadow maps alone', () => {
