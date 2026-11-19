@@ -42,6 +42,36 @@ test('the agent projection copies only whitelisted, cleaned fields', () => {
   assert.equal(JSON.stringify(agent).includes('4242'), false);
 });
 
+test('an issue card keeps only a cleaned short repository token', () => {
+  const [agent] = projectAgents([observation({ display: { issues: [
+    { number: 1, title: 'a', repo: 'agents-office' },
+    { number: 2, title: 'b', repo: 'owner/inner/short.name' },
+    { number: 3, title: 'c', repo: '<img src=x>' },
+    { number: 4, title: 'd', repo: '..' },
+    { number: 5, title: 'e', repo: 'x'.repeat(41) },
+  ] } })], publicId);
+
+  assert.deepEqual(agent.issues, [
+    { number: 1, title: 'a', repo: 'agents-office' },
+    { number: 2, title: 'b', repo: 'short.name' },
+    { number: 3, title: 'c' },
+    { number: 4, title: 'd' },
+    { number: 5, title: 'e' },
+  ]);
+});
+
+test('an issue card keeps a label color only as a cleaned 6-hex token', () => {
+  const cleaned = (color: unknown) => projectAgents([observation({ display: { issues: [
+    { number: 1, title: 'a', color: color as string },
+  ] } })], publicId)[0].issues![0].color;
+
+  assert.equal(cleaned('D73A4A'), 'd73a4a');
+  assert.equal(cleaned('#0e8a16'), '0e8a16');
+  for (const bad of ['red', 'fff', '1234567', '<b>abcdef', 'abcdef;', 0xabcdef, null]) {
+    assert.equal(cleaned(bad), undefined, `refused: ${String(bad)}`);
+  }
+});
+
 test('a plain Claude agent keeps the original three fields', () => {
   assert.deepEqual(Object.keys(projectAgents([observation()], publicId)[0]).sort(), ['activity', 'id', 'name']);
 });

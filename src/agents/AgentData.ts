@@ -8,7 +8,8 @@ export interface AgentExtras {
   waitMinutes?: number;
   group?: { id: string; label: string };
   badges?: string[];
-  issues?: Array<{ number: number; title: string; column?: string }>;
+  /** `color` is the card border color as `rrggbb` (the issue's label color). */
+  issues?: Array<{ number: number; title: string; column?: string; repo?: string; color?: string }>;
   room?: string;
   /** Opt-in write actions the server offers for this agent (today only `focus`, from the herdr plugin). */
   actions?: Array<'focus'>;

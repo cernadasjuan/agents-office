@@ -19,7 +19,11 @@ export interface DisplayExtras {
   groupKey?: string;
   groupLabel?: string;
   badges?: string[];
-  issues?: Array<{ number: number; title: string; column?: string }>;
+  /**
+   * `repo` is the short repository name (after the slash). The projection keeps it only as a plain token.
+   * `color` is the card border color, a 6-hex label color. The projection keeps it only as `rrggbb`.
+   */
+  issues?: Array<{ number: number; title: string; column?: string; repo?: string; color?: string }>;
   roomKey?: string;
   /** Write actions this agent supports. Projected only when the server enabled the action. */
   actions?: ActionName[];
@@ -150,11 +154,32 @@ function wholeNumber(value: unknown, max: number): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max ? value : undefined;
 }
 
+const REPO_SHORT = /^[A-Za-z0-9_.-]{1,40}$/;
+
+/** The repository name after the last slash, or undefined when it is not a plain short token. */
+function repoShortName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const short = value.slice(value.lastIndexOf('/') + 1);
+  return REPO_SHORT.test(short) && short !== '.' && short !== '..' ? short : undefined;
+}
+
+const HEX_COLOR = /^#?([0-9A-Fa-f]{6})$/;
+
+/** A 6-hex color as lowercase `rrggbb`, or undefined. */
+function hexColor(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return HEX_COLOR.exec(value)?.[1].toLowerCase();
+}
+
 function issueList(issues: DisplayExtras['issues'], max: number) {
   if (!Array.isArray(issues)) return undefined;
   const list = issues
-    .map((issue) => ({ number: wholeNumber(issue?.number, 10_000_000), title: displayText(issue?.title, 80),
-      ...(issue?.column ? { column: displayText(issue.column, 24) } : {}) }))
+    .map((issue) => {
+      const repo = repoShortName(issue?.repo);
+      const color = hexColor(issue?.color);
+      return { number: wholeNumber(issue?.number, 10_000_000), title: displayText(issue?.title, 80),
+        ...(issue?.column ? { column: displayText(issue.column, 24) } : {}), ...(repo ? { repo } : {}), ...(color ? { color } : {}) };
+    })
     .filter((issue) => issue.number !== undefined)
     .slice(0, max);
   return list.length > 0 ? list : undefined;

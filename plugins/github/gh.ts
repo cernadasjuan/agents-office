@@ -39,10 +39,22 @@ export interface Issue {
   inProgressLabel: boolean;
   assigned: boolean;
   updatedAt: number;
+  /** The card border color as `rrggbb`: a `wayfinder:*` label wins, else the first label. */
+  labelColor?: string;
 }
 
 function labelKey(name: string): string {
   return name.trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+const LABEL_COLOR = /^[0-9A-Fa-f]{6}$/;
+
+function cardColor(labels: unknown[]): string | undefined {
+  const named = labels.filter((label): label is { name: string; color?: unknown } =>
+    typeof label === 'object' && label !== null && typeof (label as { name?: unknown }).name === 'string');
+  const chosen = named.find((label) => label.name.trim().toLowerCase().startsWith('wayfinder:')) ?? named[0];
+  const color = chosen?.color;
+  return typeof color === 'string' && LABEL_COLOR.test(color) ? color.toLowerCase() : undefined;
 }
 
 /** Shape-check the `gh issue list --json` output. Undefined when it is not a list. */
@@ -62,6 +74,7 @@ export function parseIssueList(stdout: string): Issue[] | undefined {
     if (typeof raw.title !== 'string' || (raw.state !== 'OPEN' && raw.state !== 'CLOSED')) continue;
     const labels = Array.isArray(raw.labels) ? raw.labels.slice(0, 30) : [];
     const updatedAt = typeof raw.updatedAt === 'string' ? Date.parse(raw.updatedAt) : NaN;
+    const labelColor = cardColor(labels);
     issues.push({
       number: raw.number,
       title: raw.title.slice(0, 200),
@@ -69,6 +82,7 @@ export function parseIssueList(stdout: string): Issue[] | undefined {
       inProgressLabel: labels.some((label) => typeof label?.name === 'string' && IN_PROGRESS_LABELS.has(labelKey(label.name))),
       assigned: Array.isArray(raw.assignees) && raw.assignees.length > 0,
       updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0,
+      ...(labelColor ? { labelColor } : {}),
     });
   }
   return issues;

@@ -29,10 +29,11 @@ function countNamed(scene: THREE.Object3D, name: string): number {
   return count;
 }
 
-test('the real-size fixture wears BMAD hats and holds GitHub cards, as with the fork plugins on', () => {
-  const { scene } = buildRealSizeOffice();
+test('the real-size fixture wears BMAD hats and GitHub cards, as with the fork plugins on', () => {
+  const { scene, github } = buildRealSizeOffice();
   assert.equal(countNamed(scene, 'bmad-hats'), REAL_SIZE.hatWearers);
-  assert.equal(countNamed(scene, 'github-cards'), REAL_SIZE.cardHolders);
+  assert.equal(countNamed(scene, 'github-cards'), 1, 'all cards are one mesh');
+  assert.equal(new Set(github.cards.placements.map((placement) => placement.agentId)).size, REAL_SIZE.cardHolders);
 });
 
 test('at the real size (25 rooms, 40 agents, hats and cards) a frame from each start view stays under the draw-call budget, shadow pass included', () => {
@@ -83,6 +84,24 @@ test('the count culls like the renderer: a mesh behind the camera or outside eve
   // Without a camera the count stays the worst case: every mesh, every caster for every light
   const worst = countDrawCalls(scene);
   assert.deepEqual({ main: worst.main, shadowCalls: worst.shadowCalls, total: worst.total }, { main: 3, shadowCalls: 3, total: 6 });
+});
+
+test('with 5 issue cards on each of the 40 agents the frame stays under the draw-call budget', () => {
+  const { scene, manager, github } = buildRealSizeOffice();
+  const agents = manager.getAgents();
+  agents.forEach((managed, a) => {
+    managed.info.extras = { ...managed.info.extras, issues: Array.from({ length: 5 }, (_, i) => ({ number: a * 10 + i + 1, title: '', repo: 'agents-office', color: '0e8a16' })) };
+  });
+  github.agentsChanged(agents);
+  const cards = github.cards;
+  scene.updateMatrixWorld();
+  new StaticBatch(scene).update();
+  new FigureBatch(scene).sync(agents.map((managed) => managed.figure.group));
+  const after = countDrawCalls(scene);
+
+  console.log(`draw calls with 200 cards ${JSON.stringify(after)}`);
+  assert.equal(cards.placements.length, 200);
+  assert.ok(after.total < DRAW_CALL_BUDGET, `with cards ${JSON.stringify(after)}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {
