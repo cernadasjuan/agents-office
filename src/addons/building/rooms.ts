@@ -267,6 +267,6 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
   group.add(doorway);
   group.add(roomLabel(title ?? roomTitle(kind, []), frame.point(0, ROOM_SIZE / 2), slot.rect));
 
-  furnish(group, frame, roomFurnishing(kind, { doorAlong: frame.doorAlong }), slot.rect, stations, key);
+  furnish(group, frame, roomFurnishing(kind, { doorAlong: frame.doorAlong, usersOffice: index === 0 }), slot.rect, stations, key);
   return { kind, slot, group, stations };
 }

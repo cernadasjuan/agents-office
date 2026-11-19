@@ -12,6 +12,7 @@ import { PORTRAIT_MAX_BYTES, portraitPathFrom, readPortrait } from '../server/po
 // Synthetic image bytes only: no test reads a real picture.
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 2)]);
+const GIF = Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(32, 4)]);
 const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBPVP8 '), Buffer.alloc(32, 3)]);
 
 const resources: Array<{ server?: ViteDevServer; dir: string }> = [];
@@ -74,8 +75,8 @@ test('without a portrait file the route answers 204 with no body, so the browser
   assert.equal(response.body.length, 0);
 });
 
-test('a PNG, JPEG or WebP portrait comes back with its own image type and no-store, nosniff headers', async () => {
-  for (const [name, bytes, type] of [['me.png', PNG, 'image/png'], ['me.jpg', JPEG, 'image/jpeg'], ['me.webp', WEBP, 'image/webp']] as const) {
+test('a PNG, JPEG, WebP or GIF portrait comes back with its own image type and no-store, nosniff headers', async () => {
+  for (const [name, bytes, type] of [['me.png', PNG, 'image/png'], ['me.jpg', JPEG, 'image/jpeg'], ['me.webp', WEBP, 'image/webp'], ['me.gif', GIF, 'image/gif']] as const) {
     const { request, origin } = await portraitServer(await fileWith(name, bytes));
     const response = await request({ Origin: origin });
     assert.equal(response.status, 200, name);

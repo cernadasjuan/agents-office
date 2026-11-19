@@ -44,9 +44,12 @@ export interface RoomPlan {
   signs: SignPlan[];
 }
 
-/** What a plan needs to know about its room: where the hall door is along the door wall. */
+/** What a plan needs to know about its room. */
 export interface RoomShape {
+  /** Where the hall door is along the door wall. */
   doorAlong: number;
+  /** False for a second waiting room: no portrait and no count sign. Default true. */
+  usersOffice?: boolean;
 }
 
 /** No standing piece comes closer than this to a queue spot or a seat. */
@@ -85,10 +88,11 @@ function queueSpots(): SpotPlan[] {
  * each side of the far wall door, plants along the walls, and your portrait over
  * the door on the hall side.
  */
-function furnishOffice({ doorAlong }: RoomShape): RoomPlan {
+function furnishOffice({ doorAlong, usersOffice = true }: RoomShape): RoomPlan {
   const { a: deskA, d: deskD } = OFFICE_DESK;
-  return {
-    pieces: [
+  // The lounge corner goes to the front corner away from the door; `side` mirrors it
+  const side = doorAlong < 0 ? -1 : 1;
+  const pieces: Placement[] = [
       { piece: PIECES.desk(), a: deskA, d: deskD, turn: FACE_AWAY },
       { piece: PIECES.rug(4.2, 2.8, Colors.books[7].getHex()), a: deskA, d: deskD + 0.4 },
       // Behind the desk, left and right of the gap an outer room's door may need
@@ -104,24 +108,23 @@ function furnishOffice({ doorAlong }: RoomShape): RoomPlan {
       { piece: PIECES.wallArt(0.7, 0.9, Colors.books[6].getHex()), a: 5.9, d: 6, y: 1.6, turn: FACE_MINUS_A },
       { piece: PIECES.plant(), a: -5.5, d: 8.8 },
       { piece: PIECES.plant(), a: 5.5, d: 8.8 },
-      // The lounge corner by the door: a sofa against the door wall, two armchairs and a low table
-      { piece: PIECES.sofa(Colors.books[1].getHex()), a: -4.2, d: 0.5, turn: FACE_AWAY },
-      { piece: PIECES.lowTable(), a: -4.2, d: 1.5 },
-      { piece: PIECES.armchair(), a: -5.45, d: 2.0, turn: FACE_PLUS_A },
-      { piece: PIECES.armchair(), a: -3.0, d: 1.5, turn: FACE_MINUS_A },
-      { piece: PIECES.plant(), a: -5.6, d: 0.5 },
+      // The lounge corner, away from the door: a sofa against the door wall, two armchairs and a low table
+      { piece: PIECES.sofa(Colors.books[1].getHex()), a: -4.2 * side, d: 0.5, turn: FACE_AWAY },
+      { piece: PIECES.lowTable(), a: -4.2 * side, d: 1.5 },
+      { piece: PIECES.armchair(), a: -5.45 * side, d: 2.0, turn: FACE_PLUS_A * side },
+      { piece: PIECES.armchair(), a: -3.0 * side, d: 1.5, turn: FACE_MINUS_A * side },
+      { piece: PIECES.plant(), a: -5.6 * side, d: 0.5 },
       // The other front corner
-      { piece: PIECES.tallPlant(), a: 5.4, d: 0.6 },
-      { piece: PIECES.plant(), a: 4.6, d: 0.5 },
-      // Over the door, on the hall side, above the lintel
-      { piece: PIECES.portrait(), a: doorAlong, d: -0.25, y: 3.1 },
-    ],
-    spots: queueSpots(),
-    signs: [
-      { role: 'you', a: deskA, d: deskD + 0.7, y: 2.2 },
-      { role: 'queue-count', a: doorAlong, d: -0.3, y: 2.4 },
-    ],
-  };
+      { piece: PIECES.tallPlant(), a: 5.4 * side, d: 0.6 },
+      { piece: PIECES.plant(), a: 4.6 * side, d: 0.5 },
+  ];
+  const signs: SignPlan[] = [{ role: 'you', a: deskA, d: deskD + 0.7, y: 2.2 }];
+  if (usersOffice) {
+    // Over the door, on the hall side, above the lintel, with the wait count under it
+    pieces.push({ piece: PIECES.portrait(), a: doorAlong, d: -0.25, y: 3.1 });
+    signs.push({ role: 'queue-count', a: doorAlong, d: -0.3, y: 2.4 });
+  }
+  return { pieces, spots: queueSpots(), signs };
 }
 
 /** A lounge: three sofas facing the door, a coffee machine and many plants, tall and small. */

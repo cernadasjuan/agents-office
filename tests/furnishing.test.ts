@@ -126,8 +126,27 @@ function assertPathsClear(kind: 'office' | 'lounge', doorAlong: number) {
   }
 }
 
-test('no office piece stands on a queue spot, in the door path or in the far wall door', () => {
-  assertPathsClear('office', 0);
+/** Every door position a real room slot has (`RoomFrame.doorAlong` of slots 0 to 13). */
+const REAL_DOOR_POSITIONS = [0, 1, 2.5, -2.5];
+
+test('the real slots have only these door positions', async () => {
+  const { RoomFrame } = await import('../src/addons/building/rooms.js');
+  const seen = new Set<number>();
+  for (let index = 0; index < 14; index++) {
+    const slot = slotFor(index);
+    seen.add(Math.round(new RoomFrame(slot.rect, slot.door).doorAlong * 10) / 10 + 0);
+  }
+  assert.deepEqual([...seen].sort((a, b) => a - b), [...REAL_DOOR_POSITIONS].sort((a, b) => a - b));
+});
+
+test('no office piece stands on a queue spot, in the door path or in the far wall door, at every real door position', () => {
+  for (const doorAlong of REAL_DOOR_POSITIONS) assertPathsClear('office', doorAlong);
+});
+
+test('the lounge corner of an office goes to the side away from the door', () => {
+  const corner = (doorAlong: number) => roomFurnishing('office', { doorAlong }).pieces.find((p) => p.piece.name === 'sofa')!.a;
+  assert.ok(corner(0) < 0 && corner(2.5) < 0, 'door center or right: corner on the left');
+  assert.ok(corner(-2.5) > 0, 'door on the left: corner on the right');
 });
 
 test('queue spots are spaced and staggered so queued agents stand apart', () => {
@@ -147,7 +166,7 @@ test('queue spots are spaced and staggered so queued agents stand apart', () => 
 // --- The lounges ---
 
 test('each lounge has 8 or more plants, tall and small, and none blocks a seat or a door', () => {
-  for (const doorAlong of [0, 2.5, -2.5]) {
+  for (const doorAlong of REAL_DOOR_POSITIONS) {
     const plan = roomFurnishing('lounge', { doorAlong });
     const plants = plan.pieces.filter((p) => p.piece.category === 'plant');
     assert.ok(plants.length >= 8, `${plants.length} plants`);
@@ -173,6 +192,16 @@ test('a framed portrait hangs over your office door on the hall side, a placehol
   const image = { width: 400, height: 300 } as unknown as CanvasImageSource;
   applyPortraitImage(room.group, image);
   assert.equal(portrait.userData.portraitState, 'image');
+});
+
+test('a second waiting room has no portrait and no count sign: only your office does', () => {
+  const second = buildRoom('office', slotFor(2), 2, []);
+  assert.equal(second.group.getObjectByName(PORTRAIT_NAME), undefined);
+  let signs = 0;
+  second.group.traverse((o) => { if (o.userData.queueCount !== undefined) signs++; });
+  assert.equal(signs, 0);
+  assert.ok([...second.stations.values()].filter((s) => s.type === 'queue').length >= 20, 'it still has queue spots');
+  assert.ok(roomFurnishing('office', { doorAlong: 0, usersOffice: false }).pieces.length >= 10, 'and the furniture');
 });
 
 test('only the office has a portrait', () => {
@@ -201,6 +230,11 @@ test('under the portrait, a sign counts the fresh and aging waits, hidden when n
   const sign = countSign() as THREE.Object3D & { element: HTMLElement };
   assert.equal(sign.visible, true);
   assert.equal(sign.element.textContent, '2 waiting', 'a fresh and an aging wait; a cold one does not count');
+  // A meeting without a wait also queues, but it is not a wait for you
+  layout.seatFor(agent('d', 'meeting'), null);
+  clock += 60_000;
+  layout.update();
+  assert.equal(sign.element.textContent, '2 waiting', 'only fresh and aging waits count');
 });
 
 test('the browser asks this server once for the picture: a 204 keeps the placeholder, an image fills the frame', async () => {
@@ -222,8 +256,8 @@ test('the browser asks this server once for the picture: a 204 keeps the placeho
   assert.equal(await loadPortrait(room.group, { fetch: respond(200, 'image/png'), decode }), true);
   assert.equal(portrait.userData.portraitState, 'image');
   assert.deepEqual([...new Set(asked)], [PORTRAIT_URL], 'the local route only, no other address');
-  // A second office built later gets the picture too
-  const later = buildRoom('office', slotFor(7), 7, []);
+  // Your office built after the picture loaded (a layout switch rebuilds it) gets the picture too
+  const later = buildRoom('office', slotFor(0), 0, []);
   showLoadedPortrait(later.group);
   assert.equal(later.group.getObjectByName(PORTRAIT_NAME)!.userData.portraitState, 'image');
   resetLoadedPortrait();

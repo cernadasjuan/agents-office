@@ -268,7 +268,8 @@ export class BuildingLayout implements LayoutStrategy {
       this.addRoom('office');
       spots.splice(0, spots.length, ...this.keysOfType('queue'));
     }
-    this.showQueueCount(waiting.length);
+    // A meeting without a wait also queues, but only fresh and aging waits count for you
+    this.showQueueCount(waiting.filter((state) => queuesForYou(state.agent.extras)).length);
     const moves: LayoutMove[] = [];
     for (const state of waiting) this.free(state.seat);
     waiting.forEach((state, i) => {

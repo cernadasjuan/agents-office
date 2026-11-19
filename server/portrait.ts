@@ -48,10 +48,10 @@ export async function readPortrait(file: string | null): Promise<Portrait | null
     if (!info.isFile() || info.size === 0 || info.size > PORTRAIT_MAX_BYTES) return null;
     const handle = await open(file, 'r');
     try {
-      // Read at most one byte past the cap, in case the file grew after the check
-      const buffer = Buffer.alloc(PORTRAIT_MAX_BYTES + 1);
+      // Read one byte past the checked size: a file that grew after the check is refused
+      const buffer = Buffer.alloc(info.size + 1);
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-      if (bytesRead > PORTRAIT_MAX_BYTES) return null;
+      if (bytesRead > info.size) return null;
       const bytes = buffer.subarray(0, bytesRead);
       return sniff(bytes) === expected ? { type: expected, bytes } : null;
     } finally {
