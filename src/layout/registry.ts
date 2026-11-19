@@ -88,3 +88,22 @@ export function rememberLayoutId(id: string, storage: Pick<Storage, 'setItem'> |
 export function createLayout(id: string, scene: THREE.Scene, stations: Map<string, Station>): LayoutStrategy {
   return (factories.get(id) ?? factories.get('activity')!)(scene, stations);
 }
+
+/** The parts of `window.location` the layout switch needs; injectable for tests. */
+export interface LayoutSwitchLocation {
+  href: string;
+  search: string;
+  assign(url: string): void;
+  reload(): void;
+}
+
+/**
+ * Load the page again with the remembered layout. A URL that differs only by its hash does not
+ * reload the page, so when the search part stays the same, reload instead of navigating.
+ */
+export function reloadForLayoutSwitch(location: LayoutSwitchLocation): void {
+  const url = new URL(location.href);
+  url.searchParams.delete('layout');
+  if (url.search === location.search) location.reload();
+  else location.assign(url.toString());
+}

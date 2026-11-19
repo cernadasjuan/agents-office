@@ -252,3 +252,40 @@ test('the frame loop renders and hides the ceiling when the camera rises above i
   assert.equal(ceiling.visible, true);
   assert.equal(renders, before + 1);
 });
+
+test('a ceiling change alone, with a still camera, makes the frame loop render', () => {
+  const scene = new THREE.Scene();
+  scene.add(createWalls());
+  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
+  camera.position.set(0, 1.7, 5);
+  let renders = 0;
+  const renderer = {
+    render: () => { renders++; }, info: { render: { calls: 0, triangles: 0 }, reset: () => undefined },
+    shadowMap: { needsUpdate: false, type: THREE.PCFSoftShadowMap }, getPixelRatio: () => 1, setPixelRatio: () => undefined,
+  };
+  const loop = new FrameLoop({
+    scene, camera, renderer: renderer as never, labelRenderer: { render: () => undefined },
+    update: () => undefined, figures: () => [], mode: () => 'first-person',
+  });
+  for (let t = 0; t <= 2000; t += 100) loop.frame(t);
+  const ceiling = findCeilings(scene)[0];
+  ceiling.visible = false;
+  const before = renders;
+  loop.frame(2050);
+  assert.equal(ceiling.visible, true, 'the ceiling rule restores the ceiling below its height');
+  assert.equal(renders, before + 1, 'and that change alone renders a frame');
+});
+
+// --- Layout switch reload ---
+
+test('the layout switch reloads when only the hash would change, and navigates when ?layout= is dropped', async () => {
+  const { reloadForLayoutSwitch } = await import('../src/layout/registry.js');
+  const calls: string[] = [];
+  const at = (href: string) => ({ href, search: new URL(href).search, assign: (u: string) => calls.push(`assign ${u}`), reload: () => calls.push('reload') });
+
+  reloadForLayoutSwitch(at('http://127.0.0.1:5173/?debug=1#view=overview'));
+  reloadForLayoutSwitch(at('http://127.0.0.1:5173/#view=overview'));
+  reloadForLayoutSwitch(at('http://127.0.0.1:5173/?layout=building#view=overview'));
+
+  assert.deepEqual(calls, ['reload', 'reload', 'assign http://127.0.0.1:5173/#view=overview']);
+});

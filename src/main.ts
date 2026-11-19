@@ -5,7 +5,7 @@ import { ViewController } from './scene/ViewController.js';
 import { onSelectionChange, selectAgent, selectedAgentId } from './scene/Selection.js';
 import { AgentPoller } from './agents/AgentPoller.js';
 import { AgentPanel, isDemoMode, setupPanelCollapse } from './ui/AgentPanel.js';
-import { chooseLayoutId, confirmLayoutSwitch, createLayout, defaultViewFor, isLayoutSwitchKey, layoutName, rememberLayoutId } from './layout/registry.js';
+import { chooseLayoutId, confirmLayoutSwitch, createLayout, defaultViewFor, isLayoutSwitchKey, layoutName, rememberLayoutId, reloadForLayoutSwitch } from './layout/registry.js';
 import { chooseViewMode, rememberViewMode, viewStatusText } from './scene/ViewMemory.js';
 import { activeExtensions, setWorld, type World } from './extensions.js';
 import { tabTitleFor } from './ui/attention.js';
@@ -33,9 +33,7 @@ window.addEventListener('keydown', (event) => {
   const next = confirmLayoutSwitch(layoutId, (question) => window.confirm(question));
   if (!next) return;
   rememberLayoutId(next, window.localStorage);
-  const url = new URL(window.location.href);
-  url.searchParams.delete('layout');
-  window.location.assign(url);
+  reloadForLayoutSwitch(window.location);
 });
 
 // Agent manager
