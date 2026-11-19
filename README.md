@@ -132,6 +132,24 @@ npx agents-office --plugin name1 --plugin name2
 
 A plugin is a folder `plugins/<name>/` with an `index.ts` (server: sources, enrichers, rooms and boards) and an optional `client.ts` (browser rendering). The server copies only whitelisted, cleaned fields to the browser.
 
+`pnpm dev:fork` starts the dev server with the plugins of this fork (`github`).
+
+### GitHub: kanban board and issue cards
+
+The `github` plugin hangs a kanban board for each repository on the office wall. An agent holds a card for each issue it works on.
+
+```bash
+AGENTS_OFFICE_GITHUB_REPOS=gabriel-amyot/agents-office pnpm dev:fork
+AGENTS_OFFICE_GITHUB_REPOS=owner/one,owner/two npx agents-office --plugin github
+```
+
+- **Opt in twice:** the plugin must be loaded, and `AGENTS_OFFICE_GITHUB_REPOS` must name one or more `owner/name` repositories. Without the variable, the plugin adds nothing and runs nothing.
+- **Data:** the plugin runs `gh issue list` (the [GitHub CLI](https://cli.github.com/)) with fixed arguments, a 5 s limit and no shell. gh handles the login, so Agents Office never reads a token. Results stay in a cache for 60 s per repository. If gh is missing or fails, the board keeps the last good data, or does not appear.
+- **Columns:** "To do" holds open issues with no assignee and no in-progress label. "In progress" holds open issues that have an assignee or an `in-progress` or `doing` label. "Done" holds up to 8 issues closed in the last 7 days. Each column is newest first.
+- **Board:** up to 4 boards. The first hangs on the right part of the back wall, the next ones on the right wall (`KANBAN_BOARD_SLOTS` in `plugins/github/client.ts`).
+- **Cards in hand:** the plugin reads the agent's own tool calls, never the prompt text: `gh issue view|comment|edit N`, a git branch that starts with `N-` (`git switch -c`, `git checkout -b`, `git worktree add -b`), and `#N` or `owner/repo#N` in a `git commit` message. The agent holds the 5 most recent issues. A card shows the issue number. The title comes from the board data when the issue belongs to a configured repository.
+- **What leaves the server:** issue numbers, titles (60 to 80 characters) and column names only.
+
 ## Controls
 
 - **Click** to engage camera
