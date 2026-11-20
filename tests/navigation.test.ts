@@ -17,7 +17,7 @@ const { SelectionState } = await import('../src/scene/Selection.js');
 const { updateFreeCamera, setFreeCameraLook, focusPosition, MIN_EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
 const { floorUnder } = await import('../src/scene/OverviewCamera.js');
 const { chooseViewMode, rememberViewMode, viewStatusText, VIEW_STORAGE_KEY } = await import('../src/scene/ViewMemory.js');
-const { applyCeilingCut, findCeilings, CEILING_HEIGHT } = await import('../src/scene/Cutaway.js');
+const { applyCeilingCut, findCeilings } = await import('../src/scene/Cutaway.js');
 const { createWalls } = await import('../src/furniture/Walls.js');
 const { FrameLoop } = await import('../src/scene/FrameLoop.js');
 const registry = await import('../src/layout/registry.js');
@@ -243,7 +243,7 @@ test('a layout can ask for the isometric view as its start view; others keep fir
   assert.equal(registry.defaultViewFor('unknown'), 'first-person');
 });
 
-// --- Ceiling: hidden above the ceiling height and in the isometric view ---
+// --- Ceiling: shown in first person, hidden in the isometric view (issue #176) ---
 
 test('the ceiling is its own marked mesh so it can hide without a static merge rebuild', () => {
   const ceilings = findCeilings(createWalls());
@@ -251,19 +251,17 @@ test('the ceiling is its own marked mesh so it can hide without a static merge r
   assert.equal(ceilings[0].userData.dynamic, true);
 });
 
-test('the ceiling hides above the ceiling height and in the isometric view, and comes back below', () => {
+test('the ceiling always shows in first person; it hides only in the isometric view', () => {
   const ceilings = findCeilings(createWalls());
-  assert.equal(applyCeilingCut(ceilings, 1.7, false), false, 'nothing changes below the ceiling');
+  assert.equal(applyCeilingCut(ceilings, false), false, 'nothing changes: already shown');
   assert.equal(ceilings[0].visible, true);
-  assert.equal(applyCeilingCut(ceilings, CEILING_HEIGHT + 0.5, false), true);
+  assert.equal(applyCeilingCut(ceilings, true), true);
   assert.equal(ceilings[0].visible, false);
-  assert.equal(applyCeilingCut(ceilings, 1.7, false), true);
+  assert.equal(applyCeilingCut(ceilings, false), true);
   assert.equal(ceilings[0].visible, true);
-  assert.equal(applyCeilingCut(ceilings, 1.7, true), true);
-  assert.equal(ceilings[0].visible, false);
 });
 
-test('the frame loop renders and hides the ceiling when the camera rises above it', () => {
+test('the frame loop shows the ceiling in first person and hides it in the isometric view, however high the camera sits', () => {
   const scene = new THREE.Scene();
   scene.add(createWalls());
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
@@ -273,19 +271,26 @@ test('the frame loop renders and hides the ceiling when the camera rises above i
     render: () => { renders++; }, info: { render: { calls: 0, triangles: 0 }, reset: () => undefined },
     shadowMap: { needsUpdate: false, type: THREE.PCFSoftShadowMap }, getPixelRatio: () => 1, setPixelRatio: () => undefined,
   };
+  let mode: 'first-person' | 'isometric' = 'first-person';
   const loop = new FrameLoop({
     scene, camera, renderer: renderer as never, labelRenderer: { render: () => undefined },
-    update: () => undefined, figures: () => [], mode: () => 'first-person',
+    update: () => undefined, figures: () => [], mode: () => mode,
   });
   loop.frame(0);
   const ceiling = findCeilings(scene)[0];
   assert.equal(ceiling.visible, true);
+  // A tall camera, still in first person (ground-walk's eventual height cap is a different
+  // rule): the ceiling stays up, unlike the old height-based rule the overview mode needed.
   camera.position.y = 9;
   loop.frame(100);
+  assert.equal(ceiling.visible, true);
+  mode = 'isometric';
+  loop.frame(200);
   assert.equal(ceiling.visible, false);
   const before = renders;
+  mode = 'first-person';
   camera.position.y = 1.7;
-  loop.frame(200);
+  loop.frame(300);
   assert.equal(ceiling.visible, true);
   assert.equal(renders, before + 1);
 });

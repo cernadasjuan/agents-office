@@ -440,6 +440,16 @@ function sourceWalls(scene: THREE.Scene): THREE.Mesh[] {
 
 const topOf = (mesh: THREE.Object3D) => new THREE.Box3().setFromObject(mesh).max.y;
 
+test('issue #176: a room\'s walls (office, library, every other kind) are as tall as the main room\'s', () => {
+  assert.equal(WALL_HEIGHT, OFFICE.height, 'room walls share the main room\'s wall height constant');
+  const slot = slotFor(1);
+  const room = buildRoom('library', slot, 1, []);
+  const walls: THREE.Mesh[] = [];
+  room.group.traverse((object) => { if (object.name === 'room-walls') object.traverse((child) => { if ((child as THREE.Mesh).isMesh) walls.push(child as THREE.Mesh); }); });
+  assert.ok(walls.length > 0, 'the room has wall meshes');
+  for (const wall of walls) assert.ok(Math.abs(topOf(wall) - OFFICE.height) < 1e-6, `${wall.parent?.name ?? 'wall'} top at ${topOf(wall)}, expected ${OFFICE.height}`);
+});
+
 test('room walls, door frames and hall walls draw merged in zones the overview lowers', () => {
   const { scene, layout } = building();
   layout.syncWorldRooms([missionRoom('A')]);

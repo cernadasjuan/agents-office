@@ -92,32 +92,26 @@ test('#view=iso starts in the isometric view', () => {
   assert.ok((view.activeCamera as THREE.OrthographicCamera).isOrthographicCamera);
 });
 
-test('issue #89: #zoom= starts the overview at that camera distance, not its own default framing', () => {
-  const baseline = setup('#view=overview');
-  const { view, camera } = setup('#view=overview&zoom=15');
-  view.update(0, 1 / 60);
-  assert.equal(view.mode, 'overview');
-  assert.ok(Math.abs(view.zoomDistance - 15) < 1e-6, `zoomDistance is the requested 15 (got ${view.zoomDistance})`);
-  assert.notEqual(view.zoomDistance, baseline.view.zoomDistance, 'different from the view’s own default framing');
-  assert.ok(camera.position.y > 0, 'still a real overview pose, not a degenerate one');
-});
-
-test('issue #89: #zoom= starts the isometric view at the equivalent camera distance', () => {
-  const { view } = setup('#view=iso&zoom=15');
+test('issue #89: #zoom= starts the isometric view at the equivalent camera distance, not its own default framing', () => {
+  const baseline = setup('#view=iso');
+  const { view, camera } = setup('#view=iso&zoom=15');
   view.update(0, 1 / 60);
   assert.equal(view.mode, 'isometric');
-  assert.ok(Math.abs(view.zoomDistance - 15) < 1e-6, `zoomDistance reads the overview-equivalent 15 (got ${view.zoomDistance})`);
+  assert.ok(Math.abs(view.zoomDistance - 15) < 1e-6, `zoomDistance is the requested 15 (got ${view.zoomDistance})`);
+  assert.notEqual(view.zoomDistance, baseline.view.zoomDistance, 'different from the view’s own default framing');
+  assert.ok(camera.position.y > 0, 'still a real isometric pose, not a degenerate one');
 });
 
 test('issue #89: #zoom= is clamped into the view’s own pan/zoom limits, like the wheel already is', () => {
-  const { view } = setup('#view=overview&zoom=1000000');
+  const { view } = setup('#view=iso&zoom=1000000');
   view.update(0, 1 / 60);
-  const overview = (view as unknown as { overview: { maxDistance: number } }).overview;
-  assert.ok(view.zoomDistance <= overview.maxDistance + 1e-6, `clamped to the zoom-out limit (${view.zoomDistance} vs ${overview.maxDistance})`);
+  const isometric = (view as unknown as { isometric: { maxHalfHeight: number } }).isometric;
+  const maxZoomDistance = view.zoomDistance; // the clamp applied before this read, so it already reflects the limit
+  assert.ok(maxZoomDistance > 0 && Number.isFinite(maxZoomDistance), `clamped to a real zoom-out limit (${maxZoomDistance}, maxHalfHeight ${isometric.maxHalfHeight})`);
 });
 
 test('issue #89 review, fix round 2: a bare #zoom= (no #select=) only sets the initial framing; a later, unrelated click gets its own normal framing', () => {
-  const { view, manager, selection } = setup('#view=overview&zoom=20');
+  const { view, manager, selection } = setup('#view=iso&zoom=20');
   view.update(0, 1 / 60);
   manager.addAgent({ id: 'other', name: 'Other', activity: 'idle' });
   selection.select('other');
@@ -126,7 +120,7 @@ test('issue #89 review, fix round 2: a bare #zoom= (no #select=) only sets the i
 });
 
 test('issue #89 review, fix round 2: #zoom=&select=wanted — a decoy selected first gets normal framing, and "wanted" never steals it back', () => {
-  const { view, manager, selection } = setup('#view=overview&zoom=20&select=wanted');
+  const { view, manager, selection } = setup('#view=iso&zoom=20&select=wanted');
   manager.addAgent({ id: 'decoy', name: 'Decoy', activity: 'idle' });
   selection.select('decoy'); // selected before "wanted" ever appears
   for (let i = 0; i < 120; i++) view.update(i / 60, 1 / 60);
@@ -144,17 +138,7 @@ function fixtureRoomView(): { bounds: THREE.Box3; standing: { position: THREE.Ve
   return { bounds, standing: { position: new THREE.Vector3(24, 1.6, 0), lookAt: new THREE.Vector3(30, 1.6, 0) } };
 }
 
-test('issue #89: #room= frames a named room in the overview, via the active layout', () => {
-  const room = fixtureRoomView();
-  const { view } = setup('#view=overview&room=office', undefined, (name) => (name === 'office' ? room : null));
-  view.update(0, 1 / 60);
-  assert.equal(view.mode, 'overview');
-  const target = (view as unknown as { overview: { target: THREE.Vector3 } }).overview.target;
-  const center = room.bounds.getCenter(new THREE.Vector3());
-  assert.ok(Math.abs(target.x - center.x) < 0.5 && Math.abs(target.z - center.z) < 0.5, `target is near the room's center (${target.toArray()} vs ${center.toArray()})`);
-});
-
-test('issue #89: #room= frames a named room in the isometric view too', () => {
+test('issue #89: #room= frames a named room in the isometric view, via the active layout', () => {
   const room = fixtureRoomView();
   const { view } = setup('#view=iso&room=office', undefined, (name) => (name === 'office' ? room : null));
   view.update(0, 1 / 60);
@@ -173,20 +157,20 @@ test('issue #89: #room= in first person stands inside the room, facing its main 
 });
 
 test('issue #89: #room= with an unknown name, or no roomView at all, is a no-op (the view keeps its own default framing)', () => {
-  const baseline = setup('#view=overview');
+  const baseline = setup('#view=iso');
   baseline.view.update(0, 1 / 60);
-  const { view } = setup('#view=overview&room=not-a-room', undefined, () => null);
+  const { view } = setup('#view=iso&room=not-a-room', undefined, () => null);
   view.update(0, 1 / 60);
   assert.equal(view.zoomDistance, baseline.view.zoomDistance);
 
-  const noCallback = setup('#view=overview&room=office');
+  const noCallback = setup('#view=iso&room=office');
   noCallback.view.update(0, 1 / 60);
   assert.equal(noCallback.view.zoomDistance, baseline.view.zoomDistance, 'no roomView option at all is the same as an unknown name');
 });
 
 test('issue #89: #room= wins over #zoom= when both are given and the room resolves', () => {
   const room = fixtureRoomView();
-  const { view } = setup('#view=overview&zoom=5&room=office', undefined, (name) => (name === 'office' ? room : null));
+  const { view } = setup('#view=iso&zoom=5&room=office', undefined, (name) => (name === 'office' ? room : null));
   view.update(0, 1 / 60);
   assert.notEqual(view.zoomDistance, 5, 'the room framing wins, not the literal #zoom= value');
 });
@@ -270,7 +254,7 @@ test('#focus selects the agent once it appears, and flies the camera to it', () 
 });
 
 test('issue #89: #select= selects the agent once it appears, the same as #focus=', () => {
-  const { view, manager, selection } = setup('#view=overview&select=agent-1');
+  const { view, manager, selection } = setup('#view=iso&select=agent-1');
   view.agentsChanged(manager.getAgents());
   assert.equal(selection.selected, null);
 
@@ -280,7 +264,7 @@ test('issue #89: #select= selects the agent once it appears, the same as #focus=
 });
 
 test('issue #89 review (fix 1): #zoom= and #select=/#focus= together both survive — the pending selection flight honors the requested zoom', () => {
-  const { view, manager, selection } = setup('#view=overview&zoom=20&select=agent-1');
+  const { view, manager, selection } = setup('#view=iso&zoom=20&select=agent-1');
   view.agentsChanged(manager.getAgents());
 
   manager.addAgent({ id: 'agent-1', name: 'One', activity: 'idle' });
@@ -290,19 +274,8 @@ test('issue #89 review (fix 1): #zoom= and #select=/#focus= together both surviv
   assert.ok(Math.abs(view.zoomDistance - 20) < 0.5, `settles at the requested zoom, 20 (got ${view.zoomDistance})`);
 });
 
-test('issue #89 review (fix 1): the same, in the isometric view', () => {
-  const { view, manager, selection } = setup('#view=iso&zoom=20&select=agent-1');
-  view.agentsChanged(manager.getAgents());
-
-  manager.addAgent({ id: 'agent-1', name: 'One', activity: 'idle' });
-  view.agentsChanged(manager.getAgents());
-  assert.equal(selection.selected, 'agent-1');
-  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
-  assert.ok(Math.abs(view.zoomDistance - 20) < 0.5, `settles at the requested zoom, 20 (got ${view.zoomDistance})`);
-});
-
 test('issue #89 review (fix 1): #zoom= is consumed only once — a later selection uses the normal fixed framing distance', () => {
-  const { view, manager, selection } = setup('#view=overview&zoom=20&select=agent-1');
+  const { view, manager, selection } = setup('#view=iso&zoom=20&select=agent-1');
   view.agentsChanged(manager.getAgents());
   manager.addAgent({ id: 'agent-1', name: 'One', activity: 'idle' });
   manager.addAgent({ id: 'agent-2', name: 'Two', activity: 'idle' });

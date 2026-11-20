@@ -1,8 +1,4 @@
 import type * as THREE from 'three';
-import { OFFICE } from '../utils/Constants.js';
-
-/** Above this camera height the ceiling hides, so the rooms show from above. */
-export const CEILING_HEIGHT = OFFICE.height;
 
 /** In the overview, cutaway zones drop to this height (a dollhouse cut-away), so the room floors show. */
 export const OVERVIEW_WALL_HEIGHT = 0.5;
@@ -40,9 +36,13 @@ export function findCeilings(root: THREE.Object3D): THREE.Object3D[] {
   return ceilings;
 }
 
-/** Hide the ceilings in the overview and when the camera is above the ceiling height. True when one changed. */
-export function applyCeilingCut(ceilings: THREE.Object3D[], cameraY: number, overview: boolean): boolean {
-  const visible = !overview && cameraY <= CEILING_HEIGHT;
+/**
+ * Ceilings show in first person and hide only in the isometric view (issue #176): a flown-over
+ * first person used to see over the top of them, but first person now walks on the ground
+ * (#174), so that reason is gone. The isometric view still needs the open roof. True when one changed.
+ */
+export function applyCeilingCut(ceilings: THREE.Object3D[], overview: boolean): boolean {
+  const visible = !overview;
   let changed = false;
   for (const ceiling of ceilings) {
     if (ceiling.visible === visible) continue;

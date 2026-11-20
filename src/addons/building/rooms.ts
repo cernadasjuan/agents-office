@@ -4,6 +4,7 @@ import { getToonMaterial } from '../../utils/Materials.js';
 import { Colors } from '../../utils/Colors.js';
 import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
+import { OFFICE } from '../../utils/Constants.js';
 import { DOOR_WIDTH, ROOM_SIZE, doorPoint, type Door, type Rect, type RoomSlot, type Side, wallPieces } from './RoomPlanner.js';
 import { roomLabel } from './roomLabels.js';
 import { roomFurnishing, type RoomPlan } from './furnishing.js';
@@ -49,7 +50,8 @@ export function roomTitle(kind: RoomKind, earlierKinds: RoomKind[]): string {
   return ROOM_TITLE[kind];
 }
 
-export const WALL_HEIGHT = 2.6;
+/** Issue #176: every room's walls are as tall as the main room's (`OFFICE.height`), not their own shorter constant. */
+export const WALL_HEIGHT = OFFICE.height;
 const WALL_THICKNESS = 0.15;
 const DOOR_FRAME_HEIGHT = 2.35;
 const DOOR_POST_WIDTH = 0.2;
@@ -160,6 +162,26 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
   return group;
 }
 
+/**
+ * A room's ceiling, at the main room's wall height (issue #176: first person gets it back).
+ * Every room's ceiling shares one merged zone (`room-ceilings`, no shadows), so the building's
+ * draw-call budget does not grow with the room count; `applyCeilingCut` hides them all together
+ * in the isometric view, the same way the main room's own ceiling already does.
+ */
+export function buildCeiling(rect: Rect, height = WALL_HEIGHT): THREE.Mesh {
+  const ceiling = new THREE.Mesh(
+    new THREE.PlaneGeometry(rect.maxX - rect.minX, rect.maxZ - rect.minZ),
+    getToonMaterial(0xf2ede5),
+  );
+  ceiling.rotation.x = Math.PI / 2;
+  ceiling.position.set((rect.minX + rect.maxX) / 2, height, (rect.minZ + rect.maxZ) / 2);
+  ceiling.receiveShadow = true;
+  ceiling.name = 'room-ceiling';
+  ceiling.userData.ceiling = true;
+  markStatic(ceiling, { zone: 'room-ceilings', castShadow: false });
+  return ceiling;
+}
+
 /** Two posts and a lintel around a doorway, in the room floor color, so doors stand out from the walls. */
 export function doorFrame(rect: Rect, door: Door, color: number): THREE.Group {
   const group = new THREE.Group();
@@ -257,6 +279,7 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
   const doorway = doorFrame(slot.rect, slot.door, FLOOR_TINT[kind]);
   markDoorCutaway(doorway);
   group.add(doorway);
+  group.add(buildCeiling(slot.rect));
   group.add(roomLabel(title ?? roomTitle(kind, []), frame.point(0, ROOM_SIZE / 2), slot.rect));
 
   furnish(group, frame, roomFurnishing(kind, { doorAlong: frame.doorAlong, usersOffice: index === 0 }), slot.rect, stations, key);
