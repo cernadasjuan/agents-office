@@ -194,9 +194,27 @@ test('queue spots are spaced and staggered so queued agents stand apart', () => 
       assert.ok(gap >= 1.6, `spots ${i} and ${j} are ${gap.toFixed(2)} m apart`);
     }
   }
-  // The front center fills first
-  assert.equal(spots[0].a, 0);
+  // The front row fills first
   assert.equal(Math.max(...spots.map((s) => s.d)), spots[0].d);
+});
+
+test('two queued agents stand mirrored around the center, not one at center and one offset (#132)', () => {
+  const spots = roomFurnishing('office', { doorAlong: 0 }).spots.filter((s) => s.type === 'queue');
+  assert.equal(spots[0].a, -spots[1].a, 'the first two spots mirror around the center');
+  assert.notEqual(spots[0].a, 0, 'neither of the first two spots is the exact center');
+});
+
+test('a queue row fills completely, center-out, before the next row opens (#132)', () => {
+  const spots = roomFurnishing('office', { doorAlong: 0 }).spots.filter((s) => s.type === 'queue');
+  const firstRowSize = spots.filter((s) => s.d === spots[0].d).length;
+  const firstRow = spots.slice(0, firstRowSize);
+  assert.ok(firstRow.every((s) => s.d === spots[0].d), 'the first row fills completely before the next opens');
+  assert.notEqual(spots[firstRowSize].d, spots[0].d, 'the next spot after a full row opens a new row');
+  // Center-out: the row's positions are symmetric around 0, and the exact center fills last within the row
+  const positions = firstRow.map((s) => s.a).sort((x, y) => x - y);
+  const mirrored = positions.map((_, i) => -positions[positions.length - 1 - i] || 0);
+  assert.deepEqual(positions, mirrored, 'the row is symmetric around the center');
+  assert.equal(firstRow[firstRow.length - 1].a, 0, 'the exact center fills last within the row');
 });
 
 // --- The lounges ---

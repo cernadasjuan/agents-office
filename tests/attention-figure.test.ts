@@ -11,7 +11,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   set: () => true,
 })) as never;
 const { StickFigure } = await import('../src/characters/StickFigure.js');
-const { formatWait } = await import('../src/ui/attention.js');
+const { formatWait, formatWaitShort } = await import('../src/ui/attention.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -22,6 +22,7 @@ function run(figure: InstanceType<typeof StickFigure>, seconds: number): void {
 }
 
 const activityText = (figure: InstanceType<typeof StickFigure>) => figure.label.element.querySelector('.activity')?.textContent;
+const waitText = (figure: InstanceType<typeof StickFigure>) => figure.label.element.querySelector('.wait')?.textContent;
 
 test('a waiting agent raises its right hand and keeps the rest of its pose', () => {
   const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
@@ -61,6 +62,25 @@ test('your turn changes the label but raises no hand', () => {
 test('waits read in minutes, hours, then days', () => {
   assert.deepEqual([formatWait(5), formatWait(59), formatWait(60), formatWait(47 * 60), formatWait(3 * 24 * 60)],
     ['5 min', '59 min', '1 h', '47 h', '3 d']);
+});
+
+test('the short wait chip uses the same bands, without the space (#132)', () => {
+  assert.deepEqual(
+    [formatWaitShort(5), formatWaitShort(59), formatWaitShort(60), formatWaitShort(47 * 60), formatWaitShort(3 * 24 * 60)],
+    ['5m', '59m', '1h', '47h', '3d'],
+  );
+});
+
+test('a waiting agent carries a wait chip, so the time still reads once the label goes compact (#132)', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setActivity('implementing');
+  figure.setAttention('waiting', 12);
+  run(figure, 3);
+  assert.equal(waitText(figure), '12m');
+
+  figure.setAttention(undefined, undefined);
+  run(figure, 3);
+  assert.equal(waitText(figure), undefined, 'no wait chip once the agent stops waiting');
 });
 
 test('the label carries the agent color for the compact dot, and the label keeps its plain class', () => {

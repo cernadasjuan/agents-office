@@ -68,12 +68,14 @@ export const OFFICE_DESK = { a: 0, d: ROOM_SIZE - 2.2 } as const;
  * Queue spots in front of the user's desk: rows 1.3 m apart, 2.3 m between the
  * spots of a row, and every other row shifted by half a step, so each queued agent
  * has a clear line to the desk and the labels of neighbours stand apart.
- * The front center fills first, then outward, then the next row.
+ * Each row fills mirrored pairs center-out, nearest pair first; the exact center
+ * fills last, so a small queue stands symmetric instead of one agent dead center
+ * and the next one offset to a side. A row fills completely before the next opens.
  */
 function queueSpots(): SpotPlan[] {
   const look: [number, number, number] = [OFFICE_DESK.a, OFFICE_DESK.d + 0.7, 1.2];
   const spots: SpotPlan[] = [];
-  const full = [0, -2.3, 2.3, -4.6, 4.6];
+  const full = [-2.3, 2.3, -4.6, 4.6, 0];
   const shifted = [-1.15, 1.15, -3.45, 3.45];
   for (let row = 0; row < 5; row++) {
     const d = OFFICE_DESK.d - 1.6 - row * 1.3;
