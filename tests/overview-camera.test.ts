@@ -6,11 +6,13 @@ import {
   PoseTween,
   easeInOutCubic,
   floorBounds,
+  floorPointUnderCursor,
   frameForBounds,
   interpolatePose,
   overviewBounds,
   overviewDirection,
   setOverviewBounds,
+  zoomTowardCursor,
 } from '../src/scene/OverviewCamera.js';
 import { OFFICE } from '../src/utils/Constants.js';
 
@@ -93,6 +95,52 @@ test('the wheel zooms between limits and a drag pans on the floor', () => {
   assert.equal(view.target.y, before.y);
 
   view.drag(1e7, 1e7, 800, 60);
+  assert.ok(view.target.x >= ROOM.min.x - 1e-9 && view.target.x <= ROOM.max.x + 1e-9);
+  assert.ok(view.target.z >= ROOM.min.z - 1e-9 && view.target.z <= ROOM.max.z + 1e-9);
+});
+
+test('issue #87 AC1: the wheel zooms toward the cursor — the same floor point stays under it after 5 zoom steps', () => {
+  const fov = 60;
+  const aspect = 16 / 9;
+  const view = new OverviewController();
+  view.frame(ROOM, fov, aspect);
+
+  const ndcX = 0.4;
+  const ndcY = 0.3;
+  const underCursor = floorPointUnderCursor(view.target, view.distance, fov, aspect, ndcX, ndcY);
+  const distanceBefore = view.distance;
+
+  // -100 per step: one mouse wheel notch in most browsers.
+  for (let step = 0; step < 5; step++) zoomTowardCursor(view, ndcX, ndcY, -100, fov, aspect);
+  assert.ok(view.distance < distanceBefore, 'zoomed in');
+
+  const camera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 1000);
+  camera.position.copy(view.target).addScaledVector(overviewDirection(), view.distance);
+  camera.lookAt(view.target);
+  camera.updateMatrixWorld();
+  const projected = underCursor.clone().project(camera);
+
+  const viewportHeight = 900;
+  const pxDx = ((projected.x - ndcX) / 2) * (viewportHeight * aspect);
+  const pxDy = ((projected.y - ndcY) / 2) * viewportHeight;
+  assert.ok(Math.hypot(pxDx, pxDy) < 50, `lounge stayed under the cursor within 50 px (off by ${Math.hypot(pxDx, pxDy)})`);
+});
+
+test('issue #87: the zoom still respects the pan/zoom limits (min/max distance, floor bounds)', () => {
+  const fov = 60;
+  const aspect = 16 / 9;
+  const view = new OverviewController();
+  view.frame(ROOM, fov, aspect);
+  const fit = view.distance;
+
+  for (let step = 0; step < 50; step++) zoomTowardCursor(view, 0.9, 0.9, -100000, fov, aspect);
+  assert.equal(view.distance, view.minDistance);
+  assert.ok(view.target.x >= ROOM.min.x - 1e-9 && view.target.x <= ROOM.max.x + 1e-9);
+  assert.ok(view.target.z >= ROOM.min.z - 1e-9 && view.target.z <= ROOM.max.z + 1e-9);
+
+  view.frame(ROOM, fov, aspect);
+  for (let step = 0; step < 50; step++) zoomTowardCursor(view, -0.9, -0.9, 100000, fov, aspect);
+  assert.ok(view.distance <= fit * 1.5 + 1e-9);
   assert.ok(view.target.x >= ROOM.min.x - 1e-9 && view.target.x <= ROOM.max.x + 1e-9);
   assert.ok(view.target.z >= ROOM.min.z - 1e-9 && view.target.z <= ROOM.max.z + 1e-9);
 });
