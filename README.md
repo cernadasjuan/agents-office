@@ -22,6 +22,37 @@ pnpm build
 pnpm dev
 ```
 
+## macOS launcher (this fork)
+
+A fork-only launcher app so the office opens from Spotlight or Applications instead of a
+terminal. Install it once from a clone of this fork:
+
+```bash
+scripts/install-launcher.sh
+```
+
+This builds `Agents Office.app` into `~/Applications` (pass a folder as the one argument to
+install somewhere else) and, on the first run, creates a config file at
+`~/Library/Application Support/AgentsOffice/launcher.env` for your mission roots, GitHub
+repos and office portrait (see the file's own comments). Rerun the command after a `git pull`
+or after moving the clone, so the launcher keeps pointing at the right path.
+
+Opening "Agents Office":
+- **Cold start** (nothing answers the port): starts the dev server with this fork's plugins
+  (`herdr,github,bmad,missions,library,peek`, the same set as `pnpm dev:fork`) in the
+  background, then opens the office in your default browser.
+- **Warm start** (the office already answers the port): opens the office in your browser
+  only; it never starts a second server.
+- **Port busy with another app**: something else answers the port, but it is not this office.
+  The launcher never opens a browser or starts a server in this case. It logs it and shows a
+  macOS notification instead, so you know to close that other app first.
+- **Server lifetime**: the server keeps running after you close the browser. Quit it the same
+  way you would any other local dev server (find its `vite` process, or restart your machine).
+
+Logs: `~/Library/Logs/agents-office/launcher.log`. This bends [P6](docs/design-principles.md)
+(no daemon): the launcher lives in `scripts/`, outside the published npm package (see
+`package.json`'s `files`), and the server it starts still binds `127.0.0.1` only (S1).
+
 ## Local security boundary
 
 The dashboard is for local use. Both launch paths bind to `127.0.0.1`; attempts to
@@ -147,7 +178,7 @@ The panel tells you how fresh its data is:
 - After 2 failed polls in a row (no answer, an HTTP error or bad JSON), the footer turns amber and adds "retrying". After 5, it turns red and says "Server not reachable". The scene keeps the last known agents. The next good answer clears the warning.
 - A subagent at rest gave its final answer, so its label reads "Done", not "Taking a break". A main session at rest keeps "Taking a break".
 
-The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, the attention bands, the "Done" label, the "Stuck?" mark, the rooms (building layout only) and the keys. Beds, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it.
+The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, the attention bands, the "Done" label, the "Stuck?" mark, the rooms (building layout only) and the keys. Tombstones, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it.
 
 ### Location: stations
 
@@ -201,7 +232,7 @@ This fork adds a second layout, `building`, and makes it the default. It opens i
 - **Subagents** stand around their parent's desk.
 - **Library:** the building opens a Library room right after your office. Research trips go there first. With the `library` plugin, librarian subagents (types in `AGENTS_OFFICE_LIBRARIAN_TYPES`, default `bibliotheque-librarian`) carry a book and walk between the Library, while they research, and the agent they serve.
 - **Growth:** when a kind of station runs out, the building adds a room of that kind next to the others: desks, library, test lab, lounge, or another waiting room. Rooms are never removed, and the browser remembers them.
-- **Wayfinding:** each room has a name label above its center ("LIBRARY", "LOUNGE 2"). In the overview the label keeps a readable size on screen and draws on top, with short lines ("DESKS" / "WS10"); zoom in or point at the room for the full name. In first person it is a small plate high in the room: walls hide it, and the label of the room you stand in hides. Lounges are numbered in the order the building adds them. Each door has a frame (two posts and a lintel) in the room's floor color.
+- **Wayfinding:** each room has a name label above its center ("LIBRARY", "LOUNGE 2"). In the overview the label keeps a readable size on screen and draws on top, with short lines ("DESKS" / "WS10"); zoom in or point at the room for the full name. A line too long for the compact face cuts in the middle, not the front (`middleEllipsis` in `src/addons/building/roomLabels.ts`), so two names that share a long prefix still read differently (issue #87). In first person it is a small plate high in the room: walls hide it, and the label of the room you stand in hides. Lounges are numbered in the order the building adds them. Each door has a frame (two posts and a lintel) in the room's floor color.
 - **Furniture library:** code builds every piece; nothing is loaded from a file. `src/furniture/index.ts` lists each piece (`PIECES`), and `src/addons/building/furnishing.ts` holds one plan per room kind with the pieces and their positions.
 - **Cut-away walls:** in the overview and the isometric view, the room and hall walls drop to 0.5 m and the door frames to 1.2 m, so you see each room floor, the figures in it and the doors. First person keeps the full walls.
 
@@ -312,8 +343,8 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 
 - **Who works there:** a session joins a mission's room when its own tool calls touch that mission (a `mission` script command with the slug, or a file under `missions/<slug>/`). Its subagents stand near it. A session that waits for you still goes to your office first.
 - **Walls:** the mission statement, the documents, the GitHub issues and a kanban of the mission's threads (needs you, open, done).
-- **Past sessions:** one bed with a sleeping agent per finished session (up to 12), and a count.
-- **Signs:** the room name is a large label above the room, like the other rooms. The small title sign shows only when you zoom in (overview camera distance 24 or less), come near it in first person (12 units), or point at the room. The past sessions count shows only when you point at the room. `#labels=all` (key V) shows all signs. The "You" sign at your desk follows the same rule.
+- **Past sessions:** one small tombstone per finished session (up to 12), and a count. A session that returns removes its own tombstone, by id, not whichever is oldest. A click or hover on a tombstone opens a card (the same look as the agent card) naming which session it was and when it ended; no 3D label sits over it by default.
+- **Signs:** the room name is a large label above the room, like the other rooms. The small title sign shows only when you zoom in (overview camera distance 24 or less), come near it in first person (12 units), or point at the room. The past sessions count, and each tombstone's own end-date sign, show only when you point at them. `#labels=all` (key V) shows all signs. The "You" sign at your desk follows the same rule.
 - **Closed missions:** the room locks, its door closes and no agent goes in. The room stays.
 - Without `AGENTS_OFFICE_MISSION_ROOTS`, the plugin adds nothing. It reads files only, with a size cap.
 
@@ -342,8 +373,8 @@ AGENTS_OFFICE_PLUGINS=peek pnpm dev
 - **Mouse** to look around
 - **Esc** to release camera
 - **L** to switch the layout, when more than one is installed (also `?layout=<id>` in the URL)
-- **O** to switch between first person (the default of the original layout) and the overview, a view from above at an angle that shows the whole floor. In the overview, drag to pan, use the mouse wheel to zoom, and use W/A/S/D to pan
-- **I** to switch to the isometric view, and **I** again to go back to the view before it. The isometric view shows the whole building from above with an orthographic camera at the classic isometric angle (35 degrees above the floor, 45 degrees to the walls), so far rooms are not smaller than near rooms. Drag or W/A/S/D to pan, the mouse wheel to zoom, a click on a figure to select it. **O** in the isometric view goes to the overview
+- **O** to switch between first person (the default of the original layout) and the overview, a view from above at an angle that shows the whole floor. In the overview, drag to pan, use the mouse wheel to zoom toward the pointer (issue #87), and use W/A/S/D to pan
+- **I** to switch to the isometric view, and **I** again to go back to the view before it. The isometric view shows the whole building from above with an orthographic camera at the classic isometric angle (35 degrees above the floor, 45 degrees to the walls), so far rooms are not smaller than near rooms. Drag or W/A/S/D to pan, the mouse wheel to zoom toward the pointer, a click on a figure to select it. **O** in the isometric view goes to the overview
 - **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on a row in the triage list also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
 - **N** selects the next agent in the triage queue (the fresh or aging attention bands, in the same order as the panel's needs-you/your-turn groups), cycling back to the first past the end. A cold start, or a current selection that left the queue, goes to the first agent in the queue
 - **Esc** clears the selection (in first person it first releases the camera). A click that misses every figure clears it too, the same as Esc (a drag release never counts as that click; a click while the first-person camera is engaged looks around instead, per issue #133)

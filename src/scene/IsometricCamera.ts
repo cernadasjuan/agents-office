@@ -95,6 +95,12 @@ export class IsometricController {
     this.target.z = THREE.MathUtils.clamp(this.target.z, this.bounds.min.z, this.bounds.max.z);
   }
 
+  /** Move the target by a world-space offset on the floor (x, z), clamped like `pan`. */
+  shiftTarget(dx: number, dz: number): void {
+    this.target.x = THREE.MathUtils.clamp(this.target.x + dx, this.bounds.min.x, this.bounds.max.x);
+    this.target.z = THREE.MathUtils.clamp(this.target.z + dz, this.bounds.min.z, this.bounds.max.z);
+  }
+
   focusOn(point: THREE.Vector3): void {
     this.target.set(point.x, 0, point.z);
     this.halfHeight = Math.min(this.halfHeight, ISO_FOCUS_HALF_HEIGHT);
@@ -142,6 +148,35 @@ export class IsometricController {
     camera.zoom = 1;
     camera.updateProjectionMatrix();
   }
+}
+
+/**
+ * Where the isometric camera's ray through a screen point (NDC, -1 to 1) meets
+ * the floor (y = 0). Pure: built from the state alone, no camera object, no
+ * scene. The rays are parallel (orthographic), so the origin is any point on
+ * the ray — the point on the image plane through `target`.
+ */
+export function floorPointUnderCursor(target: THREE.Vector3, halfHeight: number, aspect: number, ndcX: number, ndcY: number): THREE.Vector3 {
+  const { back, right, up } = screenAxes();
+  const halfWidth = halfHeight * aspect;
+  const origin = target.clone().addScaledVector(right, ndcX * halfWidth).addScaledVector(up, ndcY * halfHeight);
+  const direction = back.clone().negate();
+  if (Math.abs(direction.y) < 1e-9) return origin;
+  const t = -origin.y / direction.y;
+  return origin.addScaledVector(direction, t);
+}
+
+/**
+ * Zooms the isometric view, then shifts the target so the floor point that
+ * was under the cursor (NDC, -1 to 1) stays there (issue #87, AC1). Exact for
+ * the same reason as the overview's `zoomTowardCursor`: the view axes are
+ * fixed, so a target shift moves the floor intersection by the same amount.
+ */
+export function zoomTowardCursor(view: IsometricController, ndcX: number, ndcY: number, wheelDelta: number, aspect: number): void {
+  const before = floorPointUnderCursor(view.target, view.halfHeight, aspect, ndcX, ndcY);
+  view.zoom(wheelDelta);
+  const after = floorPointUnderCursor(view.target, view.halfHeight, aspect, ndcX, ndcY);
+  view.shiftTarget(before.x - after.x, before.z - after.z);
 }
 
 /** A flight of the isometric camera: target and zoom ease together. */

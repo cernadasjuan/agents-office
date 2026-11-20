@@ -16,7 +16,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout } = await import('../src/addons/building/BuildingLayout.js');
 const {
-  buildRoom, roomFloorColor, roomTitle, roomLabelLines, compactLabelLines, roomLabelPose, roomLabelBatchFor, WALL_HEIGHT, FIRST_PERSON_LABEL_Y, FIRST_PERSON_LABEL_HEIGHT,
+  buildRoom, roomFloorColor, roomTitle, roomLabelLines, compactLabelLines, middleEllipsis, roomLabelPose, roomLabelBatchFor, WALL_HEIGHT, FIRST_PERSON_LABEL_Y, FIRST_PERSON_LABEL_HEIGHT,
   OVERVIEW_DOOR_HEIGHT, OVERVIEW_LABEL_BOTTOM,
 } = await import('../src/addons/building/rooms.js');
 const { buildRealSizeOffice } = await import('./real-size-office.js');
@@ -59,8 +59,9 @@ const framesIn = (root: THREE.Object3D) => {
   return found;
 };
 
-const missionRoom = (title = 'Office roadmap', sleepers = 3) => ({
-  id: `room-${title}`, kind: 'mission' as const, title, state: 'open' as const, sleepers,
+const missionRoom = (title = 'Office roadmap', sleeperCount = 3) => ({
+  id: `room-${title}`, kind: 'mission' as const, title, state: 'open' as const,
+  sleepers: Array.from({ length: sleeperCount }, (_, i) => ({ id: `tomb-${i}`, endedAt: '2026-11-18' })),
   walls: { statement: 'Ship it', docs: [], issues: [], kanban: [] },
 });
 
@@ -89,9 +90,42 @@ test('label lines: short lines for the default overview, a " · " starts a new l
   assert.deepEqual(roomLabelLines('LIBRARY', 7), ['LIBRARY']);
   assert.deepEqual(roomLabelLines('MISSION ROADMAP FOR THE FORK', 7), ['MISSION', 'ROADMAP…']);
   assert.deepEqual(compactLabelLines('MISSION ROADMAP 3'), ['MISSION', '…3']);
-  assert.deepEqual(compactLabelLines('MEDIA PLAN SALESFORCE PERSISTENCE'), ['MEDIA', '…PERSI…']);
+  assert.deepEqual(compactLabelLines('MEDIA PLAN SALESFORCE PERSISTENCE'), ['MEDIA', '…PER…CE']);
   assert.deepEqual(compactLabelLines('LOUNGE 2'), ['LOUNGE', '2']);
   assert.deepEqual(roomLabelLines('MISSION ROADMAP 3', 16), ['MISSION ROADMAP', '3']);
+});
+
+test('middleEllipsis cuts a too-long word in the middle, not the front', () => {
+  assert.equal(middleEllipsis('LIBRARY', 7), 'LIBRARY', 'fits, unchanged');
+  assert.equal(middleEllipsis('AGENT-83-REVIEW', 7), 'AGE…IEW');
+  assert.equal(middleEllipsis('', 7), '');
+  assert.equal(middleEllipsis('AB', 1), '…', 'no room for even one real character');
+  assert.equal(middleEllipsis('ABCDE', 2), 'A…', 'a one-character budget after the ellipsis keeps only the head');
+});
+
+test('middleEllipsis keeps a surrogate pair whole, even at the cut boundary', () => {
+  // A supplementary character (an emoji) is two UTF-16 units; slicing by index
+  // alone can split the pair and leave a lone surrogate. Split by code point instead.
+  const cut = middleEllipsis('AGENT-NAME\uD83D\uDE80XY', 7);
+  const lonelySurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  assert.equal(lonelySurrogate.test(cut), false, `no lone surrogate in ${JSON.stringify(cut)}`);
+  assert.ok(Array.from(cut).length <= 7);
+});
+
+test('issue #87 AC3: two compact chips that share their first 9 characters still differ', () => {
+  // Both names share the word "AGENT" and a numbered mission slug, the real shape of
+  // two mission rooms today (see docs/roadmap.md item 20's examples).
+  const reviewFace = compactLabelLines('AGENT 83 BUILD REVIEW');
+  const launcherFace = compactLabelLines('AGENT 83 BUILD LAUNCHER');
+  assert.notDeepEqual(reviewFace, launcherFace);
+
+  // The exact collision from before this fix: two last words sharing a 5-character
+  // prefix ("PERSI") both front-cut to the identical "…PERSI…". Confirmed against the
+  // pre-fix compactLabelLines: both produced the same string, so this pair is a real
+  // regression check, not just two names that already read apart.
+  const persistence = compactLabelLines('MEDIA PLAN SALESFORCE PERSISTENCE');
+  const persistage = compactLabelLines('MEDIA PLAN SALESFORCE PERSISTAGE');
+  assert.notDeepEqual(persistence, persistage);
 });
 
 test('in the overview a plate grows with the zoom distance but never gets wider than a room', () => {

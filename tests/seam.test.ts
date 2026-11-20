@@ -93,7 +93,8 @@ test('a core source failure is an error', async () => {
 });
 
 test('the world projection cleans rooms and boards and hashes their keys', () => {
-  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War\troom', state: 'locked', sleepers: 3,
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War\troom', state: 'locked',
+    sleepers: [{ id: 'J-1', endedAt: '2026-11-18T19:40:00Z' }, { id: '' }, { id: 'J-2' }],
     walls: { statement: 'Ship it', issues: [{ number: 7, title: 'Fix', state: 'closed' }], kanban: [{ column: 'Doing', cards: [{ number: 8, title: 'Card' }] }] } }],
     boards: [{ key: 'b', title: 'Board', columns: [{ name: 'Todo', cards: [{ number: 1.5, title: 'bad' }] }] }] }],
   ['missions', 'Bad Name'], publicId);
@@ -101,6 +102,8 @@ test('the world projection cleans rooms and boards and hashes their keys', () =>
   assert.deepEqual(world.plugins, ['missions']);
   assert.equal(world.rooms[0].id, 'h(room:m-1)');
   assert.equal(world.rooms[0].title, 'War room');
+  // A blank id is dropped; a raw journey id is hashed (never sent raw); a time-of-day is cut to the day
+  assert.deepEqual(world.rooms[0].sleepers, [{ id: 'h(sleeper:m-1:J-1)', endedAt: '2026-11-18' }, { id: 'h(sleeper:m-1:J-2)' }]);
   assert.equal(world.rooms[0].state, 'locked');
   assert.deepEqual(world.rooms[0].walls.kanban, [{ column: 'Doing', cards: [{ number: 8, title: 'Card' }] }]);
   assert.deepEqual(world.boards[0].columns[0].cards, []);

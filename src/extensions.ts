@@ -1,4 +1,5 @@
 import type { ManagedAgent } from './agents/AgentManager.js';
+import type { PickTarget } from './scene/Selection.js';
 import type * as THREE from 'three';
 
 export interface WorldRoom {
@@ -6,7 +7,8 @@ export interface WorldRoom {
   kind: 'mission' | 'workspace';
   title: string;
   state: 'open' | 'locked';
-  sleepers?: number;
+  /** One entry per ended session (a tombstone): its own public id and the day it ended. */
+  sleepers?: Array<{ id: string; endedAt?: string }>;
   walls: {
     statement?: string;
     docs?: string[];
@@ -41,6 +43,8 @@ export interface OfficeExtension {
   agentsChanged?(agents: ManagedAgent[]): void;
   worldChanged?(world: World): void;
   update?(elapsed: number, delta: number): void;
+  /** Extra things a click or hover can pick, besides an agent (for example a tombstone). */
+  pickTargets?(): PickTarget[];
 }
 
 const registered: OfficeExtension[] = [];

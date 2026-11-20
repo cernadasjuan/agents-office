@@ -12,6 +12,7 @@ import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.
 import type { WorldRoom } from '../../extensions.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
 import { markStatic } from '../../scene/StaticMerge.js';
+import type { PickTarget } from '../../scene/Selection.js';
 
 /**
  * Work that happens at the agent's own desk. Everything else is a trip. Planning,
@@ -126,6 +127,11 @@ export class BuildingLayout implements LayoutStrategy {
 
   get missionRoomCount(): number {
     return this.missionRooms.size;
+  }
+
+  /** Every war room's tombstones, pickable by a click or hover (issue #127). */
+  tombstonePickTargets(): PickTarget[] {
+    return [...this.missionRooms.values()].flatMap((room) => room.tombstonePickTargets());
   }
 
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
