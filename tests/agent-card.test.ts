@@ -81,7 +81,45 @@ test('the card shows name, activity, attention band and wait, workspace, provide
   assert.equal(root().querySelector<HTMLElement>('.inspector-wait')!.hidden, true, 'no wait without attention');
   assert.equal(root().querySelector<HTMLElement>('.inspector-band')!.hidden, true);
   assert.equal(text('.inspector-workspace'), 'No workspace');
-  assert.equal(text('.inspector-personas'), 'No personas');
+  assert.equal(text('.inspector-personas'), 'No personas or skills');
+});
+
+test('issue #171: the card shows a short, stable id and a provider mark next to the provider text', (t) => {
+  const { card, selection, text, root } = makeCard(t);
+  card.render([main, codex]);
+  selection.select('main-1');
+  assert.equal(text('.inspector-id'), `#${main.id.slice(0, 8)}`);
+  assert.equal(root().querySelectorAll('.inspector-provider svg').length, 1, 'a mark, not a downloaded image');
+  assert.equal(root().querySelector('.inspector-provider img'), null, 'never a downloaded brand asset');
+
+  selection.select('codex-1');
+  assert.equal(text('.inspector-id'), `#${codex.id.slice(0, 8)}`);
+  assert.equal(text('.inspector-provider'), 'Codex', 'the text never disappears, only the mark changes shape');
+  assert.equal(root().querySelectorAll('.inspector-provider svg').length, 1);
+});
+
+test('issue #166: the "Persona / Skills" row lists personas, then every skill used this session', (t) => {
+  const withSkills: AgentInfo = {
+    id: 'skilled-1', name: 'reviewer', activity: 'reviewing',
+    extras: { badges: ['quinn'], skills: ['code-review', 'simplify'] },
+  };
+  const { card, selection, root } = makeCard(t);
+  card.render([withSkills]);
+  selection.select('skilled-1');
+  const items = [...root().querySelectorAll('.inspector-personas li')];
+  assert.deepEqual(items.map((li) => li.textContent), ['quinn', 'code-review', 'simplify']);
+  assert.equal(items[0]!.classList.contains('skill'), false, 'a persona badge is not styled as a skill');
+  assert.equal(items[1]!.classList.contains('skill'), true);
+  assert.equal(items[2]!.classList.contains('skill'), true);
+});
+
+test('issue #166: without the skills plugin, the row falls back to personas only (graceful degradation)', (t) => {
+  const { card, selection, root } = makeCard(t);
+  card.render([main]); // main has badges, no skills field at all
+  selection.select('main-1');
+  const items = [...root().querySelectorAll('.inspector-personas li')];
+  assert.deepEqual(items.map((li) => li.textContent), ['amelia', 'quinn']);
+  assert.equal(items.every((li) => !li.classList.contains('skill')), true);
 });
 
 test('an idle agent with a your-turn wait shows "Your turn" in the header, not "Taking a break" (issue #168)', (t) => {

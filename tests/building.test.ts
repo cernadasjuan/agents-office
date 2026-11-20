@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac, randomBytes } from 'node:crypto';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
@@ -15,6 +16,18 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout, BUILDING_STORAGE_KEY } = await import('../src/addons/building/BuildingLayout.js');
+const { missionSlot } = await import('../src/addons/building/missionRooms.js');
+const { projectWorld } = await import('../server/seam.js');
+
+/** The same hashing `server/vitePlugin.ts` uses for `publicId`, with its own random key held
+ * for the whole call (one key, so the same raw string always hashes the same, the way one
+ * server run does): a room's real client-facing `id` never carries the raw `mission:<slug>`
+ * key it came from (issue #89 review, fix 2 — `roomView` must match through this, not an
+ * injected raw id). */
+function createFakePublicId(): (raw: string) => string {
+  const key = randomBytes(32).toString('hex');
+  return (raw: string) => createHmac('sha256', key).update(raw).digest('hex');
+}
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -45,6 +58,17 @@ test('walls leave a door-wide gap at each door', () => {
 
 // --- Layout ---
 
+/** The real built floor rect of `room-${index}-${kind}` (`src/addons/building/rooms.ts`'s own name), not `slotFor` in isolation. */
+function builtRoomRect(scene: THREE.Scene, index: number, kind: string): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  const group = scene.getObjectByName(`room-${index}-${kind}`);
+  if (!group) throw new Error(`no built room named room-${index}-${kind}`);
+  let floor: THREE.Object3D | undefined;
+  group.traverse((object) => { if (object.userData.floor) floor = object; });
+  if (!floor) throw new Error(`room-${index}-${kind} has no floor`);
+  const box = new THREE.Box3().setFromObject(floor);
+  return { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z };
+}
+
 function setup(storage = new Map<string, string>()) {
   let clock = 0;
   const scene = new THREE.Scene();
@@ -68,14 +92,26 @@ test('an agent keeps its home desk, makes a trip after the dwell time, and comes
   const { layout, agent, tick } = setup();
   const home = layout.seatFor(agent('a', 'implementing'), null)!;
 
-  assert.equal(layout.seatFor(agent('a', 'researching'), 'implementing'), null, 'no move before the dwell time');
+  assert.equal(layout.seatFor(agent('a', 'testing'), 'implementing'), null, 'no move before the dwell time');
   assert.deepEqual(tick(3000).filter((m) => m.agentId === 'a'), []);
   const trip = tick(1500).find((m) => m.agentId === 'a')!;
-  assert.match(trip.seat.key, /researching/);
+  assert.match(trip.seat.key, /^test_/);
 
-  layout.seatFor(agent('a', 'debugging'), 'researching');
+  layout.seatFor(agent('a', 'debugging'), 'testing');
   const back = tick(4500).find((m) => m.agentId === 'a')!;
   assert.equal(back.seat.key, home.key);
+});
+
+test('a non-librarian keeps its home desk through a research activity: no trip, no move at all (issue #128 AC2)', () => {
+  const { layout, agent, tick } = setup();
+  const home = layout.seatFor(agent('a', 'implementing'), null)!;
+
+  assert.equal(layout.seatFor(agent('a', 'researching'), 'implementing'), null, 'the target does not change, so there is nothing to move to after the dwell time');
+  assert.deepEqual(tick(4500).filter((m) => m.agentId === 'a'), []);
+
+  layout.seatFor(agent('a', 'debugging'), 'researching');
+  assert.deepEqual(tick(4500).filter((m) => m.agentId === 'a'), [], 'still at the same desk the whole time');
+  assert.equal(layout.seatFor(agent('a', 'implementing'), 'debugging'), null);
 });
 
 test('a planning agent with no war room stays at its desk, not the lounge (#131)', () => {
@@ -117,11 +153,13 @@ test('a saved building with an old writing room in storage drops it silently (#1
 });
 
 test('a short tool call does not make the agent walk', () => {
+  // Uses 'testing' (not 'researching', issue #128 review): a non-librarian's research no
+  // longer creates a pending trip at all, so it could no longer prove cancellation works.
   const { layout, agent, tick } = setup();
   layout.seatFor(agent('a', 'implementing'), null);
-  layout.seatFor(agent('a', 'researching'), 'implementing');
+  layout.seatFor(agent('a', 'testing'), 'implementing');
   tick(1000);
-  layout.seatFor(agent('a', 'implementing'), 'researching');
+  layout.seatFor(agent('a', 'implementing'), 'testing');
   assert.deepEqual(tick(5000).filter((m) => m.agentId === 'a'), []);
 });
 
@@ -212,6 +250,37 @@ test('the building rents a desk room when the hall desks are taken, and rebuilds
   assert.deepEqual(reloaded.roomKinds, ['office', 'library', 'desks']);
 });
 
+test('a saved 3-room layout rents each kind at the slot its index gives it, the same way on every reload (issue #128 review round 2)', () => {
+  // Rooms are remembered by kind, in rental order, and rented back in that same order on
+  // reload (`roomKinds` above): slotFor(index) decides where each one physically sits, by
+  // index alone, not by kind. For office/library/desks that is slot 0 (east-center, unmoved),
+  // slot 1 (south-east since issue #120's swap) and slot 2 (north-east, where the Library
+  // itself used to sit before that swap). This is the one-time move the swap causes for
+  // anyone with an existing saved building of 3 or more rooms: whatever room was third stays
+  // third, but the ground under it moved. Noted in README.md and CHANGELOG.md.
+  //
+  // This asserts the layout's own built rooms (by their `room-${index}-${kind}` name in the
+  // scene, `src/addons/building/rooms.ts`), not `slotFor` in isolation: a bug in `addRoom`
+  // that called `slotFor` with the wrong index would still leave `slotFor` itself correct,
+  // and a test that only re-checked `slotFor` would never see it (issue #128 review round 2).
+  const storage = new Map([[BUILDING_STORAGE_KEY, JSON.stringify(['office', 'library', 'desks'])]]);
+  const { layout, scene } = setup(storage);
+  assert.deepEqual(layout.roomKinds, ['office', 'library', 'desks']);
+  const office = builtRoomRect(scene, 0, 'office');
+  const library = builtRoomRect(scene, 1, 'library');
+  const desks = builtRoomRect(scene, 2, 'desks');
+  assert.deepEqual(office, { minX: 15, maxX: 27, minZ: -6, maxZ: 6 }, 'office: east-center, unmoved');
+  assert.ok(library.minZ > 0, `library: south-east (issue #120), got ${JSON.stringify(library)}`);
+  assert.ok(desks.minZ < 0, `desks: north-east, where the library used to be, got ${JSON.stringify(desks)}`);
+
+  // Reloading the same saved kind order again lands every room at the same physical rect.
+  const again = setup(new Map(storage));
+  assert.deepEqual(again.layout.roomKinds, layout.roomKinds);
+  assert.deepEqual(builtRoomRect(again.scene, 0, 'office'), office, 'office: same rect after reload');
+  assert.deepEqual(builtRoomRect(again.scene, 1, 'library'), library, 'library: same rect after reload');
+  assert.deepEqual(builtRoomRect(again.scene, 2, 'desks'), desks, 'desks: same rect after reload');
+});
+
 test('idle agents beyond the hall seats get a lounge room', () => {
   const { layout, agent } = setup();
   for (let i = 0; i < 10; i++) layout.seatFor(agent(`i${i}`, 'idle'), null);
@@ -273,30 +342,170 @@ test('a waiting agent still goes to the user office before its war room', () => 
   assert.match(seat.key, /^room0_queue_/);
 });
 
+// --- roomView (issue #89, #room=) ---
+
+test('roomView("office") frames the user\'s office, the room at slot 0, never a later waiting room', () => {
+  const { layout } = setup();
+  const view = layout.roomView('office')!;
+  assert.ok(view, 'office exists from the start');
+  const officeRect = slotFor(0).rect;
+  assert.deepEqual([view.bounds.min.x, view.bounds.max.x, view.bounds.min.z, view.bounds.max.z], [officeRect.minX, officeRect.maxX, officeRect.minZ, officeRect.maxZ]);
+  assert.ok(view.bounds.max.y > view.bounds.min.y, 'has floor-to-wall height, not a flat box');
+});
+
+test('roomView is case-insensitive and trims whitespace', () => {
+  const { layout } = setup();
+  assert.deepEqual(layout.roomView('OFFICE'), layout.roomView('office'));
+  assert.deepEqual(layout.roomView('  library  '), layout.roomView('library'));
+});
+
+test('roomView returns null for a kind that is not yet open and for any unknown name', () => {
+  const { layout } = setup();
+  assert.equal(layout.roomView('lab'), null, 'no test lab has been rented yet');
+  assert.equal(layout.roomView('not-a-room'), null);
+  assert.equal(layout.roomView(''), null);
+});
+
+test('roomView matches a mission room by its slugified title or its public id — through the real projectWorld projection (review fix 2)', () => {
+  const { layout } = setup();
+  assert.equal(layout.roomView('media-plan-q1'), null, 'not open yet');
+
+  // The real server projection: the client only ever sees the hashed id and the display
+  // title, never the raw `mission:<slug>` key this started from.
+  const publicId = createFakePublicId();
+  const projected = projectWorld(
+    [{ rooms: [{ key: 'mission:media-plan-q1', kind: 'mission', title: 'Media Plan Q1', state: 'open', walls: {} }] }],
+    ['missions'],
+    publicId,
+  ).rooms[0]!;
+  assert.notEqual(projected.id, 'mission:media-plan-q1', 'the id a client sees is hashed, not the raw key');
+  assert.equal(projected.title, 'Media Plan Q1');
+
+  layout.syncWorldRooms([{ id: projected.id, kind: 'mission', title: projected.title, state: 'open', sleepers: [], walls: {} }]);
+
+  assert.equal(layout.roomView('mission:media-plan-q1'), null, 'the raw server-side key never works on the client');
+  const byTitle = layout.roomView('media-plan-q1')!;
+  assert.ok(byTitle, 'matches by the slugified title instead');
+  const byUppercaseTitle = layout.roomView('Media-Plan-Q1')!;
+  assert.deepEqual(byUppercaseTitle, byTitle, 'case-insensitive, like every other roomView name');
+  const byId = layout.roomView(projected.id)!;
+  assert.deepEqual(byId, byTitle, 'the exact public id also works, for a reviewer who copies it from /api/world');
+
+  const missionRect = missionSlot(0).rect;
+  assert.deepEqual([byTitle.bounds.min.x, byTitle.bounds.max.x, byTitle.bounds.min.z, byTitle.bounds.max.z],
+    [missionRect.minX, missionRect.maxX, missionRect.minZ, missionRect.maxZ]);
+});
+
+test('roomView picks none when two mission rooms slugify to the same title; the exact public id still works (review fix round 2)', () => {
+  const { layout } = setup();
+  const publicId = createFakePublicId();
+  const projected = projectWorld(
+    [{ rooms: [
+      { key: 'mission:media-plan', kind: 'mission', title: 'Media Plan', state: 'open', walls: {} },
+      { key: 'mission:media/plan', kind: 'mission', title: 'Media/Plan', state: 'open', walls: {} },
+    ] }],
+    ['missions'],
+    publicId,
+  ).rooms;
+  assert.notEqual(projected[0]!.id, projected[1]!.id, 'two distinct rooms, two distinct ids');
+
+  layout.syncWorldRooms(projected.map((room) => ({ id: room.id, kind: 'mission' as const, title: room.title, state: 'open' as const, sleepers: [], walls: {} })));
+
+  assert.equal(layout.roomView('media-plan'), null, 'ambiguous by title: picks none, not whichever came first');
+  assert.ok(layout.roomView(projected[0]!.id), 'the exact public id still resolves its own room');
+  assert.ok(layout.roomView(projected[1]!.id), 'and the other room by its own id');
+  assert.notDeepEqual(layout.roomView(projected[0]!.id), layout.roomView(projected[1]!.id));
+});
+
+test('roomView\'s first-person standing point sits inside the room, facing further into it', () => {
+  const { layout } = setup();
+  const view = layout.roomView('office')!;
+  const rect = slotFor(0).rect;
+  assert.ok(view.standing.position.x > rect.minX && view.standing.position.x < rect.maxX, 'inside the room on x');
+  assert.ok(view.standing.position.z > rect.minZ && view.standing.position.z < rect.maxZ, 'inside the room on z');
+  assert.ok(view.standing.position.y > 0, 'a standing eye height, not on the floor');
+  const facing = view.standing.lookAt.clone().sub(view.standing.position);
+  assert.ok(facing.lengthSq() > 0, 'looks somewhere other than straight down at its own feet');
+});
+
 // --- Library and librarians ---
 
-test('research trips go to the Library room before the hall shelves', () => {
+test('the Librarian persona badge reaches the Library room before the hall shelves (issue #128)', () => {
   const { layout, agent } = setup();
-  const seat = layout.seatFor(agent('r', 'researching'), null)!;
+  const seat = layout.seatFor(agent('r', 'researching', { badges: ['librarian'] }), null)!;
   assert.match(seat.key, /^room1_researching_/);
 });
 
 test('a librarian walks to the Library to research and back to its agent with what it found', () => {
   const { layout, agent, tick } = setup();
   const desk = layout.seatFor(agent('parent', 'implementing'), null)!;
-  const fetching = layout.seatFor(agent('lib', 'researching', { parentId: 'parent', role: 'librarian' }), null)!;
+  const fetching = layout.seatFor(agent('lib', 'researching', { parentId: 'parent', badges: ['librarian'] }), null)!;
   assert.match(fetching.key, /^room1_researching_/);
 
-  layout.seatFor(agent('lib', 'writing_docs', { parentId: 'parent', role: 'librarian' }), 'researching');
+  layout.seatFor(agent('lib', 'writing_docs', { parentId: 'parent', badges: ['librarian'] }), 'researching');
   const back = tick(4500).find((m) => m.agentId === 'lib')!;
   assert.match(back.seat.key, /_pod\d$/);
   assert.ok(back.seat.position.distanceTo(desk.position) < 2);
+});
+
+test('an old-style role tag, with no Librarian persona badge, no longer reaches the Library (issue #128, Prospero\'s review)', () => {
+  const { layout, agent } = setup();
+  const seat = layout.seatFor(agent('r', 'researching', { role: 'librarian' }), null)!;
+  assert.doesNotMatch(seat.key, /^room1_researching_/, 'a name or role tag alone is not the persona signal');
+});
+
+test('a main session with no Librarian badge and no war room keeps its own desk for a research trip, not the Library (issue #128 AC2)', () => {
+  const { layout, agent } = setup();
+  const seat = layout.seatFor(agent('r', 'researching'), null)!;
+  assert.doesNotMatch(seat.key, /^room1_researching_/);
+  assert.doesNotMatch(seat.key, /researching/, 'it never visits any researching station, hall shelves included');
+  assert.match(seat.key, /^desk_/);
+});
+
+test('a main session with a war room keeps a non-librarian research trip inside that room, not the Library (issue #128 AC3)', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const seat = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
+  assert.match(seat.key, /^mission0_seat_/, 'inside its own war room');
+  assert.doesNotMatch(seat.key, /^room1_researching_/, 'never the Library');
 });
 
 test('an ordinary subagent that researches stays at its parent desk', () => {
   const { layout, agent } = setup();
   layout.seatFor(agent('parent', 'implementing'), null);
   assert.match(layout.seatFor(agent('helper', 'researching', { parentId: 'parent' }), null)!.key, /_pod\d$/);
+});
+
+test('a non-librarian subagent whose parent has no seat yet never reaches the Library, even on this exact timing (issue #128 review)', () => {
+  // A real race: a subagent is polled in the same cycle as its freshly spawned, not-yet-seated
+  // parent. The persona check and the pod check both fall through; the generic research
+  // routing must still never land on the Library's own shelves.
+  const { layout, agent } = setup();
+  const seat = layout.seatFor(agent('helper', 'researching', { parentId: 'parent' }), null)!;
+  assert.doesNotMatch(seat.key, /^room1_researching_/, 'never the Library, even with an unseated parent');
+  assert.doesNotMatch(seat.key, /_pod\d$/, 'there is no parent seat yet to anchor a pod spot to');
+});
+
+test('a librarian subagent still reaches the Library even though its parent already has a desk (the badge wins over the pod rule)', () => {
+  const { layout, agent } = setup();
+  layout.seatFor(agent('parent', 'implementing'), null);
+  const seat = layout.seatFor(agent('lib', 'researching', { parentId: 'parent', badges: ['librarian'] }), null)!;
+  assert.match(seat.key, /^room1_researching_/);
+});
+
+// --- Issue #120: the library wing moves to the south-east ---
+
+test('the library (the second room the building ever rents) sits at the south-east slot, not the north-east', () => {
+  // slotFor(1) is where the second rented room goes; the building rents the Library second,
+  // right after the office. South of the hall is positive z (the front, where the meeting
+  // table and coffee area sit); north is negative z (the back wall, the whiteboards).
+  const slot = slotFor(1);
+  assert.ok(slot.rect.minZ > 0, `slot 1 is south (minZ=${slot.rect.minZ}), not north`);
+  // AC2: the corridor branch toward slot 1 (the hall's own door) leads straight to the
+  // Library's entrance, the same way every ring-0 room's door already matches its slot
+  // (rebuildHallWalls derives every door from slotFor(room.index)); this geometric
+  // identity is what guarantees it, not a separate corridor structure (none exists yet).
+  assert.deepEqual(slot.door, { side: 'west', at: 9.5 });
 });
 
 // --- Workspace grouping in the shared desk pool (#138: per-workspace desk rooms retired) ---

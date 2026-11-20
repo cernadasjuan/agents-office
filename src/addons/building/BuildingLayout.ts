@@ -3,9 +3,9 @@ import type { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { Activity } from '../../agents/ActivityAnimations.js';
 import { OFFICE_WALLS, type Station } from '../../scene/Office.js';
 import { OFFICE } from '../../utils/Constants.js';
-import type { LayoutAgent, LayoutMove, LayoutStrategy, Seat } from '../../layout/LayoutStrategy.js';
-import { HALL, matchingDoor, slotFor, type Door } from './RoomPlanner.js';
-import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, roomTitle, type RoomKind } from './rooms.js';
+import type { LayoutAgent, LayoutMove, LayoutStrategy, RoomView, Seat } from '../../layout/LayoutStrategy.js';
+import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type RoomSlot } from './RoomPlanner.js';
+import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, type RoomKind } from './rooms.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
@@ -31,9 +31,48 @@ const ROOM_FOR_STATION: Record<string, RoomKind> = Object.fromEntries(
   Object.entries(ROOM_STATION_TYPE).map(([kind, type]) => [type, kind as RoomKind]),
 ) as Record<string, RoomKind>;
 
+/**
+ * The Librarian persona badge (issue #128, Prospero's own review on the issue): the real
+ * signal the `bmad` plugin's hat detection reports (`bmad.py agent librarian`, a Skill
+ * call, or a subagent type that resolves to it, `plugins/bmad/roster.ts`), never a name
+ * or role tag an agent's own session metadata could claim on its own.
+ */
+function isLibrarian(extras: LayoutAgent['extras']): boolean {
+  return Array.isArray(extras?.badges) && extras.badges.includes('librarian');
+}
+
 export const BUILDING_STORAGE_KEY = 'agents-office.building.rooms';
 const DEFAULT_DWELL_MS = 4000;
 const QUEUE_REFRESH_MS = 500;
+const ROOM_KINDS: readonly string[] = ['office', 'desks', 'library', 'lab', 'lounge'];
+/** A plausible standing eye height (issue #89, `#room=` first person), not a floor minimum like `MIN_EYE_HEIGHT`. */
+const ROOM_VIEW_EYE_HEIGHT = 1.6;
+
+/**
+ * Lowercased, non-alphanumeric runs collapsed to one `-`, leading/trailing `-` trimmed
+ * (issue #89 review, fix 2): `#room=<mission id>` matches a human-typed name against a
+ * mission room's own displayed title this way, never against `id` (the server's opaque hash
+ * of the mission key; a client never sees the raw slug the server hashed).
+ */
+function slugify(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/**
+ * The camera framing for a room's slot (issue #89, `#room=`): its world bounds, floor to
+ * wall height, and a first-person standing pose a third of the way in from the door,
+ * looking further inward toward the room's main (far) wall. Pure: no scene, no layout state.
+ */
+export function roomViewFromSlot(slot: RoomSlot): RoomView {
+  const bounds = new THREE.Box3(
+    new THREE.Vector3(slot.rect.minX, 0, slot.rect.minZ),
+    new THREE.Vector3(slot.rect.maxX, WALL_HEIGHT, slot.rect.maxZ),
+  );
+  const frame = new RoomFrame(slot.rect, slot.door);
+  const position = frame.point(0, ROOM_SIZE * 0.35, ROOM_VIEW_EYE_HEIGHT);
+  const lookAt = position.clone().addScaledVector(frame.inward, 4);
+  return { bounds, standing: { position, lookAt } };
+}
 
 type Target = 'home' | 'pod' | 'queue' | `trip:${string}` | `room:${string}`;
 
@@ -134,6 +173,41 @@ export class BuildingLayout implements LayoutStrategy {
     return [...this.missionRooms.values()].flatMap((room) => room.tombstonePickTargets());
   }
 
+  /**
+   * Where the camera should go to show a named room (issue #89, `#room=`). A room kind
+   * ("office": always the first one, "Your office", never a later overflow waiting room;
+   * "desks", "library", "lab", "lounge": the first room of that kind), or a mission room.
+   * A mission room never matches by a raw `mission:<slug>` key: `id` is the server's opaque
+   * hash of that key (`projectWorld`'s `publicId`), so a client never sees the slug it was
+   * hashed from (issue #89 review, fix 2). It matches instead by the room's own displayed
+   * title, slugified (`#room=media-plan` against the title "Media Plan"), or by the exact
+   * public id a reviewer could copy from `/api/world`. Unknown names return null; this never
+   * changes the scene, only reports where a camera could go.
+   */
+  roomView(name: string): RoomView | null {
+    const query = name.trim().toLowerCase();
+    if (!query) return null;
+    let slot: RoomSlot | null = null;
+    if (ROOM_KINDS.includes(query)) {
+      const record = this.rooms.find((room) => room.kind === query);
+      if (record) slot = slotFor(record.index);
+    }
+    if (!slot) {
+      const byId = [...this.missionRooms.values()].find((room) => room.id === name);
+      if (byId) {
+        slot = byId.slot;
+      } else {
+        // Two mission rooms can slugify to the same title (issue #89 review, fix round 2):
+        // picking the first one silently would show the wrong room. The exact public id
+        // always disambiguates them; a title match only resolves when exactly one applies.
+        const byTitle = [...this.missionRooms.values()].filter((room) => slugify(room.title) === query);
+        if (byTitle.length === 1) slot = byTitle[0]!.slot;
+        else if (byTitle.length > 1) console.debug(`roomView("${name}") matches more than one mission room by title; none resolved`);
+      }
+    }
+    return slot ? roomViewFromSlot(slot) : null;
+  }
+
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
     const state = this.stateOf(agent);
     const desired = this.targetFor(state);
@@ -181,10 +255,17 @@ export class BuildingLayout implements LayoutStrategy {
     const room = agent.extras?.room ? this.missionRooms.get(agent.extras.room) : undefined;
     if (!parentId && room && !room.locked) return `room:${room.id}`;
     const parent = parentId ? this.agents.get(parentId) : undefined;
-    // A librarian fetches from the Library while it researches, and brings it back to its agent otherwise
-    if (agent.extras?.role === 'librarian' && agent.activity === 'researching') return 'trip:researching';
+    // Only the Librarian persona fetches from the library-knowledge shelves (issue #128):
+    // a real persona-hat badge, not a name or role tag (Prospero's own review on the issue).
+    // It brings what it found back to its agent otherwise, through the pod branch below.
+    if (isLibrarian(agent.extras) && agent.activity === 'researching') return 'trip:researching';
     if (parent && (parent.home || parent.target?.startsWith('room:'))) return 'pod';
-    if (DESK_WORK.has(agent.activity)) return 'home';
+    // A non-librarian's research trip never reaches the library-knowledge room either: with
+    // a war room it already stayed there (the room check above). Without one it keeps its
+    // own desk, the same as desk work (issue #128 AC2) — this covers a subagent whose parent
+    // has no seat yet too (the pod check above falls through on that exact timing, issue #128
+    // review), not only a main session; the generic trip below is never reached for research.
+    if (DESK_WORK.has(agent.activity) || agent.activity === 'researching') return 'home';
     return `trip:${TRIP_STATION[agent.activity] ?? 'idle'}`;
   }
 

@@ -26,6 +26,8 @@ export interface DisplayExtras {
   groupKey?: string;
   groupLabel?: string;
   badges?: string[];
+  /** Skills used at least once this session, newest first (issue #166). Plain tokens only, the same as `badges`. */
+  skills?: string[];
   /**
    * `repo` is the short repository name (after the slash). The projection keeps it only as a plain token.
    * `color` is the card border color, a 6-hex label color. The projection keeps it only as `rrggbb`.
@@ -192,6 +194,8 @@ export async function describeWorld(providers: WorldProvider[], observations: Ob
 const ACTIVITIES = new Set(['idle', 'planning', 'implementing', 'researching', 'testing', 'debugging',
   'reviewing', 'writing_docs', 'deploying', 'meeting']);
 const BADGE = /^[a-z0-9-]{1,32}$/;
+/** A skill name (issue #166): same token shape `plugins/peek` already validates skill names against, a plugin's own namespace prefix (`crit:crit-cli`) included. */
+const SKILL = /^[A-Za-z0-9:_.-]{1,64}$/;
 
 export function displayText(value: unknown, maxLength: number): string {
   return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
@@ -275,6 +279,9 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
   return observations.map((agent) => {
     const extras = agent.display ?? {};
     const badges = Array.isArray(extras.badges) ? extras.badges.filter((b) => BADGE.test(b)).slice(0, 6) : [];
+    const skills = Array.isArray(extras.skills)
+      ? extras.skills.filter((s): s is string => typeof s === 'string' && SKILL.test(s)).slice(0, 8)
+      : [];
     const issues = issueList(extras.issues, 5);
     const waitMinutes = wholeNumber(extras.waitMinutes, 100_000);
     const actions = actionList(extras.actions, enabledActions);
@@ -289,6 +296,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
       ...(waitMinutes !== undefined ? { waitMinutes } : {}),
       ...(extras.groupKey ? { group: { id: publicId(`group:${extras.groupKey}`), label: displayText(extras.groupLabel, 40) } } : {}),
       ...(badges.length > 0 ? { badges } : {}),
+      ...(skills.length > 0 ? { skills } : {}),
       ...(issues ? { issues } : {}),
       ...(extras.roomKey ? { room: publicId(`room:${extras.roomKey}`) } : {}),
       ...(actions ? { actions } : {}),

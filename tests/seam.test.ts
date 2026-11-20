@@ -53,6 +53,15 @@ test('orchestrating projects only alongside your-turn, never alone and never und
   assert.equal('orchestrating' in plain, false);
 });
 
+test('skills keeps only plain string tokens, dropping a non-string value even if it would pass the pattern once coerced to a string (issue #166 review)', () => {
+  const [agent] = projectAgents([observation({
+    display: { skills: ['write-a-skill', 'BAD SKILL', null, 42, true, ['nested']] as never },
+  })], publicId);
+
+  assert.deepEqual(agent.skills, ['write-a-skill']);
+  assert.ok(agent.skills!.every((skill) => typeof skill === 'string'));
+});
+
 test('an issue card keeps only a cleaned short repository token', () => {
   const [agent] = projectAgents([observation({ display: { issues: [
     { number: 1, title: 'a', repo: 'agents-office' },

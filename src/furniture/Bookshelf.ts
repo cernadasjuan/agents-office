@@ -2,10 +2,14 @@ import * as THREE from 'three';
 import { getToonMaterial } from '../utils/Materials.js';
 import { Colors } from '../utils/Colors.js';
 
-export function createBookshelf() {
+/**
+ * `color` lets a room give its shelves a distinct finish (issue #128: the library-knowledge
+ * shelves render white, so an agent never confuses them with an ordinary bookshelf).
+ */
+export function createBookshelf(color: number | THREE.Color = Colors.bookshelf) {
   const group = new THREE.Group();
 
-  const shelfMat = getToonMaterial(Colors.bookshelf);
+  const shelfMat = getToonMaterial(color);
 
   // Back panel
   const backGeo = new THREE.BoxGeometry(1.6, 2.0, 0.04);

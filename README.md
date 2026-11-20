@@ -22,6 +22,21 @@ pnpm build
 pnpm dev
 ```
 
+`pnpm smoke` is a separate, opt-in check (issue #89): it starts the dev server against a
+fixture agent list on an OS-assigned free port (never a fixed one, never 5173), opens it in
+one headless Chromium page (`playwright` is a dev dependency, never a runtime one, P6), and
+fails on any page error. It never runs as part of `pnpm test`.
+
+`pnpm install` does not fetch Chromium for this `playwright` version; run this once, on a
+fresh clone or after a `playwright` upgrade:
+
+```bash
+npx playwright install chromium
+```
+
+`pnpm smoke` checks Chromium is installed before it starts anything, and prints this exact
+command if it is missing.
+
 ## macOS launcher (this fork)
 
 A fork-only launcher app so the office opens from Spotlight or Applications instead of a
@@ -39,7 +54,7 @@ or after moving the clone, so the launcher keeps pointing at the right path.
 
 Opening "Agents Office":
 - **Cold start** (nothing answers the port): starts the dev server with this fork's plugins
-  (`herdr,github,bmad,missions,library,peek`, the same set as `pnpm dev:fork`) in the
+  (`herdr,github,bmad,missions,library,peek,skills`, the same set as `pnpm dev:fork`) in the
   background, then opens the office in your default browser.
 - **Warm start** (the office already answers the port): opens the office in your browser
   only; it never starts a second server.
@@ -235,9 +250,9 @@ This fork adds a second layout, `building`, and makes it the default. It opens i
 - **Your office:** the first room, east of the hall. Agents with a fresh or aging wait (blocked or your turn) walk in and queue in front of your desk: fresh waits first, then aging waits, the longest wait first inside each band. A cold wait leaves the queue for the lounge. When one leaves, the line moves up. The queue has 23 spots in five staggered rows (2.3 m between the spots of a row), so queued agents and their labels stand apart; a 24th wait opens a second waiting room. The office is furnished: a rug under the desk, a credenza and a display shelf behind it, a floor lamp, wall art, a lounge corner (a sofa, two armchairs and a low table) in the front corner away from the door, and eight plants. Nothing stands on a queue spot or in a door path. Over the door of your office (not a second waiting room), on the hall side, hangs your portrait, with "N waiting" under it when agents wait for you.
 - **Lounges:** three sofas, a coffee machine and ten plants, tall and small, in the corners and between the sofas.
 - **Home desks:** each session gets its own desk for its whole life, from one shared pool (the hall desks, then a rented desk room when those run out). Coding, debugging, deploying, planning, reviewing and writing docs happen there. A mission agent with a war room does those at that room's furniture instead (see "missions: war rooms" below). With the herdr plugin, sessions of one herdr workspace sit at neighboring desks; the building no longer rents a separate room per workspace.
-- **Trips:** research goes to a bookshelf, tests to a test station, breaks to a sofa or the coffee machine. The agent walks back home when desk work starts again. A trip starts only when the new activity lasts 4 seconds, so short tool calls do not make agents walk.
-- **Subagents** stand around their parent's desk.
-- **Library:** the building opens a Library room right after your office. Research trips go there first. With the `library` plugin, librarian subagents (types in `AGENTS_OFFICE_LIBRARIAN_TYPES`, default `bibliotheque-librarian`) carry a book and walk between the Library, while they research, and the agent they serve.
+- **Trips:** tests go to a test station, breaks to a sofa or the coffee machine. A main session's own research stays at its desk, no trip at all (issue #128): only the Librarian persona (Prospero, see "bmad: persona hats" below) fetches from the Library shelves. The agent walks back home when desk work starts again. A trip starts only when the new activity lasts 4 seconds, so short tool calls do not make agents walk.
+- **Subagents** stand around their parent's desk, researching included; a war room's own subagent stays in that room instead.
+- **Library:** the building opens a Library room south-east of the hall, right after your office (issue #120). Rooms are remembered by the order you rent them, not by kind, so for an existing saved building of 3 or more rooms this is a one-time move: the room that used to sit south-east (whichever one you rented third) now sits north-east instead, with nothing about that room itself changed. Its shelves render white, to tell library knowledge apart from any other bookshelf (issue #128). Only an agent running the Librarian persona (the hat plugin's own `librarian` badge, see "bmad: persona hats" below) fetches from them, main session or subagent; everyone else keeps its desk or, inside a war room, that room's own furniture. With the `library` plugin, librarian subagents (types in `AGENTS_OFFICE_LIBRARIAN_TYPES`, default `bibliotheque-librarian`) also carry a book while they research.
 - **Growth:** when a kind of station runs out, the building adds a room of that kind next to the others: desks, library, test lab, lounge, or another waiting room. Rooms are never removed, and the browser remembers them.
 - **Wayfinding:** each room has a name label above its center ("LIBRARY", "LOUNGE 2"). In the overview the label keeps a readable size on screen and draws on top, with short lines ("DESKS" / "WS10"); zoom in or point at the room for the full name. A line too long for the compact face cuts in the middle, not the front (`middleEllipsis` in `src/addons/building/roomLabels.ts`), so two names that share a long prefix still read differently (issue #87). In first person it is a small plate high in the room: walls hide it, and the label of the room you stand in hides. Lounges are numbered in the order the building adds them. Each door has a frame (two posts and a lintel) in the room's floor color.
 - **Furniture library:** code builds every piece; nothing is loaded from a file. `src/furniture/index.ts` lists each piece (`PIECES`), and `src/addons/building/furnishing.ts` holds one plan per room kind with the pieces and their positions.
@@ -270,9 +285,14 @@ A plugin is a folder `plugins/<name>/` with an `index.ts` (server: sources, enri
 
 ### bmad: persona hats
 
-The `bmad` plugin shows which BMAD personas an agent plays. Each persona the agent loaded gets a toon hat on the figure's head. The hats stack in the order the agent loaded the personas: Sally wears a beret, Winston a hard hat, Amelia a beanie, Quinn a detective cap, John a top hat, Mary a graduation cap, Bob a baseball cap, Dexter a deerstalker, Leo a crown and Atlas a miner helmet. Other personas get a colored party hat. The figure shows up to 4 hats and a `+N` marker for the others. The label adds the persona names to the activity line, for example "Researching · Sally, Winston".
+The `bmad` plugin shows which BMAD personas an agent plays. Each persona the agent loaded gets a toon hat on the figure's head. The hats stack in the order the agent loaded the personas: Sally wears a beret, Winston a hard hat, Amelia a beanie, Quinn a detective cap, John a top hat, Mary a graduation cap, Bob a baseball cap, Dexter a deerstalker, Leo a crown, Atlas a miner helmet, and Prospero (the Bibliothèque Librarian, issue #149) a small stack of books with a bookmark. Other personas get a colored party hat. The figure shows up to 4 hats and a `+N` marker for the others. The label adds the persona names to the activity line, for example "Researching · Sally, Winston".
 
 Only tool calls count: a Bash call to `bmad.py agent <name>`, a Skill call for a persona (or `bmad` with the persona as the first word), or a subagent whose type is a persona. Text in prompts or answers never counts, and `bmad.py resolve` or `list` does not count. The plugin reads only the bytes that the transcript added since the last poll (at most 4 MB per poll). The API gets only the persona ids as badges.
+
+
+### skills: used skills in the agent card
+
+The `skills` plugin lists every skill an agent used at least once this session, next to its personas in the card's "Persona / Skills" row. Only a `Skill` tool call counts, read incrementally from the same transcript bytes `bmad` reads; a skill name in a prompt or an answer never counts. Without this plugin loaded, the row falls back to showing personas only.
 
 
 ### GitHub: kanban board and issue cards
@@ -405,7 +425,7 @@ AGENTS_OFFICE_PLUGINS=jira pnpm dev
 - **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on a row in the triage list also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
 - **N** selects the next agent in the triage queue (the fresh or aging attention bands, in the same order as the panel's needs-you/your-turn groups), cycling back to the first past the end. A cold start, or a current selection that left the queue, goes to the first agent in the queue
 - **Esc** clears the selection (in first person it first releases the camera). A click that misses every figure clears it too, the same as Esc (a drag release never counts as that click; a click while the first-person camera is engaged looks around instead, per issue #133)
-- **Agent card:** a selection opens a card left of the triage panel. It shows the name, the activity (attention-overridden the same way as the panel row and the floating label — "Waiting for you" or "Your turn", never a raw activity like "Taking a break", while attention is set), the attention band and wait, the herdr workspace, the provider, the personas, the subagents (a click selects one) and up to 10 linked issues, newest first, or "No linked issues". An issue reads `<repo>#N` when the server knows its repository. With the github plugin, such an issue of a configured repository is a link to GitHub. An issue number alone never links. With the `peek` plugin, the card also shows Recent, Assets and Equipment (see the peek plugin). The card updates in place on each poll. A click on another agent changes the card content. Esc or the close button closes it. The camera puts the selected figure in the free area left of the card
+- **Agent card:** a selection opens a card left of the triage panel. It shows the name, a short stable id next to it, the activity (attention-overridden the same way as the panel row and the floating label — "Waiting for you" or "Your turn", never a raw activity like "Taking a break", while attention is set), the attention band and wait, the herdr workspace, the provider (a small logo mark next to the "Codex"/"Claude Code" text, a rounded square for Claude Code and a hexagon for Codex), a "Persona / Skills" row (every persona badge, then every skill the agent used this session — without the `skills` plugin the row falls back to personas only), the subagents (a click selects one) and up to 10 linked issues, newest first, or "No linked issues". An issue reads `<repo>#N` when the server knows its repository. With the github plugin, such an issue of a configured repository is a link to GitHub. An issue number alone never links. With the `peek` plugin, the card also shows Recent, Assets and Equipment (see the peek plugin). The card updates in place on each poll. A click on another agent changes the card content. Esc or the close button closes it. The camera puts the selected figure in the free area left of the card. The floating label over the agent's figure shows the same short id on its own line, hidden in compact labels
 - **F** recenters the camera on the selected agent (or flies to the first agent in the queue when none is selected) and highlights the card's "Focus in herdr" button for about 1.5 s, without sending the request: a click on the button still does that, per the decision on issue #85 (AC2/AC3)
 - **V** to switch the labels between `smart` (the default) and `all` full labels. `#labels=all` in the URL starts with all labels
 - **/** gives the triage panel's filter field the focus, opening the panel first if it is collapsed. Typing hides rows whose name and activity do not match, case-insensitively; an empty filter shows every row again. Shift+/ (`?`) still opens the legend, not the filter
@@ -415,7 +435,8 @@ AGENTS_OFFICE_PLUGINS=jira pnpm dev
 - The office remembers the last view (first person, overview or isometric) in the browser and opens in it after a reload. `#view=overview`, `#view=first-person` or `#view=iso` in the URL wins over the saved view. The side panel header shows the layout and the view.
 - First person has no bounding box: you can walk through every doorway into a room, and fly above the building (Space). Only the floor stops the camera. The ceiling hides when the camera is above it (6 m), in the overview and in the isometric view. There is no wall collision.
 - **Shift+L** switches the layout after a confirmation (the page reloads). The layout choice is saved too.
-- `#view=overview` in the URL starts in the overview, `#view=iso` in the isometric view. `#focus=<agent id>` selects that agent when it appears (agent IDs change when the server restarts)
+- `#view=overview` in the URL starts in the overview, `#view=iso` in the isometric view. `#select=<agent id>` (`#focus=`, its older name, still works) selects that agent when it appears (agent IDs change when the server restarts). `#zoom=<distance>` starts the view at that camera distance instead of its own default framing; the number is the same overview-equivalent distance the side panel's zoom reads, for both the overview and the isometric view (issue #89)
+- `#room=office`, `#room=library` or `#room=<mission id>` frames that room instead, in whichever view you start in: the overview and the isometric view fly to the room's bounds, first person stands inside it facing its main wall. Useful for a screenshot of a room's boards without hunting for it by hand. Read-only, and ignored when the name matches no room (for example the fork's building layout is not active, or that room has not opened yet). `#room=office` always means your own office, never a later overflow waiting room (issue #89)
 
 ## Architecture
 

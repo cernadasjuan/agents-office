@@ -103,6 +103,13 @@ const BUILDERS: Record<string, () => Hat> = {
     [dome(0.16), 0xe67e22],
     [disc(0.18, 0.015), 0xe67e22],
   ], [new THREE.CylinderGeometry(0.035, 0.035, 0.03, 10).rotateX(Math.PI / 2), 0xfff3b0, [0, 0.08, 0.16]]),
+  // Prospero: a small stack of three books, a bookmark ribbon standing up from the top one
+  librarian: () => assemble('book-stack', 0.16, [
+    [new THREE.BoxGeometry(0.26, 0.04, 0.2), 0x8b6914, [0, 0.02, 0]],
+    [new THREE.BoxGeometry(0.22, 0.04, 0.17), 0xa33b3b, [0, 0.06, 0]],
+    [new THREE.BoxGeometry(0.18, 0.04, 0.14), 0x1f2a44, [0, 0.1, 0]],
+    [new THREE.BoxGeometry(0.025, 0.09, 0.012), 0xf1c40f, [0.06, 0.16, 0.06]],
+  ]),
 };
 
 const PARTY_COLORS = [0xe84393, 0x00b894, 0x6c5ce7, 0xfd9644, 0x0984e3, 0xd63031];

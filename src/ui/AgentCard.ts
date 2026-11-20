@@ -1,4 +1,4 @@
-import { activityLabel, type AgentExtras, type AgentInfo } from '../agents/AgentData.js';
+import { activityLabel, shortAgentId, type AgentExtras, type AgentInfo } from '../agents/AgentData.js';
 import { officeSelection, type SelectionState } from '../scene/Selection.js';
 import { attentionBand, attentionLine } from './attention.js';
 
@@ -17,6 +17,37 @@ const CARD_GAP_PX = 8;
 const MIN_FREE_AREA_PX = 240;
 const STATUS_MS = 3000;
 const PULSE_MS = 1500;
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * A small provider mark (issue #171): simple geometry, not a downloaded brand asset, so it
+ * carries no license to track. A rounded square for Claude Code, a hexagon for Codex — two
+ * different shapes, not just two colors, so the distinction still reads for a colorblind
+ * viewer. Always a sibling of the provider's text name, never a replacement for it (AC3: text
+ * never disappears, since this SVG never fails to load the way an external image could).
+ */
+function createProviderMark(doc: Document, provider: 'codex' | undefined): SVGSVGElement {
+  const svg = doc.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
+  svg.setAttribute('width', '12');
+  svg.setAttribute('height', '12');
+  svg.setAttribute('viewBox', '0 0 14 14');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('provider-mark');
+  const shape = doc.createElementNS(SVG_NS, provider === 'codex' ? 'polygon' : 'rect');
+  if (provider === 'codex') {
+    shape.setAttribute('points', '7,0.5 13,4 13,10 7,13.5 1,10 1,4');
+    shape.setAttribute('fill', '#a8b8ff');
+  } else {
+    shape.setAttribute('x', '1');
+    shape.setAttribute('y', '1');
+    shape.setAttribute('width', '12');
+    shape.setAttribute('height', '12');
+    shape.setAttribute('rx', '3');
+    shape.setAttribute('fill', '#9fe0c0');
+  }
+  svg.appendChild(shape);
+  return svg;
+}
 
 export type CardIssue = NonNullable<AgentExtras['issues']>[number];
 
@@ -112,6 +143,7 @@ interface Section {
 export class AgentCard {
   private readonly root: HTMLElement;
   private readonly name: HTMLElement;
+  private readonly idTag: HTMLElement;
   private readonly activity: HTMLElement;
   private readonly wait: HTMLElement;
   private readonly band: HTMLElement;
@@ -120,7 +152,7 @@ export class AgentCard {
   private readonly parentRow: HTMLElement;
   private readonly actionRow: HTMLElement;
   private readonly status: HTMLElement;
-  private readonly personas: Section;
+  private readonly personaSkills: Section;
   private readonly subagents: Section;
   private readonly issues: Section;
   private readonly selection: SelectionState;
@@ -149,13 +181,17 @@ export class AgentCard {
     this.root.style.width = `${CARD_WIDTH_PX}px`;
 
     const header = el('div', 'inspector-header');
+    const titleGroup = el('div', 'inspector-title');
     this.name = el('h3', 'inspector-name');
+    this.idTag = el('span', 'inspector-id');
+    this.idTag.title = 'Agent id';
+    titleGroup.append(this.name, this.idTag);
     const close = el('button', 'inspector-close', '×');
     close.type = 'button';
     close.title = 'Close (Esc)';
     close.setAttribute('aria-label', 'Close the agent card');
     close.addEventListener('click', () => this.selection.clear());
-    header.append(this.name, close);
+    header.append(titleGroup, close);
 
     const state = el('div', 'inspector-state');
     this.activity = el('span', 'inspector-activity');
@@ -167,6 +203,9 @@ export class AgentCard {
     this.provider = el('dd', 'inspector-provider');
     this.workspace = el('dd', 'inspector-workspace');
     facts.append(el('dt', '', 'Provider'), this.provider, el('dt', '', 'Workspace'), this.workspace);
+    // The mark is a sibling of the text, never a replacement (AC3): the text node always
+    // exists even before the first `fill()` call fills in the real provider.
+    this.provider.append(createProviderMark(doc, undefined), this.text('span', 'Claude Code'));
 
     this.parentRow = el('div', 'inspector-parent');
     this.actionRow = el('div', 'inspector-actions');
@@ -180,12 +219,12 @@ export class AgentCard {
       root.append(el('h4', '', title), body);
       return { root, body };
     };
-    this.personas = section('inspector-personas', 'Personas');
+    this.personaSkills = section('inspector-personas', 'Persona / Skills');
     this.subagents = section('inspector-subagents', 'Subagents');
     this.issues = section('inspector-issues', 'Issues');
 
     this.root.append(header, state, this.wait, facts, this.parentRow, this.actionRow, this.status,
-      this.personas.root, this.subagents.root, this.issues.root);
+      this.personaSkills.root, this.subagents.root, this.issues.root);
     parent.appendChild(this.root);
 
     this.selection.onChange(() => this.refresh());
@@ -330,14 +369,16 @@ export class AgentCard {
     this.band.textContent = band ?? '';
     this.band.hidden = band === undefined;
     if (band) this.band.dataset.band = band;
-    this.provider.textContent = extras.provider === 'codex' ? 'Codex' : 'Claude Code';
+    this.idTag.textContent = `#${shortAgentId(agent.id)}`;
+    const providerName = extras.provider === 'codex' ? 'codex' : undefined;
+    this.provider.replaceChildren(createProviderMark(this.provider.ownerDocument, providerName), this.text('span', providerName === 'codex' ? 'Codex' : 'Claude Code'));
     this.workspace.textContent = extras.group?.label || 'No workspace';
 
     // Lists are rebuilt only when their content changes, so a focused button survives a poll.
     const children = this.agents.filter((candidate) => candidate.extras?.parentId === agent.id && candidate.id !== agent.id);
     const parent = extras.parentId ? this.agents.find((candidate) => candidate.id === extras.parentId) : undefined;
     const available = actions.filter((action) => action.available(agent));
-    const key = JSON.stringify([agent.id, extras.badges, extras.issues?.slice(0, CARD_MAX_ISSUES),
+    const key = JSON.stringify([agent.id, extras.provider, extras.badges, extras.skills, extras.issues?.slice(0, CARD_MAX_ISSUES),
       children.map((child) => [child.id, child.name, activityLabel(child)]), parent?.id, parent?.name, available.map((a) => a.id)]);
     if (agent.id !== this.shownId) {
       this.shownId = agent.id;
@@ -346,7 +387,16 @@ export class AgentCard {
     if (key === this.renderedKey) return;
     this.renderedKey = key;
 
-    this.fillList(this.personas.body, extras.badges ?? [], 'No personas', (badge) => this.text('li', badge));
+    // Persona / Skills (issue #166): personas first, then every skill used this session.
+    // Without the skills plugin, extras.skills is undefined and the row shows personas only
+    // (graceful degradation, the same pattern every other optional extras field already follows).
+    const personaItems = (extras.badges ?? []).map((badge) => ({ kind: 'persona' as const, label: badge }));
+    const skillItems = (extras.skills ?? []).map((skill) => ({ kind: 'skill' as const, label: skill }));
+    this.fillList(this.personaSkills.body, [...personaItems, ...skillItems], 'No personas or skills', (item) => {
+      const li = this.text('li', item.label);
+      if (item.kind === 'skill') li.classList.add('skill');
+      return li;
+    });
     this.fillList(this.subagents.body, children, 'No subagents', (child) => {
       const item = this.text('li', '');
       item.appendChild(this.selectButton(child.id, `${child.name} · ${activityLabel(child)}`));
