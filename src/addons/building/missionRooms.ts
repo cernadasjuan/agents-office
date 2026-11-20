@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { createMeetingTable } from '../../furniture/MeetingTable.js';
+import { PIECES } from '../../furniture/index.js';
 import { getToonMaterial } from '../../utils/Materials.js';
 import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
@@ -121,7 +121,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
 
   // The table and its seats; more agents stand around it
   const center = frame.point(0, 6.2);
-  const table = createMeetingTable();
+  const table = PIECES.meetingTable().create();
   table.position.copy(center);
   group.add(table);
   for (let i = 0; i < TABLE_SEATS; i++) {

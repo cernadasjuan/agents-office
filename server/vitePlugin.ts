@@ -9,6 +9,7 @@ import { attentionEnricher } from './attention.js';
 import { isOfficePlugin, pluginEntry } from './plugins.js';
 import { describeWorld, observe, projectAgents, projectPeek, projectWorld, VIEW_NAMES, type Observation, type OfficePlugin, type OfficeView } from './seam.js';
 import { defaultAuditLogPath, WriteActions } from './actions.js';
+import { portraitPathFrom, readPortrait } from './portrait.js';
 
 function isLoopback(address: string | undefined): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
@@ -26,6 +27,8 @@ export interface AgentDetectorOptions {
   codexHome?: string | null;
   /** Audit log for write actions. Default: AGENTS_OFFICE_AUDIT_LOG, else a file in the OS temp folder. */
   auditLogPath?: string;
+  /** The picture over the office door. Default: AGENTS_OFFICE_PORTRAIT, else none. null turns it off. */
+  portraitPath?: string | null;
 }
 
 /**
@@ -208,6 +211,27 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
           res.statusCode = 500;
           res.end(JSON.stringify({ error: 'Unable to read the view' }));
         }
+      });
+
+      // Read-only and opt-in: without a valid portrait file the answer is 204 and the office shows a placeholder
+      const portraitPath = settings.portraitPath === undefined ? portraitPathFrom() : settings.portraitPath;
+      server.middlewares.use('/api/portrait', async (req, res) => {
+        if (!admit(server, req, res)) return;
+        if (!isExactPath(req)) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: 'Not found' }));
+          return;
+        }
+        const portrait = await readPortrait(portraitPath);
+        if (!portrait) {
+          res.removeHeader('Content-Type');
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+        res.setHeader('Content-Type', portrait.type);
+        res.setHeader('Content-Length', portrait.bytes.length);
+        res.end(portrait.bytes);
       });
 
       server.middlewares.use('/api/world', async (req, res) => {
