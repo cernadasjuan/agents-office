@@ -146,13 +146,17 @@ The two thresholds are one constant, `ATTENTION_BANDS` in `src/ui/attention.ts`.
 
 Subagents never ask; their parent does. Without a status in the session file, nothing changes.
 
+### Stuck sessions
+
+A session can stay busy with no progress; today it looks the same as a session that is actually working. A busy session with no transcript write for 60 min shows "Stuck?" in its label and in its panel row, in place of the activity. A long tool call still counts as progress: only the transcript's write time matters, not how long the call runs. The mark clears on its own on the next poll once the session writes again. The threshold is one constant, `STUCK_AFTER_MINUTES` in `src/ui/attention.ts`, next to `ATTENTION_BANDS`. Subagents never get this mark; their parent does. A session without a status, a transcript, or a known write time keeps the old behavior. Like a fresh wait, a stuck mark always gets the full floating label, so it shows even on a figure far from the camera and not selected.
+
 ### Triage list
 
 The side panel lists the agents by what you must do:
 
 1. **Needs you:** blocked agents, fresh waits first, then aging waits, the longest wait first inside each band. Each row shows the name, the wait ("12 min") and the activity.
 2. **Your turn:** agents that wait for your next prompt, in the same order. The group starts collapsed when it has more than 5 agents.
-3. **Working:** busy agents. Subagents are indented under their parent.
+3. **Working:** busy agents. Subagents are indented under their parent. A stuck one (no transcript write for 60 min) reads "Stuck?" instead of its activity.
 4. **Idle:** the rest. The group starts collapsed.
 5. **Cold:** blocked or your-turn agents that waited 24 h or more, the longest wait first. The group starts collapsed and shows its count, so a cold wait never vanishes.
 
@@ -171,7 +175,7 @@ The panel tells you how fresh its data is:
 - After 2 failed polls in a row (no answer, an HTTP error or bad JSON), the footer turns amber and adds "retrying". After 5, it turns red and says "Server not reachable". The scene keeps the last known agents. The next good answer clears the warning.
 - A subagent at rest gave its final answer, so its label reads "Done", not "Taking a break". A main session at rest keeps "Taking a break".
 
-The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, the attention bands, the "Done" label, the rooms (building layout only) and the keys. Beds, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it.
+The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, the attention bands, the "Done" label, the "Stuck?" mark, the rooms (building layout only) and the keys. Beds, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it.
 
 ### Location: stations
 
@@ -219,12 +223,11 @@ This fork adds a second layout, `building`, and makes it the default. It opens i
 
 - **Your office:** the first room, east of the hall. Agents with a fresh or aging wait (blocked or your turn) walk in and queue in front of your desk: fresh waits first, then aging waits, the longest wait first inside each band. A cold wait leaves the queue for the lounge. When one leaves, the line moves up. The queue has 23 spots in five staggered rows (2.3 m between the spots of a row), so queued agents and their labels stand apart; a 24th wait opens a second waiting room. The office is furnished: a rug under the desk, a credenza and a display shelf behind it, a floor lamp, wall art, a lounge corner (a sofa, two armchairs and a low table) in the front corner away from the door, and eight plants. Nothing stands on a queue spot or in a door path. Over the door of your office (not a second waiting room), on the hall side, hangs your portrait, with "N waiting" under it when agents wait for you.
 - **Lounges:** three sofas, a coffee machine and ten plants, tall and small, in the corners and between the sofas.
-- **Home desks:** each session gets its own desk for its whole life. Coding, debugging, deploying and planning happen there. A planning agent with a war room plans at that room's whiteboard instead (see "missions: war rooms" below).
-- **Trips:** research goes to a bookshelf, tests to a test station, reviews and docs to a writing desk, breaks to a sofa or the coffee machine. The agent walks back home when desk work starts again. A trip starts only when the new activity lasts 4 seconds, so short tool calls do not make agents walk.
-- **Workspace rooms:** with the herdr plugin, sessions of one herdr workspace get their desks in a room named after it ("Desks · <workspace>"). Sessions outside herdr keep the hall desks. A session whose workspace shows up later moves there once.
+- **Home desks:** each session gets its own desk for its whole life, from one shared pool (the hall desks, then a rented desk room when those run out). Coding, debugging, deploying, planning, reviewing and writing docs happen there. A mission agent with a war room does those at that room's furniture instead (see "missions: war rooms" below). With the herdr plugin, sessions of one herdr workspace sit at neighboring desks; the building no longer rents a separate room per workspace.
+- **Trips:** research goes to a bookshelf, tests to a test station, breaks to a sofa or the coffee machine. The agent walks back home when desk work starts again. A trip starts only when the new activity lasts 4 seconds, so short tool calls do not make agents walk.
 - **Subagents** stand around their parent's desk.
 - **Library:** the building opens a Library room right after your office. Research trips go there first. With the `library` plugin, librarian subagents (types in `AGENTS_OFFICE_LIBRARIAN_TYPES`, default `bibliotheque-librarian`) carry a book and walk between the Library, while they research, and the agent they serve.
-- **Growth:** when a kind of station runs out, the building adds a room of that kind next to the others: desks, library, test lab, writing room, lounge, or another waiting room. Rooms are never removed, and the browser remembers them.
+- **Growth:** when a kind of station runs out, the building adds a room of that kind next to the others: desks, library, test lab, lounge, or another waiting room. Rooms are never removed, and the browser remembers them.
 - **Wayfinding:** each room has a name label above its center ("LIBRARY", "LOUNGE 2"). In the overview the label keeps a readable size on screen and draws on top, with short lines ("DESKS" / "WS10"); zoom in or point at the room for the full name. In first person it is a small plate high in the room: walls hide it, and the label of the room you stand in hides. Lounges are numbered in the order the building adds them. Each door has a frame (two posts and a lintel) in the room's floor color.
 - **Furniture library:** code builds every piece; nothing is loaded from a file. `src/furniture/index.ts` lists each piece (`PIECES`), and `src/addons/building/furnishing.ts` holds one plan per room kind with the pieces and their positions.
 - **Cut-away walls:** in the overview and the isometric view, the room and hall walls drop to 0.5 m and the door frames to 1.2 m, so you see each room floor, the figures in it and the doors. First person keeps the full walls.

@@ -142,7 +142,7 @@ Each slice is one issue and one pull request into the fork `main`. Order follows
 | 17 | Pods around the parent | T3 | 5, 15 |
 | 18 | Library room and librarian trips | T3 | 16 |
 | 19 | CEO office and waiting queue | T3 | 3, 16 |
-| 20 | Rooms by herdr workspace | T3 | 11, 16 |
+| 20 | ~~Rooms by herdr workspace~~ — replaced by #118 (floors per repo); retired in #138 | T3 | 11, 16 |
 | 21 | Reply spike, then reply from the office | T3 | 19 |
 | 22 | Harness plugin: mission war rooms with past-session beds, walls and a locked room when closed | T2 | 2, 16 |
 

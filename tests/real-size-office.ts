@@ -35,7 +35,8 @@ function issuesFor(i: number): Array<{ number: number; title: string }> | undefi
 export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManager; layout: BuildingLayout; github: GithubOfficeExtension } {
   const scene = new THREE.Scene();
   addLighting(scene);
-  const rooms = ['office', 'library', 'lounge', 'lounge', 'lounge', ...Array.from({ length: 11 }, (_, i) => `desks@ws${i}`)];
+  // Per-workspace desk rooms are retired (#138): the 11 workspaces share the desk pool, the room count stays the same with plain `desks` rooms.
+  const rooms = ['office', 'library', 'lounge', 'lounge', 'lounge', ...Array.from({ length: 11 }, () => 'desks')];
   const store = new Map([['agents-office.building.rooms', JSON.stringify(rooms)]]);
   const layout = new BuildingLayout(scene, createOffice(scene), {
     storage: { getItem: (key: string) => store.get(key) ?? null, setItem: () => undefined },

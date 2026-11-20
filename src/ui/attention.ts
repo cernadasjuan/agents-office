@@ -1,4 +1,4 @@
-import type { AgentExtras } from '../agents/AgentData.js';
+import { STUCK_LABEL, type AgentExtras } from '../agents/AgentData.js';
 
 const TITLE = 'Agents Office';
 
@@ -7,6 +7,13 @@ const TITLE = 'Agents Office';
  * 24 h, cold from 24 h. Only a fresh wait calls for the user. Change the bands here.
  */
 export const ATTENTION_BANDS = { freshUnderMinutes: 15, coldFromMinutes: 24 * 60 } as const;
+
+/**
+ * A busy session with no transcript write for this long looks the same as a
+ * working one. The server marks it stuck; the label and the panel row then
+ * show "Stuck?" instead of the activity. Change the threshold here.
+ */
+export const STUCK_AFTER_MINUTES = 60;
 
 export type AttentionBand = 'fresh' | 'aging' | 'cold';
 
@@ -61,11 +68,25 @@ export function oldestFreshWait<T extends { extras?: Wait }>(agents: T[]): T | u
   return best;
 }
 
-type Queued = { id: string; extras?: Wait };
+type Queued = { id: string; name: string; extras?: Wait };
+
+/** A stable order for two agents with the same wait: by name, then by id. */
+function byName<T extends { id: string; name: string }>(a: T, b: T): number {
+  return a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/**
+ * The one wait order every surface shares: by `compareWaits`, with a tied
+ * wait broken by `byName`. The triage panel's groups and key N's queue both
+ * sort with this, so a tie never cycles in a different order than it lists.
+ */
+export function byWait<T extends { id: string; name: string; extras?: Wait }>(a: T, b: T): number {
+  return compareWaits(a.extras, b.extras) || byName(a, b);
+}
 
 /**
  * The triage panel's two queued groups, in the panel's own order: Needs you
- * (a block) before Your turn, each sorted by `compareWaits`. A cold wait is
+ * (a block) before Your turn, each sorted by `byWait`. A cold wait is
  * never queued. This is the one bucket function the panel's `triageGroup`
  * and key N's queue both read, so the two stay in the same order.
  */
@@ -76,11 +97,11 @@ export function queueBucket(wait: Wait): 'needs-you' | 'your-turn' | undefined {
   return undefined;
 }
 
-/** Key N's queue: Needs you first, then Your turn, each sorted by `compareWaits` — the same order as the triage panel's groups. */
+/** Key N's queue: Needs you first, then Your turn, each sorted by `byWait` — the same order as the triage panel's groups, tie for tie. */
 export function triageQueue<T extends Queued>(agents: T[]): T[] {
   const bucketOf = (agent: T) => queueBucket(agent.extras);
-  const needsYou = agents.filter((agent) => bucketOf(agent) === 'needs-you').sort((a, b) => compareWaits(a.extras, b.extras));
-  const yourTurn = agents.filter((agent) => bucketOf(agent) === 'your-turn').sort((a, b) => compareWaits(a.extras, b.extras));
+  const needsYou = agents.filter((agent) => bucketOf(agent) === 'needs-you').sort(byWait);
+  const yourTurn = agents.filter((agent) => bucketOf(agent) === 'your-turn').sort(byWait);
   return [...needsYou, ...yourTurn];
 }
 
@@ -89,7 +110,7 @@ export function triageQueue<T extends Queued>(agents: T[]): T[] {
  * past the end. The first agent when `currentId` is null or not in the queue
  * (a cold-start press, or the current selection has left the queue).
  */
-export function nextInQueue<T extends Queued>(queue: T[], currentId: string | null): T | null {
+export function nextInQueue<T extends { id: string }>(queue: T[], currentId: string | null): T | null {
   if (queue.length === 0) return null;
   const index = currentId === null ? -1 : queue.findIndex((agent) => agent.id === currentId);
   return queue[(index + 1) % queue.length];
@@ -107,10 +128,11 @@ export function tabTitleFor(waits: Wait[]): string {
   return tabTitle(counted.filter((w) => w!.attention === 'waiting').length, counted.filter((w) => w!.attention === 'your-turn').length);
 }
 
-/** The label line: the activity, then how long the agent has waited for the user. */
-export function attentionLine(activityLabel: string, attention: string | undefined, waitMinutes: number | undefined): string {
+/** The label line: the activity, then how long the agent has waited for the user, or "Stuck?" when it has gone quiet. */
+export function attentionLine(activityLabel: string, attention: string | undefined, waitMinutes: number | undefined, stuck = false): string {
   if (attention === 'waiting') return `Waiting for you${waitMinutes !== undefined ? ` · ${formatWait(waitMinutes)}` : ''}`;
   if (attention === 'your-turn') return `Your turn${waitMinutes !== undefined ? ` · ${formatWait(waitMinutes)}` : ''}`;
+  if (stuck) return STUCK_LABEL;
   return activityLabel;
 }
 
