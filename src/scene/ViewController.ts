@@ -229,10 +229,12 @@ export class ViewController {
       this.dragPoint = null;
     });
     canvas.addEventListener('click', (event) => {
+      // Pointer lock turns a click into "look around" (issue #133); let it through unselected.
       if (document.pointerLockElement) return;
       if (!isClick(this.pressPoint, { x: event.clientX, y: event.clientY })) return;
       const agentId = this.pickAt(event.clientX, event.clientY);
       if (agentId) this.selection.select(agentId);
+      else this.selection.clear();
     });
     canvas.addEventListener('wheel', (event) => {
       if (!isViewFromAbove(this.currentMode)) return;
