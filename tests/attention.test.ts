@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { attentionEnricher } from '../server/attention.js';
-import { tabTitle } from '../src/ui/attention.js';
+import { oldestFreshWait, tabTitle, type Wait } from '../src/ui/attention.js';
 import type { Observation } from '../server/seam.js';
 
 const NOW = Date.UTC(2026, 10, 18, 12, 0, 0);
@@ -47,4 +47,27 @@ test('the tab title counts blocked agents first, then your turn', () => {
   assert.equal(tabTitle(2, 0), '(2) Agents Office');
   assert.equal(tabTitle(2, 5), '(2) +5 · Agents Office');
   assert.equal(tabTitle(0, 5), '+5 · Agents Office');
+});
+
+function wait(id: string, waitMinutes?: number): { id: string; extras: Wait } {
+  return { id, extras: { attention: 'waiting', waitMinutes } };
+}
+
+test('the oldest fresh wait is the fresh agent that has waited the longest', () => {
+  const agents = [wait('a', 2), wait('b', 12), wait('c', 5)];
+  assert.equal(oldestFreshWait(agents)?.id, 'b');
+});
+
+test('an aging or cold wait never wins over a fresh one, even with a longer wait', () => {
+  const agents = [wait('fresh', 10), wait('aging', 60), wait('cold', 2000)];
+  assert.equal(oldestFreshWait(agents)?.id, 'fresh');
+});
+
+test('without any fresh wait, there is no oldest fresh wait', () => {
+  const agents = [wait('aging', 60), wait('cold', 2000)];
+  assert.equal(oldestFreshWait(agents), undefined);
+});
+
+test('an empty list has no oldest fresh wait', () => {
+  assert.equal(oldestFreshWait([]), undefined);
 });

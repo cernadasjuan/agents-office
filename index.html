@@ -286,6 +286,51 @@
       z-index: 200;
       pointer-events: none;
     }
+    /* Off-screen marker: an arrow at the screen edge pointing at a fresh wait outside the frame (#86). */
+    #offscreen-markers {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 50;
+    }
+    .offscreen-marker {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: none;
+      background: none;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    .offscreen-marker::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      margin: auto;
+      width: 0;
+      height: 0;
+      border-top: 9px solid transparent;
+      border-bottom: 9px solid transparent;
+      border-left: 14px solid var(--agent-color, #ff7a59);
+      filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.6));
+    }
+    /* Markers that would collide merge into one, with a count, instead of stacking unclickable arrows. */
+    .offscreen-marker-cluster::before { display: none; }
+    .offscreen-marker-cluster {
+      border-radius: 50%;
+      background: var(--agent-color, #ff7a59);
+      color: #1a1a2e;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 28px;
+      text-align: center;
+      filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.6));
+    }
+
     .agent-card select {
       width: 100%;
       margin-top: 4px;
@@ -301,6 +346,7 @@
 </head>
 <body>
   <div id="pointer-hint">Click to look around &mdash; WASD to move &mdash; Space/Q up/down &mdash; Shift = fast &mdash; ESC to release &mdash; Click a figure to select &mdash; O = overview &mdash; Shift+L = layout</div>
+  <div id="offscreen-markers"></div>
   <div id="ui-panel">
     <div class="panel-header">
       <div class="panel-title">
