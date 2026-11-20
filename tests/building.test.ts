@@ -232,39 +232,47 @@ test('an ordinary subagent that researches stays at its parent desk', () => {
   assert.match(layout.seatFor(agent('helper', 'researching', { parentId: 'parent' }), null)!.key, /_pod\d$/);
 });
 
-// --- Rooms by workspace ---
+// --- Workspace grouping in the shared desk pool (#138: per-workspace desk rooms retired) ---
 
 const inWorkspace = (label: string) => ({ group: { id: `g-${label}`, label } });
 
-test('sessions of one workspace share a desk room named after it; others keep the hall desks', () => {
-  const { layout, agent, scene, storage } = setup();
+test('tagged sessions sit at the hall desks with everyone else; no desk room is rented for them', () => {
+  const { layout, agent, scene } = setup();
   const a1 = layout.seatFor(agent('a1', 'implementing', inWorkspace('Alpha')), null)!;
-  const a2 = layout.seatFor(agent('a2', 'implementing', inWorkspace('Alpha')), null)!;
   const b1 = layout.seatFor(agent('b1', 'implementing', inWorkspace('Beta')), null)!;
   const loner = layout.seatFor(agent('n', 'implementing'), null)!;
 
-  assert.equal(a1.key.split('_')[0], a2.key.split('_')[0], 'same room');
-  assert.notEqual(a1.key.split('_')[0], b1.key.split('_')[0], 'another room for Beta');
+  assert.deepEqual(layout.roomKinds, ['office', 'library'], 'no new room for two workspaces of one session each');
+  assert.match(a1.key, /^desk_/);
+  assert.match(b1.key, /^desk_/);
   assert.match(loner.key, /^desk_/);
   const labels = scene.children.flatMap((c) => c.children).filter((c) => c.userData.roomLabel !== undefined).map((c) => c.userData.roomLabel);
-  assert.ok(labels.includes('Desks · Alpha') && labels.includes('Desks · Beta'));
-  assert.deepEqual(JSON.parse(storage.get(BUILDING_STORAGE_KEY)!), ['office', 'library', 'desks@Alpha', 'desks@Beta']);
+  assert.ok(!labels.some((label) => label.startsWith('Desks ·')), 'no per-workspace room label');
 });
 
-test('workspace rooms come back by name after a reload', () => {
-  const { layout, agent, storage } = setup();
-  layout.seatFor(agent('a1', 'implementing', inWorkspace('Alpha')), null);
-  const reloaded = setup(storage).layout;
-  const seat = reloaded.seatFor(agent('again', 'implementing', inWorkspace('Alpha')), null)!;
-  assert.match(seat.key, /^room2_/);
-  assert.deepEqual(reloaded.roomKinds, ['office', 'library', 'desks']);
-});
-
-test('a session whose workspace becomes known later moves once to its workspace room', () => {
+test('sessions of one workspace get neighboring desks', () => {
   const { layout, agent } = setup();
-  const hall = layout.seatFor(agent('late', 'implementing'), null)!;
-  assert.match(hall.key, /^desk_/);
-  const moved = layout.seatFor(agent('late', 'implementing', inWorkspace('Gamma')), 'implementing')!;
-  assert.match(moved.key, /^room\d+_implementing_/);
-  assert.equal(layout.seatFor(agent('late', 'implementing', inWorkspace('Gamma')), 'implementing'), null, 'only once');
+  const a1 = layout.seatFor(agent('a1', 'implementing', inWorkspace('Alpha')), null)!;
+  const a2 = layout.seatFor(agent('a2', 'implementing', inWorkspace('Alpha')), null)!;
+  const b1 = layout.seatFor(agent('b1', 'implementing', inWorkspace('Beta')), null)!;
+  const indexOf = (key: string) => Number(key.split('_')[1]);
+
+  assert.equal(Math.abs(indexOf(a1.key) - indexOf(a2.key)), 1, 'Alpha sessions sit next to each other');
+  assert.notEqual(indexOf(b1.key), indexOf(a1.key));
+  assert.notEqual(indexOf(b1.key), indexOf(a2.key));
+});
+
+test('a stored desks@<workspace> room does not come back after a reload', () => {
+  const storage = new Map([[BUILDING_STORAGE_KEY, JSON.stringify(['office', 'library', 'desks@proxy'])]]);
+  const { layout } = setup(storage);
+
+  assert.deepEqual(layout.roomKinds, ['office', 'library']);
+  assert.deepEqual(JSON.parse(storage.get(BUILDING_STORAGE_KEY)!), ['office', 'library']);
+});
+
+test('a session whose workspace becomes known later keeps its desk; home is for life', () => {
+  const { layout, agent } = setup();
+  const first = layout.seatFor(agent('late', 'implementing'), null)!;
+  assert.match(first.key, /^desk_/);
+  assert.equal(layout.seatFor(agent('late', 'implementing', inWorkspace('Gamma')), 'implementing'), null, 'no move');
 });

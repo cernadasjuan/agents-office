@@ -151,9 +151,12 @@ test('the building still opens room walls by name after the merge, and the new r
   const batch = new StaticBatch(scene);
   batch.update();
   const roomCount = layout.roomKinds.length;
+
+  // Fill every hall desk first: the shared pool (#138) means a workspace session only rents a room once those are gone
+  for (let i = 0; i < 8; i++) layout.seatFor({ id: `s${i}`, activity: 'implementing' }, null);
   const before = batch.mergedMeshes.reduce((sum, mesh) => sum + mesh.geometry.attributes.position.count, 0);
 
-  // A workspace session rents a desk room: the eighth room opens a door in the room inside it
+  // One more session rents a desk room: the ninth room opens a door in the room inside it
   layout.seatFor({ id: 'a', activity: 'implementing', extras: { group: { id: 'g', label: 'ws' } } }, null);
   assert.equal(layout.roomKinds.length, roomCount + 1, 'a ring-1 room was added');
   assert.equal(batch.update(), true);
