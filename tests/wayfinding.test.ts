@@ -59,8 +59,9 @@ const framesIn = (root: THREE.Object3D) => {
   return found;
 };
 
-const missionRoom = (title = 'Office roadmap', sleepers = 3) => ({
-  id: `room-${title}`, kind: 'mission' as const, title, state: 'open' as const, sleepers,
+const missionRoom = (title = 'Office roadmap', sleeperCount = 3) => ({
+  id: `room-${title}`, kind: 'mission' as const, title, state: 'open' as const,
+  sleepers: Array.from({ length: sleeperCount }, (_, i) => ({ id: `tomb-${i}`, endedAt: '2026-11-18' })),
   walls: { statement: 'Ship it', docs: [], issues: [], kanban: [] },
 });
 
@@ -303,7 +304,7 @@ test('lounges are numbered in the order they are rented', () => {
   assert.equal(roomTitle('lounge', []), 'Lounge 1');
   assert.equal(roomTitle('lounge', ['office', 'lounge', 'desks', 'lounge']), 'Lounge 3');
   assert.equal(roomTitle('library', ['lounge']), 'Library');
-  assert.equal(roomTitle('desks', [], 'core'), 'Desks · core');
+  assert.equal(roomTitle('desks', []), 'Desks');
 });
 
 test('three lounges in the building are named Lounge 1, Lounge 2 and Lounge 3', () => {

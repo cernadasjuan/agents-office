@@ -122,3 +122,15 @@ test('a poll skipped because one is still running does not report a failure', as
   assert.equal(reports, 0);
   assert.equal(poller.pollHealth.failures, 0);
 });
+
+test('a stuck field in the answer reaches the new agent\'s extras', async () => {
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([{ id: 'a', name: 'agent', activity: 'implementing', stuck: true }])));
+  const addAgent = mock.fn();
+  const stuckManager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent: () => undefined } as unknown as AgentManager;
+  const poller = new AgentPoller(stuckManager) as unknown as { poll(): Promise<void> };
+
+  await poller.poll();
+
+  assert.equal(addAgent.mock.callCount(), 1);
+  assert.deepEqual(addAgent.mock.calls[0].arguments[0].extras, { stuck: true });
+});

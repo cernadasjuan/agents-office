@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createOffice } from '../src/scene/Office.js';
 import { addLighting } from '../src/scene/SceneSetup.js';
 import { BuildingLayout } from '../src/addons/building/BuildingLayout.js';
+import { MAX_TOMBSTONES } from '../src/addons/building/missionRooms.js';
 import { AgentManager } from '../src/agents/AgentManager.js';
 import { bmadHats } from '../plugins/bmad/client.js';
 import { GithubOfficeExtension } from '../plugins/github/client.js';
@@ -35,13 +36,16 @@ function issuesFor(i: number): Array<{ number: number; title: string }> | undefi
 export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManager; layout: BuildingLayout; github: GithubOfficeExtension } {
   const scene = new THREE.Scene();
   addLighting(scene);
-  const rooms = ['office', 'library', 'lounge', 'lounge', 'lounge', ...Array.from({ length: 11 }, (_, i) => `desks@ws${i}`)];
+  // Per-workspace desk rooms are retired (#138): the 11 workspaces share the desk pool, the room count stays the same with plain `desks` rooms.
+  const rooms = ['office', 'library', 'lounge', 'lounge', 'lounge', ...Array.from({ length: 11 }, () => 'desks')];
   const store = new Map([['agents-office.building.rooms', JSON.stringify(rooms)]]);
   const layout = new BuildingLayout(scene, createOffice(scene), {
     storage: { getItem: (key: string) => store.get(key) ?? null, setItem: () => undefined },
   });
+  // Worst case: every war room at the tombstone cap, not just a handful.
   layout.syncWorldRooms(Array.from({ length: REAL_SIZE.missionRooms }, (_, i) => ({
-    id: `m${i}`, kind: 'mission', title: `Mission ${i}`, state: i === 8 ? 'locked' as const : 'open' as const, sleepers: 5,
+    id: `m${i}`, kind: 'mission', title: `Mission ${i}`, state: i === 8 ? 'locked' as const : 'open' as const,
+    sleepers: Array.from({ length: MAX_TOMBSTONES }, (_, j) => ({ id: `m${i}-tomb-${j}`, endedAt: '2026-11-18' })),
     walls: { statement: 'x', docs: ['a'], issues: [], kanban: [] },
   })));
   const manager = new AgentManager(scene, layout);

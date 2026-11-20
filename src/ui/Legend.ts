@@ -1,5 +1,5 @@
-import { ATTENTION_BANDS, formatWait } from './attention.js';
-import { DONE_LABEL } from '../agents/AgentData.js';
+import { ATTENTION_BANDS, STUCK_AFTER_MINUTES, formatWait } from './attention.js';
+import { DONE_LABEL, STUCK_LABEL } from '../agents/AgentData.js';
 
 export interface LegendEntry {
   sign: string;
@@ -17,6 +17,7 @@ export interface LegendSection {
 
 const FRESH = formatWait(ATTENTION_BANDS.freshUnderMinutes);
 const COLD = formatWait(ATTENTION_BANDS.coldFromMinutes);
+const STUCK_AFTER = formatWait(STUCK_AFTER_MINUTES);
 
 const SECTIONS: LegendSection[] = [
   {
@@ -38,6 +39,7 @@ const SECTIONS: LegendSection[] = [
       { sign: 'Cold wait', meaning: `${COLD} or longer. The agent moves to the Cold group.` },
       { sign: 'Needs you', meaning: 'The agent is blocked on you, for example on a permission.' },
       { sign: 'Your turn', meaning: 'The agent finished its turn and waits for your next prompt.' },
+      { sign: STUCK_LABEL, meaning: `A busy agent with no transcript write for ${STUCK_AFTER}. Check the session.` },
     ],
   },
   {
@@ -46,7 +48,7 @@ const SECTIONS: LegendSection[] = [
       { sign: 'Your office', meaning: 'Agents that wait for you stand in line in front of your desk. A "Waiting room" gives the line more space.', layout: 'building' },
       { sign: 'Desks', meaning: 'Each session has a home desk. The room label names the workspace.', layout: 'building' },
       { sign: 'Lounge', meaning: 'Agents at rest, and extra seats when a room is full.', layout: 'building' },
-      { sign: 'Beds', meaning: 'In a mission room, one bed for each finished session of the mission.', plugin: 'missions' },
+      { sign: 'Tombstones', meaning: 'In a mission room, one tombstone for each finished session of the mission. Click or hover one to see which session it was.', plugin: 'missions' },
     ],
   },
   {
