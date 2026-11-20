@@ -11,6 +11,7 @@ import { activeExtensions, currentWorld, setWorld, type World } from './extensio
 import { nextInQueue, tabTitleFor, triageQueue } from './ui/attention.js';
 import { LabelDetailController } from './ui/LabelDetail.js';
 import { AgentCard } from './ui/AgentCard.js';
+import { TombstoneCard } from './ui/TombstoneCard.js';
 import { FrameLoop } from './scene/FrameLoop.js';
 import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
 import { FreshnessFooter } from './ui/freshness.js';
@@ -44,6 +45,9 @@ const agentManager = new AgentManager(scene, createLayout(layoutId, scene, stati
 
 // Agent card: opens on a selection, docked left of the triage panel. Plugins add buttons and links.
 const agentCard = new AgentCard(document.body, { anchor: document.getElementById('ui-panel')! });
+// Tombstone card (issue #127): same dock spot, same selection; shares it with the agent card
+// since a tombstone id never matches an agent id, so only one of the two ever shows.
+const tombstoneCard = new TombstoneCard(document.body, { anchor: document.getElementById('ui-panel')! });
 
 // Camera mode (key O toggles first person and the overview, key I the isometric view) and click to select.
 // Start view: `#view=overview|first-person|iso`, then the last view, then the layout default.
@@ -54,6 +58,7 @@ const view = new ViewController({
   canvas: renderer.domElement,
   scene,
   agents: () => agentManager.getAgents(),
+  tombstones: () => activeExtensions(scene).flatMap((extension) => extension.pickTargets?.() ?? []),
   keys: window,
   hint: document.getElementById('pointer-hint'),
   hash: window.location.hash,
@@ -147,6 +152,7 @@ async function pollWorld(): Promise<void> {
     const world = (await res.json()) as World;
     setWorld(world);
     for (const extension of activeExtensions(scene)) extension.worldChanged?.(world);
+    tombstoneCard.render(world.rooms.flatMap((room) => room.sleepers ?? []));
     labelDetail.sceneChanged();
     frameLoop.sceneChanged();
   } catch {

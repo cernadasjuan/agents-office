@@ -212,7 +212,7 @@
     }
     .agent-provider { color: #9fe0c0; }
     .agent-badge { color: #d0c0ff; }
-    #agent-inspector {
+    #agent-inspector, #tombstone-inspector {
       position: fixed;
       top: 16px;
       right: 352px;
@@ -228,7 +228,7 @@
       backdrop-filter: blur(8px);
       z-index: 100;
     }
-    #agent-inspector[hidden] { display: none; }
+    #agent-inspector[hidden], #tombstone-inspector[hidden] { display: none; }
     .inspector-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
     .inspector-name { font-size: 15px; color: #fff; overflow-wrap: anywhere; }
     .inspector-close {

@@ -26,7 +26,7 @@ members:
   - {kind: gh, ref: "owner/repo#11", title: "Fixes", role: done}
   - {kind: folder, ref: "tickets/x", title: "Folder", role: current}
 journey:
-  - {id: J-1, kind: session}
+  - {id: J-1, kind: session, end: "2026-11-18T19:40:00Z"}
   - {id: J-2, kind: session}
   - {id: J-3, kind: gap}
 threads:
@@ -45,7 +45,12 @@ test('a mission record becomes room walls: statement, docs, issues, kanban and p
   assert.deepEqual(mission.docs, ['Design explainer']);
   assert.deepEqual(mission.issues, [{ number: 46, title: 'Roadmap parent', state: 'open' }, { number: 11, title: 'Fixes', state: 'closed' }]);
   assert.deepEqual(mission.kanban.map((c) => [c.column, c.cards.map((card) => card.number)]), [['Needs you', [2]], ['Open', [1]], ['Done', [3]]]);
-  assert.equal(mission.sleepers, 2);
+  assert.deepEqual(mission.sleepers, [{ id: 'J-1', endedAt: '2026-11-18T19:40:00Z' }, { id: 'J-2' }]);
+});
+
+test('a session entry with no id does not become a tombstone', () => {
+  const mission = summarizeMission('no-id', { title: 'No id', status: 'active', journey: [{ kind: 'session' }, { id: 'J-1', kind: 'session' }] });
+  assert.deepEqual(mission?.sleepers, [{ id: 'J-1' }]);
 });
 
 test('a done mission is a locked room, and folders that are not missions are skipped', () => {

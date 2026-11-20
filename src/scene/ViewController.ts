@@ -4,7 +4,7 @@ import { focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter,
 import { IsometricController, IsometricTween, type IsometricState } from './IsometricCamera.js';
 import { OverviewController, PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
 import { SelectionMarker } from './SelectionMarker.js';
-import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, type ScreenPoint, type SelectionState, type ViewMode } from './Selection.js';
+import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, type PickTarget, type ScreenPoint, type SelectionState, type ViewMode } from './Selection.js';
 
 const FLIGHT_SECONDS = 0.6;
 const FIRST_PERSON_FOCUS_DISTANCE = 4;
@@ -26,6 +26,8 @@ export interface ViewControllerOptions {
   canvas: HTMLCanvasElement;
   scene: THREE.Scene;
   agents: () => ManagedAgent[];
+  /** Other pickable things besides an agent's figure (for example a tombstone). */
+  tombstones?: () => PickTarget[];
   /** Where key presses arrive (the window). */
   keys: Pick<Window, 'addEventListener'>;
   hint?: HTMLElement | null;
@@ -182,7 +184,7 @@ export class ViewController {
     if (selected) this.marker.follow(selected.figure.group.position, elapsed);
   }
 
-  /** The agent whose figure is under a screen point, or null. */
+  /** The agent figure, or other pickable (a tombstone), under a screen point, or null. */
   pickAt(clientX: number, clientY: number): string | null {
     const rect = this.options.canvas.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
@@ -193,7 +195,11 @@ export class ViewController {
     const camera = this.activeCamera;
     camera.updateMatrixWorld();
     this.raycaster.setFromCamera(ndc, camera);
-    return pickAgent(this.raycaster, this.options.agents().map((agent) => ({ id: agent.info.id, object: agent.figure.group })));
+    const targets = [
+      ...this.options.agents().map((agent) => ({ id: agent.info.id, object: agent.figure.group })),
+      ...(this.options.tombstones?.() ?? []),
+    ];
+    return pickAgent(this.raycaster, targets);
   }
 
   private listen(): void {
