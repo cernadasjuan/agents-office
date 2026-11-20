@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
 import { focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
-import { IsometricController, IsometricTween, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
+import { IsometricController, IsometricTween, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
 import { PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
+import type { RoomView } from '../layout/LayoutStrategy.js';
 import { SelectionMarker } from './SelectionMarker.js';
 import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, type PickTarget, type ScreenPoint, type SelectionState, type ViewMode } from './Selection.js';
 
@@ -39,6 +40,8 @@ export interface ViewControllerOptions {
   modeChanged?: (mode: ViewMode) => void;
   /** Pixels to show a selected figure left of the canvas center (the agent card covers the right). */
   figureShiftPx?: () => number;
+  /** `#room=<name>` (issue #89): where the camera should go to show that room, from the active layout. Without it, or for a layout with no rooms, `#room=` does nothing. */
+  roomView?: (name: string) => RoomView | null;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -66,6 +69,18 @@ export class ViewController {
   /** True once the current gesture has panned, even if it ends back near the press point (issue #133). */
   private dragged = false;
   private pendingFocus: string | null;
+  /**
+   * `#zoom=` paired with `#select=`/`#focus=` (issue #89 review, fix round 2): only ever set
+   * when the URL also names an agent to select, and only applies to that exact agent's own
+   * first flight, never a bare `#zoom=` (that only sets the view's own initial framing,
+   * `applyStartZoom` below) and never a different agent `selectionChanged` sees first. A
+   * decoy selected before the named agent ever appears gets its own normal framing, not the
+   * requested zoom; once any other selection or a click happens, the request is dropped for
+   * good, matching `pendingZoomTarget` going stale.
+   */
+  private pendingStartZoom: number | null;
+  /** The one agent id `pendingStartZoom` is reserved for, or null once it no longer applies. */
+  private pendingZoomTarget: string | null;
   private marker: SelectionMarker;
   private selection: SelectionState;
   private raycaster = new THREE.Raycaster();
@@ -76,6 +91,8 @@ export class ViewController {
     this.marker = new SelectionMarker(options.scene);
     const start = parseViewHash(options.hash ?? '');
     this.pendingFocus = start.focus;
+    this.pendingZoomTarget = start.focus;
+    this.pendingStartZoom = start.focus !== null ? start.zoom : null;
 
     setPointerLockFilter((event) => this.currentMode === 'first-person' && this.pickAt(event.clientX, event.clientY) === null);
     this.listen();
@@ -84,6 +101,43 @@ export class ViewController {
     const startView = options.view ?? start.view;
     if (startView !== 'first-person') this.setMode(startView, false);
     else options.modeChanged?.(this.currentMode);
+    const room = start.room !== null ? (this.options.roomView?.(start.room) ?? null) : null;
+    if (room) this.applyStartRoom(room);
+    else if (start.zoom !== null) this.applyStartZoom(start.zoom);
+  }
+
+  /** `#zoom=<distance>` (issue #89): starts the view at that camera distance instead of its own default framing. A no-op in first person, which has no zoom. */
+  private applyStartZoom(zoomDistance: number): void {
+    if (this.currentMode === 'isometric') {
+      this.isometric.halfHeight = THREE.MathUtils.clamp(
+        zoomDistance * Math.tan(THREE.MathUtils.degToRad(this.options.camera.fov) / 2),
+        this.isometric.minHalfHeight,
+        this.isometric.maxHalfHeight,
+      );
+      this.applyIsometric();
+    }
+  }
+
+  /**
+   * `#room=<name>` (issue #89): frames that room instead of the view's own default framing
+   * or `#zoom=`, in whichever view is active. The isometric view flies to the room's bounds,
+   * using the same pure framing math a selection flight target would (never narrowing the
+   * view's own pan/zoom limits, unlike `frame`); first person stands inside the room, facing
+   * its main wall. Read-only: it never changes the scene, only the camera.
+   */
+  private applyStartRoom(room: RoomView): void {
+    if (this.currentMode === 'isometric') {
+      this.isometric.target.copy(room.bounds.getCenter(new THREE.Vector3()));
+      this.isometric.halfHeight = THREE.MathUtils.clamp(
+        framedHalfHeight(room.bounds, this.aspect()),
+        this.isometric.minHalfHeight,
+        this.isometric.maxHalfHeight,
+      );
+      this.applyIsometric();
+    } else {
+      this.applyPose(room.standing);
+      setFreeCameraLook(this.options.camera, room.standing.position, room.standing.lookAt);
+    }
   }
 
   get mode(): ViewMode {
@@ -257,6 +311,14 @@ export class ViewController {
   }
 
   private selectionChanged(agentId: string | null): void {
+    // Any selection other than the one #select= named drops the pending #zoom= for good
+    // (issue #89 review, fix round 2): a decoy selected first must never steal it, and the
+    // named agent, once it finally appears, must get its own normal framing instead, not a
+    // stale request meant for someone else.
+    if (agentId !== this.pendingZoomTarget) {
+      this.pendingStartZoom = null;
+      this.pendingZoomTarget = null;
+    }
     const agent = agentId ? this.selectedAgent() : undefined;
     if (!agent) {
       this.marker.hide();
@@ -284,9 +346,21 @@ export class ViewController {
   }
 
   private flyToAgent(point: THREE.Vector3): void {
+    // #zoom= paired with #select=/#focus= (issue #89 review): consumed once, so this flight
+    // (and only this one) honors the requested zoom instead of focusOn's own fixed distance.
+    const startZoom = this.pendingStartZoom;
+    this.pendingStartZoom = null;
+    this.pendingZoomTarget = null;
     if (this.currentMode === 'isometric') {
       const from: IsometricState = this.isometric.state();
       this.isometric.focusOn(point);
+      if (startZoom !== null) {
+        this.isometric.halfHeight = THREE.MathUtils.clamp(
+          startZoom * Math.tan(THREE.MathUtils.degToRad(this.options.camera.fov) / 2),
+          this.isometric.minHalfHeight,
+          this.isometric.maxHalfHeight,
+        );
+      }
       this.isometric.pan(this.cardShiftPx() * this.isometric.unitsPerPixel(this.options.canvas.clientHeight), 0);
       this.isometricFlight = new IsometricTween(from, this.isometric.state(), FLIGHT_SECONDS);
       this.isometric.setState(from);

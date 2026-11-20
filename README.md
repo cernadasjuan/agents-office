@@ -22,6 +22,21 @@ pnpm build
 pnpm dev
 ```
 
+`pnpm smoke` is a separate, opt-in check (issue #89): it starts the dev server against a
+fixture agent list on an OS-assigned free port (never a fixed one, never 5173), opens it in
+one headless Chromium page (`playwright` is a dev dependency, never a runtime one, P6), and
+fails on any page error. It never runs as part of `pnpm test`.
+
+`pnpm install` does not fetch Chromium for this `playwright` version; run this once, on a
+fresh clone or after a `playwright` upgrade:
+
+```bash
+npx playwright install chromium
+```
+
+`pnpm smoke` checks Chromium is installed before it starts anything, and prints this exact
+command if it is missing.
+
 ## macOS launcher (this fork)
 
 A fork-only launcher app so the office opens from Spotlight or Applications instead of a
@@ -407,7 +422,8 @@ AGENTS_OFFICE_PLUGINS=jira pnpm dev
 - The office remembers the last view (first person or isometric) in the browser and opens in it after a reload. `#view=first-person` or `#view=iso` in the URL wins over the saved view; an unknown or no-longer-supported view name (`#view=overview`, for example) falls back to first person. The side panel header shows the layout and the view.
 - First person has no bounding box: you can walk through every doorway into a room, and fly above the building (Space). Only the floor stops the camera. The ceiling hides when the camera is above it (6 m), in the isometric view. There is no wall collision.
 - **Shift+L** switches the layout after a confirmation (the page reloads). The layout choice is saved too.
-- `#view=iso` in the URL starts in the isometric view. `#focus=<agent id>` selects that agent when it appears (agent IDs change when the server restarts)
+- `#view=iso` in the URL starts in the isometric view. `#select=<agent id>` (`#focus=`, its older name, still works) selects that agent when it appears (agent IDs change when the server restarts). `#zoom=<distance>` starts the view at that camera distance instead of its own default framing; the number is the same overview-equivalent distance the side panel's zoom reads (issue #89)
+- `#room=office`, `#room=library` or `#room=<mission id>` frames that room instead, in whichever view you start in: the isometric view flies to the room's bounds, first person stands inside it facing its main wall. Useful for a screenshot of a room's boards without hunting for it by hand. Read-only, and ignored when the name matches no room (for example the fork's building layout is not active, or that room has not opened yet). `#room=office` always means your own office, never a later overflow waiting room (issue #89)
 
 ## Architecture
 

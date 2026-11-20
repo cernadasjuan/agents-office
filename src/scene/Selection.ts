@@ -147,16 +147,40 @@ export function isViewFromAbove(mode: ViewMode): boolean {
 export interface ViewHash {
   view: ViewMode;
   focus: string | null;
+  /** The overview-equivalent camera distance to start at (`zoomDistance` units), or null for the view's own default framing. */
+  zoom: number | null;
+  /** A room name or mission id to frame on load (`office`, `library`, a mission slug), lowercased, or null. */
+  room: string | null;
 }
 
 const PUBLIC_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
-/** `#view=iso` (or `isometric`) starts in the isometric view. `#focus=<agent id>` selects that agent once it appears. */
+/** A finite, positive `#zoom=` value, or null for anything else (missing, zero, negative, not a number). */
+function parseZoom(value: string | null): number | null {
+  if (value === null) return null;
+  const zoom = Number(value);
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : null;
+}
+
+/**
+ * `#view=iso` (or `isometric`) starts in the isometric view; an unknown or retired view name
+ * (`overview`, for example) falls back to first person. `#select=<agent id>` (or `#focus=`, its
+ * older name, still read) selects that agent once it appears. `#zoom=<distance>` starts at that
+ * camera distance instead of the view's own default framing (issue #89): the isometric view
+ * converts it to the equivalent `halfHeight`, the same way `ViewController.zoomDistance` already
+ * reports it in one unit. `#room=office`, `#room=library` or `#room=<mission id>` frames that
+ * room instead, in the current view (fly to its bounds in the isometric view, stand inside it
+ * facing its main wall in first person); unknown names are ignored, read-only, no effect on
+ * the scene (issue #89, added so a reviewer can screenshot a room's boards from one URL).
+ */
 export function parseViewHash(hash: string): ViewHash {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
-  const focus = params.get('focus');
+  const focus = params.get('select') ?? params.get('focus');
+  const room = params.get('room');
   return {
     view: viewModeFromName(params.get('view')) ?? 'first-person',
     focus: focus && PUBLIC_ID.test(focus) ? focus : null,
+    zoom: parseZoom(params.get('zoom')),
+    room: room && PUBLIC_ID.test(room) ? room.toLowerCase() : null,
   };
 }
