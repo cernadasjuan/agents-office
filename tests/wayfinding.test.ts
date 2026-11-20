@@ -303,7 +303,7 @@ test('lounges are numbered in the order they are rented', () => {
   assert.equal(roomTitle('lounge', []), 'Lounge 1');
   assert.equal(roomTitle('lounge', ['office', 'lounge', 'desks', 'lounge']), 'Lounge 3');
   assert.equal(roomTitle('library', ['lounge']), 'Library');
-  assert.equal(roomTitle('desks', [], 'core'), 'Desks · core');
+  assert.equal(roomTitle('desks', []), 'Desks');
 });
 
 test('three lounges in the building are named Lounge 1, Lounge 2 and Lounge 3', () => {

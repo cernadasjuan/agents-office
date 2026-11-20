@@ -199,22 +199,11 @@ function furnishLab(): RoomPlan {
   return { pieces, spots, signs: [] };
 }
 
-function furnishReview(): RoomPlan {
-  const pieces: Placement[] = [];
-  const spots: SpotPlan[] = [];
-  for (const a of rows(4, 2.8)) {
-    pieces.push({ piece: PIECES.desk(), a, d: 7 });
-    spots.push({ type: 'reviewing', a, d: 6.3, look: [a, 7.15, 1.2] });
-  }
-  return { pieces, spots, signs: [] };
-}
-
 const FURNISH: Record<RoomKind, (shape: RoomShape) => RoomPlan> = {
   office: furnishOffice,
   desks: furnishDesks,
   library: furnishLibrary,
   lab: furnishLab,
-  review: furnishReview,
   lounge: furnishLounge,
 };
 

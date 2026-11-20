@@ -79,7 +79,7 @@ test('rooms.ts builds no furniture geometry inline: pieces come from the furnitu
   assert.doesNotMatch(rooms, /from '\.\.\/\.\.\/furniture\//, 'rooms.ts imports no factory directly');
   const furnishing = readFileSync(new URL('../src/addons/building/furnishing.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(furnishing, /new THREE\.|Geometry/, 'the plans hold positions only');
-  for (const kind of ['office', 'desks', 'library', 'lab', 'review', 'lounge'] as const) {
+  for (const kind of ['office', 'desks', 'library', 'lab', 'lounge'] as const) {
     const plan = roomFurnishing(kind, { doorAlong: 0 });
     assert.ok(plan.pieces.length > 0, `${kind} has a plan`);
   }
@@ -155,7 +155,7 @@ function assertFarWallDoorClear(kind: RoomKind, doorAlong: number) {
 }
 
 test('no piece in any room kind blocks the far-wall door gap an outer room may need', () => {
-  for (const kind of ['office', 'desks', 'library', 'lab', 'review', 'lounge'] as const) {
+  for (const kind of ['office', 'desks', 'library', 'lab', 'lounge'] as const) {
     for (const doorAlong of REAL_DOOR_POSITIONS) assertFarWallDoorClear(kind, doorAlong);
   }
 });
@@ -240,7 +240,7 @@ test('a second waiting room has no portrait and no count sign: only your office 
 });
 
 test('only the office has a portrait', () => {
-  for (const kind of ['desks', 'library', 'lab', 'review', 'lounge'] as const) {
+  for (const kind of ['desks', 'library', 'lab', 'lounge'] as const) {
     assert.equal(buildRoom(kind, slotFor(1), 1, []).group.getObjectByName(PORTRAIT_NAME), undefined, kind);
   }
 });
