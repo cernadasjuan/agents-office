@@ -22,6 +22,34 @@ pnpm build
 pnpm dev
 ```
 
+## macOS launcher (this fork)
+
+A fork-only launcher app so the office opens from Spotlight or Applications instead of a
+terminal. Install it once from a clone of this fork:
+
+```bash
+scripts/install-launcher.sh
+```
+
+This builds `Agents Office.app` into `~/Applications` (pass a folder as the one argument to
+install somewhere else) and, on the first run, creates a config file at
+`~/Library/Application Support/AgentsOffice/launcher.env` for your mission roots, GitHub
+repos and office portrait (see the file's own comments). Rerun the command after a `git pull`
+or after moving the clone, so the launcher keeps pointing at the right path.
+
+Opening "Agents Office":
+- **Cold start** (no server running): starts the dev server with this fork's plugins
+  (`herdr,github,bmad,missions,library,peek`, the same set as `pnpm dev:fork`) in the
+  background, then opens the office in your default browser.
+- **Warm start** (server already running): opens the office in your browser only; it never
+  starts a second server.
+- **Server lifetime**: the server keeps running after you close the browser. Quit it the same
+  way you would any other local dev server (find its `vite` process, or restart your machine).
+
+Logs: `~/Library/Logs/agents-office/launcher.log`. This bends [P6](docs/design-principles.md)
+(no daemon): the launcher lives in `scripts/`, outside the published npm package (see
+`package.json`'s `files`), and the server it starts still binds `127.0.0.1` only (S1).
+
 ## Local security boundary
 
 The dashboard is for local use. Both launch paths bind to `127.0.0.1`; attempts to
