@@ -14,6 +14,7 @@ import type { WorldRoom } from '../../extensions.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
 import { markStatic } from '../../scene/StaticMerge.js';
 import type { PickTarget } from '../../scene/Selection.js';
+import { createMissionsBoard, placeMissionsBoard, type MissionBoardEntry } from './missionsBoard.js';
 
 /**
  * Work that happens at the agent's own desk. Everything else is a trip. Planning,
@@ -48,6 +49,7 @@ const ROOM_FOR_STATION: Record<string, RoomKind> = Object.fromEntries(
 export const BUILDING_STORAGE_KEY = 'agents-office.building.rooms';
 const DEFAULT_DWELL_MS = 4000;
 const QUEUE_REFRESH_MS = 500;
+const MISSIONS_BOARD_REFRESH_MS = 1000;
 
 type Target = 'home' | 'pod' | 'queue' | `trip:${string}` | `room:${string}`;
 
@@ -71,6 +73,8 @@ export interface BuildingOptions {
   now?: () => number;
   dwellMs?: number;
   storage?: Pick<Storage, 'getItem' | 'setItem'>;
+  /** A real wall clock (epoch ms), for the missions board's elapsed/duration timer. Defaults to `Date.now`. */
+  wallClock?: () => number;
 }
 
 /**
@@ -87,15 +91,22 @@ export class BuildingLayout implements LayoutStrategy {
   private hallWalls: THREE.Group | null = null;
   private missionRooms = new Map<string, MissionRoom & { extraDoors: Door[] }>();
   private now: () => number;
+  private wallClock: () => number;
   private dwellMs: number;
   private storage: BuildingOptions['storage'];
   private lastQueueRefresh = -Infinity;
+  private lastMissionsBoardRefresh = -Infinity;
+  private missionBoardEntries: MissionBoardEntry[] = [];
+  private missionsBoard = createMissionsBoard();
 
   constructor(private scene: THREE.Scene, private stations: Map<string, Station>, options: BuildingOptions = {}) {
     this.now = options.now ?? (() => performance.now());
+    this.wallClock = options.wallClock ?? (() => Date.now());
     this.dwellMs = options.dwellMs ?? DEFAULT_DWELL_MS;
     this.storage = options.storage;
     this.hideHallSideWalls();
+    placeMissionsBoard(this.missionsBoard.mesh, this.scene);
+    this.missionsBoard.draw([], this.wallClock());
     const remembered = this.rememberedRooms();
     for (const kind of remembered.length > 0 ? remembered : (['office'] as RoomKind[])) this.addRoom(kind, false);
     // The Library is its own room from the start: research trips and librarians go there
@@ -136,6 +147,9 @@ export class BuildingLayout implements LayoutStrategy {
         inner.group.add(walls);
       }
     }
+    this.missionBoardEntries = rooms.filter((room) => room.kind === 'mission')
+      .map((room) => ({ title: room.title, state: room.state, createdAt: room.createdAt, closedAt: room.closedAt }));
+    this.missionsBoard.draw(this.missionBoardEntries, this.wallClock());
     return [];
   }
 
@@ -186,6 +200,12 @@ export class BuildingLayout implements LayoutStrategy {
     if (now - this.lastQueueRefresh >= QUEUE_REFRESH_MS) {
       this.lastQueueRefresh = now;
       moves.push(...this.orderQueue());
+    }
+    // The missions board's running timer ticks on its own schedule (issue #144), not tied to
+    // new mission data (every ~10 s poll): it must visibly move while nothing else changes.
+    if (now - this.lastMissionsBoardRefresh >= MISSIONS_BOARD_REFRESH_MS) {
+      this.lastMissionsBoardRefresh = now;
+      this.missionsBoard.draw(this.missionBoardEntries, this.wallClock());
     }
     this.growMissionFurniture();
     return moves;

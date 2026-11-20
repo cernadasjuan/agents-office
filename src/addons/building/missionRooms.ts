@@ -29,7 +29,7 @@ export const MAX_TOMBSTONES = 12;
 const TABLE_SEATS = 8;
 const STANDING_SPOTS = 12;
 
-function canvasBoard(width: number, height: number): { mesh: THREE.Mesh; draw: (title: string, lines: string[]) => void } {
+export function canvasBoard(width: number, height: number): { mesh: THREE.Mesh; draw: (title: string, lines: string[]) => void } {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = Math.round(512 * (height / width));

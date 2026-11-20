@@ -47,14 +47,19 @@ test('walls leave a door-wide gap at each door', () => {
 
 function setup(storage = new Map<string, string>()) {
   let clock = 0;
+  let wallClock = Date.parse('2026-11-20T00:00:00Z');
   const scene = new THREE.Scene();
   const layout = new BuildingLayout(scene, createOffice(scene), {
     now: () => clock,
+    wallClock: () => wallClock,
     dwellMs: 4000,
     storage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => void storage.set(k, v) },
   });
   const agent = (id: string, activity: Activity, extras?: AgentExtras) => ({ id, activity, ...(extras ? { extras } : {}) });
-  return { scene, layout, storage, agent, tick: (ms: number) => { clock += ms; return layout.update(); } };
+  return {
+    scene, layout, storage, agent,
+    tick: (ms: number) => { clock += ms; wallClock += ms; return layout.update(); },
+  };
 }
 
 test('the building opens with the user office and the Library, and remembers its rooms', () => {
@@ -397,4 +402,30 @@ test('a session whose workspace becomes known later keeps its desk; home is for 
   const first = layout.seatFor(agent('late', 'implementing'), null)!;
   assert.match(first.key, /^desk_/);
   assert.equal(layout.seatFor(agent('late', 'implementing', inWorkspace('Gamma')), 'implementing'), null, 'no move');
+});
+
+// --- Issue #144: a small missions board near the mission corridor ---
+
+test('the missions board exists from the start, empty, and updates as missions arrive and close', () => {
+  const { layout, scene, tick } = setup();
+  const board = scene.getObjectByName('missions-board');
+  assert.ok(board, 'the board is mounted even with no missions yet');
+
+  layout.syncWorldRooms([{
+    id: 'm-1', kind: 'mission', title: 'Office roadmap', state: 'open',
+    createdAt: '2026-11-20T00:00:00Z',
+    walls: { statement: 'x', docs: [], issues: [], kanban: [] },
+  }]);
+  // The board's own timer tick (not tied to the next world poll) must not throw
+  tick(1500);
+  tick(1500);
+
+  layout.syncWorldRooms([{
+    id: 'm-1', kind: 'mission', title: 'Office roadmap', state: 'locked',
+    createdAt: '2026-11-20T00:00:00Z', closedAt: '2026-11-20T00:00:03Z',
+    walls: { statement: 'x', docs: [], issues: [], kanban: [] },
+  }]);
+  tick(1500);
+  // Still mounted: a closed mission does not remove the board or itself from it
+  assert.ok(scene.getObjectByName('missions-board'));
 });

@@ -66,6 +66,9 @@ export interface RoomInput {
   state: 'open' | 'locked';
   /** One entry per ended session, its own id and the day it ended (a tombstone). */
   sleepers?: Array<{ id: string; endedAt?: string }>;
+  /** For the missions board (issue #144): when a mission started, and when a closed one stopped. */
+  createdAt?: string;
+  closedAt?: string;
   walls?: {
     statement?: string;
     docs?: string[];
@@ -192,6 +195,13 @@ const ISO_DATE = /^(\d{4}-\d{2}-\d{2})/;
 
 function isoDate(value: unknown): string | undefined {
   return typeof value === 'string' ? ISO_DATE.exec(value)?.[1] : undefined;
+}
+
+/** A full ISO-8601 timestamp, parseable by `Date`: for the missions board's elapsed-time clock (issue #144). */
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+function isoTimestamp(value: unknown): string | undefined {
+  return typeof value === 'string' && ISO_TIMESTAMP.test(value) ? value : undefined;
 }
 
 const REPO_SHORT = /^[A-Za-z0-9_.-]{1,40}$/;
@@ -325,6 +335,8 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
       title: displayText(room.title, 60),
       state: room.state === 'locked' ? 'locked' : 'open',
       ...(sleepers.length > 0 ? { sleepers } : {}),
+      ...(isoTimestamp(room.createdAt) ? { createdAt: isoTimestamp(room.createdAt) } : {}),
+      ...(isoTimestamp(room.closedAt) ? { closedAt: isoTimestamp(room.closedAt) } : {}),
       walls: {
         ...(walls.statement ? { statement: displayText(walls.statement, 240) } : {}),
         ...(Array.isArray(walls.docs) ? { docs: walls.docs.slice(0, 8).map((doc) => displayText(doc, 60)) } : {}),

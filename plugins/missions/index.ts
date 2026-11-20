@@ -27,6 +27,10 @@ export interface MissionSummary {
   kanban: Array<{ column: string; cards: Array<{ number: number; title: string }> }>;
   /** One entry per ended session (a tombstone), its own journey id and the day it ended. */
   sleepers: Array<{ id: string; endedAt?: string }>;
+  /** When the mission started (`created` in mission.yaml), for the missions board (issue #144). */
+  createdAt?: string;
+  /** When a closed mission stopped, approximated by its last `updated` timestamp. Open missions have none. */
+  closedAt?: string;
 }
 
 export function parseRoots(list: string | undefined): string[] {
@@ -112,6 +116,8 @@ export function summarizeMission(slug: string, record: unknown): MissionSummary 
       .filter((entry) => text(entry.kind) === 'session' || text(entry.kind) === 'night_run')
       .map((entry) => ({ id: text(entry.id), ...(text(entry.end) ? { endedAt: text(entry.end) } : {}) }))
       .filter((entry) => entry.id !== ''),
+    ...(text(mission.created) ? { createdAt: text(mission.created) } : {}),
+    ...(status === 'done' || status === 'abandoned' ? (text(mission.updated) ? { closedAt: text(mission.updated) } : {}) : {}),
   };
 }
 
@@ -226,6 +232,8 @@ export function missionsPlugin(roots: string[], now: () => number = Date.now): O
         title: mission.title,
         state: mission.state,
         sleepers: mission.sleepers,
+        ...(mission.createdAt ? { createdAt: mission.createdAt } : {}),
+        ...(mission.closedAt ? { closedAt: mission.closedAt } : {}),
         walls: { statement: mission.statement, docs: mission.docs, issues: mission.issues, kanban: mission.kanban },
       })),
     }),

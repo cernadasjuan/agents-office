@@ -9,6 +9,9 @@ export interface WorldRoom {
   state: 'open' | 'locked';
   /** One entry per ended session (a tombstone): its own public id and the day it ended. */
   sleepers?: Array<{ id: string; endedAt?: string }>;
+  /** For the missions board (issue #144): when a mission started, and when a closed one stopped. */
+  createdAt?: string;
+  closedAt?: string;
   walls: {
     statement?: string;
     docs?: string[];
