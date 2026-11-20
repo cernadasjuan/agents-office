@@ -12,7 +12,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   set: () => true,
 })) as never;
 const { AgentManager } = await import('../src/agents/AgentManager.js');
-const { ViewController } = await import('../src/scene/ViewController.js');
+const { ViewController, VIEW_HINTS } = await import('../src/scene/ViewController.js');
 const { SelectionState } = await import('../src/scene/Selection.js');
 const { updateFreeCamera, setFreeCameraLook, focusPosition, MIN_EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
 const { floorUnder } = await import('../src/scene/OverviewCamera.js');
@@ -34,6 +34,16 @@ function memoryStorage(initial: Record<string, string> = {}) {
     data,
   };
 }
+
+// --- Key hints list the keyboard triage keys (issue #85) ---
+
+test('every view hint lists N, F and the filter key', () => {
+  for (const hint of Object.values(VIEW_HINTS)) {
+    assert.match(hint, /N = next/);
+    assert.match(hint, /F = focus/);
+    assert.match(hint, /\/ = filter/);
+  }
+});
 
 // --- Free camera: no bounding box ---
 
@@ -134,6 +144,33 @@ test('fly-to an agent next to a room wall ends inside its room, with the figure 
   const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
   const toFigure = new THREE.Vector3(seat.x, 1.1, seat.z).sub(camera.position).normalize();
   assert.ok(forward.dot(toFigure) > 0.95, 'the figure is in frame');
+});
+
+test('key F fix: refocus flies to an already-selected agent, even though a reselect alone is a no-op', () => {
+  const seat = new THREE.Vector3(15.6, 0, 1);
+  const { view, manager, selection, camera } = viewSetup({ seat, floors: [hall, room] });
+  camera.position.set(0, 1.7, 1);
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  const afterFirstFly = camera.position.clone();
+
+  camera.position.set(-5, 1.7, -5); // pan away, as if the user moved the camera by hand
+  selection.select('a'); // a plain reselect: SelectionState ignores it, nothing flies
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.notDeepEqual(camera.position.toArray(), afterFirstFly.toArray(), 'confirms the reselect alone did not fly back');
+
+  view.refocus('a');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.ok(Math.abs(camera.position.x - afterFirstFly.x) < 0.05 && Math.abs(camera.position.z - afterFirstFly.z) < 0.05,
+    'refocus flew back to the same framing');
+});
+
+test('key F fix: refocus on an agent no longer in the scene does nothing', () => {
+  const { view, camera } = viewSetup();
+  const before = camera.position.clone();
+  view.refocus('gone');
+  assert.deepEqual(camera.position.toArray(), before.toArray());
 });
 
 // --- Start view and remembered view ---
