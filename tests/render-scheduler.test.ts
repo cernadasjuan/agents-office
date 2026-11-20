@@ -40,9 +40,9 @@ test('nothing moves: one render on start, then one per second; a request or moti
   assert.equal(scheduler.shouldRender(2133, true), true);
 });
 
-test('the overview uses at most 1.5 pixels per CSS pixel and hard shadows; first person keeps the look', () => {
-  assert.deepEqual(renderQuality('overview', 2), { pixelRatio: 1.5, shadowType: THREE.BasicShadowMap });
-  assert.deepEqual(renderQuality('overview', 1), { pixelRatio: 1, shadowType: THREE.BasicShadowMap });
+test('the isometric view uses at most 1.5 pixels per CSS pixel and hard shadows; first person keeps the look', () => {
+  assert.deepEqual(renderQuality('isometric', 2), { pixelRatio: 1.5, shadowType: THREE.BasicShadowMap });
+  assert.deepEqual(renderQuality('isometric', 1), { pixelRatio: 1, shadowType: THREE.BasicShadowMap });
   assert.deepEqual(renderQuality('first-person', 3), { pixelRatio: 2, shadowType: THREE.PCFShadowMap });
 });
 
@@ -124,7 +124,7 @@ function officeLoop(options: { animate?: (figure: InstanceType<typeof StickFigur
   scene.add(figure.group);
   const renderer = fakeRenderer();
   const stats = new FrameStats();
-  let mode: 'first-person' | 'overview' = 'first-person';
+  let mode: 'first-person' | 'isometric' = 'first-person';
   const loop = new FrameLoop({
     scene,
     camera,
@@ -198,11 +198,11 @@ test('a figure moving in a far room renders but leaves the hall shadow maps alon
   assert.equal(renderer.shadowUpdates, 1);
 });
 
-test('switching to the overview lowers the pixel ratio, turns soft shadows off and redraws them once', () => {
+test('switching to the isometric view lowers the pixel ratio, turns soft shadows off and redraws them once', () => {
   const { renderer, run, setMode } = officeLoop();
   run(1);
   assert.equal(renderer.pixelRatio, 2);
-  setMode('overview');
+  setMode('isometric');
   const before = renderer.shadowUpdates;
   run(1, 1000);
   assert.equal(renderer.pixelRatio, 1.5);

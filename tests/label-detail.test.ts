@@ -46,26 +46,25 @@ test('smart mode, first person: an agent within the near distance gets a full la
 test('smart mode: a waiting agent without a known wait time always gets a full label (the old behavior), in both views and at any zoom', () => {
   const waiting = facts({ attention: 'waiting', distance: 500 });
   assert.equal(labelDetail(waiting, view()), 'full');
-  assert.equal(labelDetail(waiting, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'full');
+  assert.equal(labelDetail(waiting, view({ viewMode: 'isometric', zoomDistance: zoomedOut })), 'full');
 });
 
 test('smart mode: a fresh wait always gets a full label, in both views and at any zoom (#132)', () => {
   const fresh = facts({ attention: 'waiting', waitMinutes: 5, distance: 500 });
   assert.equal(labelDetail(fresh, view()), 'full');
-  assert.equal(labelDetail(fresh, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'full');
+  assert.equal(labelDetail(fresh, view({ viewMode: 'isometric', zoomDistance: zoomedOut })), 'full');
 });
 
 test('smart mode: a cold block (waiting 24 h or more) gets a compact label like any other agent', () => {
   const coldBlock = facts({ attention: 'waiting', waitMinutes: 2 * 24 * 60, distance: 500 });
   assert.equal(labelDetail(coldBlock, view()), 'compact');
-  assert.equal(labelDetail(coldBlock, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact');
+  assert.equal(labelDetail(coldBlock, view({ viewMode: 'isometric', zoomDistance: zoomedOut })), 'compact');
 });
 
-test('smart mode, overview or isometric: an aging block follows the normal zoom rule, not forced full (#132)', () => {
+test('smart mode, isometric: an aging block follows the normal zoom rule, not forced full (#132)', () => {
   const agingFar = facts({ attention: 'waiting', waitMinutes: 60, distance: 500 });
-  assert.equal(labelDetail(agingFar, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact', 'zoomed out: compact, same as a real queue at scale');
-  assert.equal(labelDetail(agingFar, view({ viewMode: 'isometric', zoomDistance: zoomedOut })), 'compact', 'isometric follows the same rule as overview');
-  assert.equal(labelDetail(facts({ attention: 'waiting', waitMinutes: 60, distance: 500 }), view({ viewMode: 'overview', zoomDistance: zoomedIn })), 'full', 'zoomed in: full, like any other agent');
+  assert.equal(labelDetail(agingFar, view({ viewMode: 'isometric', zoomDistance: zoomedOut })), 'compact', 'zoomed out: compact, same as a real queue at scale');
+  assert.equal(labelDetail(facts({ attention: 'waiting', waitMinutes: 60, distance: 500 }), view({ viewMode: 'isometric', zoomDistance: zoomedIn })), 'full', 'zoomed in: full, like any other agent');
 });
 
 test('smart mode, first person: an aging block still forces a full label, unchanged from before #132', () => {
@@ -80,34 +79,34 @@ test('smart mode, first person: an aging block still forces a full label, unchan
 
 test('smart mode: "your turn" alone does not make a label full (most idle sessions have it)', () => {
   assert.equal(labelDetail(facts({ attention: 'your-turn' }), view()), 'compact');
-  assert.equal(labelDetail(facts({ attention: 'your-turn' }), view({ viewMode: 'overview' })), 'compact');
+  assert.equal(labelDetail(facts({ attention: 'your-turn' }), view({ viewMode: 'isometric' })), 'compact');
 });
 
 test('smart mode: the selected agent gets a full label in both views', () => {
   assert.equal(labelDetail(facts({ selected: true }), view()), 'full');
-  assert.equal(labelDetail(facts({ selected: true }), view({ viewMode: 'overview' })), 'full');
+  assert.equal(labelDetail(facts({ selected: true }), view({ viewMode: 'isometric' })), 'full');
 });
 
 test('smart mode: the hovered agent gets a full label in both views', () => {
   assert.equal(labelDetail(facts({ hovered: true }), view()), 'full');
-  assert.equal(labelDetail(facts({ hovered: true }), view({ viewMode: 'overview' })), 'full');
+  assert.equal(labelDetail(facts({ hovered: true }), view({ viewMode: 'isometric' })), 'full');
 });
 
-test('smart mode, overview: far zoom gives compact labels, even for agents near the camera', () => {
-  assert.equal(labelDetail(facts({ distance: near }), view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact');
+test('smart mode, isometric: far zoom gives compact labels, even for agents near the camera', () => {
+  assert.equal(labelDetail(facts({ distance: near }), view({ viewMode: 'isometric', zoomDistance: zoomedOut })), 'compact');
 });
 
-test('smart mode, overview: close zoom gives full labels', () => {
-  assert.equal(labelDetail(facts(), view({ viewMode: 'overview', zoomDistance: zoomedIn })), 'full');
-  assert.equal(labelDetail(facts(), view({ viewMode: 'overview', zoomDistance: OVERVIEW_FULL_LABEL_ZOOM })), 'full');
+test('smart mode, isometric: close zoom gives full labels', () => {
+  assert.equal(labelDetail(facts(), view({ viewMode: 'isometric', zoomDistance: zoomedIn })), 'full');
+  assert.equal(labelDetail(facts(), view({ viewMode: 'isometric', zoomDistance: OVERVIEW_FULL_LABEL_ZOOM })), 'full');
 });
 
-test('smart mode, first person: the overview zoom has no effect', () => {
+test('smart mode, first person: the isometric zoom has no effect', () => {
   assert.equal(labelDetail(facts(), view({ zoomDistance: zoomedIn })), 'compact');
 });
 
 test('all mode: every label is full, whatever the facts', () => {
-  for (const viewMode of ['first-person', 'overview'] as const) {
+  for (const viewMode of ['first-person', 'isometric'] as const) {
     for (const zoomDistance of [zoomedIn, zoomedOut]) {
       for (const distance of [near, far, 1000]) {
         assert.equal(labelDetail(facts({ distance }), view({ mode: 'all', viewMode, zoomDistance })), 'full');
@@ -123,7 +122,7 @@ test('an unknown distance (NaN) counts as far, never as near', () => {
 test('smart mode: a stuck agent always gets a full label, in both views and at any zoom, even unselected and unhovered', () => {
   const stuck = facts({ stuck: true, distance: 500 });
   assert.equal(labelDetail(stuck, view()), 'full');
-  assert.equal(labelDetail(stuck, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'full');
+  assert.equal(labelDetail(stuck, view({ viewMode: 'isometric', zoomDistance: zoomedOut })), 'full');
 });
 
 test('a recovered (no longer stuck) far agent goes back to a compact label', () => {
@@ -135,11 +134,11 @@ test('a recovered (no longer stuck) far agent goes back to a compact label', () 
 test('#labels=all selects all labels, everything else gives the smart default', () => {
   assert.equal(parseLabelMode(''), 'smart');
   assert.equal(parseLabelMode('#labels=all'), 'all');
-  assert.equal(parseLabelMode('#view=overview&labels=all'), 'all');
+  assert.equal(parseLabelMode('#view=iso&labels=all'), 'all');
   assert.equal(parseLabelMode('labels=all'), 'all');
   assert.equal(parseLabelMode('#labels=smart'), 'smart');
   assert.equal(parseLabelMode('#labels=ALL<script>'), 'smart');
-  assert.equal(parseLabelMode('#view=overview'), 'smart');
+  assert.equal(parseLabelMode('#view=iso'), 'smart');
 });
 
 test('the V cycle goes smart, all, smart', () => {
@@ -198,7 +197,7 @@ function agent(id: string, x: number, attention?: 'waiting' | 'your-turn', stuck
   };
 }
 
-function controllerSetup(options: { hash?: string; viewMode?: 'first-person' | 'overview'; zoom?: number } = {}) {
+function controllerSetup(options: { hash?: string; viewMode?: 'first-person' | 'isometric'; zoom?: number } = {}) {
   const document = dom.window.document;
   const canvas = document.createElement('canvas');
   document.body.appendChild(canvas);
@@ -250,8 +249,8 @@ test('controller: the selected and the hovered agents become full', () => {
   assert.deepEqual(compact(), ['mine'], 'the pointer left: the hover ends');
 });
 
-test('controller, overview: far zoom compacts all but the waiting agent, close zoom shows all full', () => {
-  const { controller, state, compact } = controllerSetup({ viewMode: 'overview' });
+test('controller, isometric: far zoom compacts all but the waiting agent, close zoom shows all full', () => {
+  const { controller, state, compact } = controllerSetup({ viewMode: 'isometric' });
   controller.update(0);
   assert.deepEqual(compact(), ['near', 'far', 'mine']);
   state.zoom = zoomedIn;
@@ -260,7 +259,7 @@ test('controller, overview: far zoom compacts all but the waiting agent, close z
 });
 
 test('controller: updates are throttled, a forced refresh is not', () => {
-  const { controller, state, compact } = controllerSetup({ viewMode: 'overview' });
+  const { controller, state, compact } = controllerSetup({ viewMode: 'isometric' });
   controller.update(1000);
   state.zoom = zoomedIn;
   controller.update(1000 + LABEL_DETAIL_INTERVAL_MS - 1);
@@ -270,7 +269,7 @@ test('controller: updates are throttled, a forced refresh is not', () => {
 });
 
 test('controller: #labels=all keeps every label full (the old behavior)', () => {
-  const { controller, compact, indicator } = controllerSetup({ hash: '#view=overview&labels=all', viewMode: 'overview' });
+  const { controller, compact, indicator } = controllerSetup({ hash: '#view=iso&labels=all', viewMode: 'isometric' });
   assert.equal(controller.mode, 'all');
   controller.update(0);
   assert.deepEqual(compact(), []);
@@ -317,7 +316,7 @@ function hiddenIds(agents: LabelAgent[]): string[] {
   return agents.filter((a) => a.figure.label.element.style.visibility === 'hidden').map((a) => a.info.id);
 }
 
-function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'overview' | 'isometric'; zoom?: number } = {}) {
+function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'isometric'; zoom?: number } = {}) {
   const document = dom.window.document;
   const canvas = document.createElement('canvas');
   document.body.appendChild(canvas);
@@ -328,7 +327,7 @@ function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'o
   camera.lookAt(0, 1, 0);
   camera.updateMatrixWorld();
   const agents: LabelAgent[] = [];
-  const state = { viewMode: options.viewMode ?? 'overview', zoom: options.zoom ?? 0, selected: null as string | null, picked: null as string | null };
+  const state = { viewMode: options.viewMode ?? 'isometric', zoom: options.zoom ?? 0, selected: null as string | null, picked: null as string | null };
   const controller = new LabelDetailController({
     agents: () => agents,
     camera,
@@ -374,7 +373,7 @@ test('declutter: an agent with a clear screen spot of its own is never hidden, w
 test('declutter: #labels=all shows every label, even ones that would otherwise overlap', () => {
   const { controller, agents, state } = declutterSetup({ hash: '#labels=all' });
   agents.push(agent('a', 0), agent('b', 0));
-  state.viewMode = 'overview';
+  state.viewMode = 'isometric';
   controller.update(0);
   controller.refresh();
   assert.deepEqual(hiddenIds(agents), []);
@@ -382,13 +381,13 @@ test('declutter: #labels=all shows every label, even ones that would otherwise o
 
 // --- Review fix round (PR #152): view-mode guard, real label size, behind-camera skip ---
 
-test('declutter: never runs in first person, even for labels that would overlap in the overview (review fix)', () => {
+test('declutter: never runs in first person, even for labels that would overlap in the isometric view (review fix)', () => {
   const { controller, agents, state } = declutterSetup({ viewMode: 'first-person' });
   agents.push(agent('working', 0), agent('aging-wait', 0, 'waiting', false, 60));
   controller.update(0);
   controller.refresh();
   assert.deepEqual(hiddenIds(agents), [], 'same screen spot, but first person never hides a label');
-  state.viewMode = 'overview';
+  state.viewMode = 'isometric';
   controller.refresh();
   assert.deepEqual(hiddenIds(agents), ['working'], 'the same two agents do decide an overlap once in the overview');
 });

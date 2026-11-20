@@ -5,13 +5,12 @@ export const VIEW_STORAGE_KEY = 'agents-office.view';
 
 export const VIEW_NAMES: Record<ViewMode, string> = {
   'first-person': 'First person',
-  overview: 'Overview',
   isometric: 'Isometric',
 };
 
 const asViewMode = viewModeFromName;
 
-/** `#view=overview`, `#view=first-person` or `#view=iso` in the URL hash, else null. */
+/** `#view=first-person` or `#view=iso` in the URL hash, else null. */
 export function viewFromHash(hash: string): ViewMode | null {
   return asViewMode(new URLSearchParams(hash.replace(/^#/, '')).get('view'));
 }

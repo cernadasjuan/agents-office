@@ -56,7 +56,7 @@ const SECTIONS: LegendSection[] = [
     entries: [
       { sign: 'Click', meaning: 'Select a figure or a row. In first person, a click elsewhere engages the camera.' },
       { sign: 'W A S D', meaning: 'Move or pan. Space and Q go up and down. Shift moves faster.' },
-      { sign: 'O', meaning: 'Switch between first person and the overview.' },
+      { sign: 'I', meaning: 'Switch between first person and the isometric view.' },
       { sign: 'V', meaning: 'Switch the labels between smart and all.' },
       { sign: 'Shift+L', meaning: 'Switch the layout.' },
       { sign: 'N', meaning: 'Select the next agent that needs you, in queue order.' },

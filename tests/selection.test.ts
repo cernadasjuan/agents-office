@@ -115,9 +115,10 @@ test('a press and release close together is a click, a drag is not', () => {
 
 test('the URL hash picks the start view and the agent to focus', () => {
   assert.deepEqual(parseViewHash(''), { view: 'first-person', focus: null });
-  assert.deepEqual(parseViewHash('#view=overview'), { view: 'overview', focus: null });
-  assert.deepEqual(parseViewHash('#focus=ab12cd&view=overview'), { view: 'overview', focus: 'ab12cd' });
+  assert.deepEqual(parseViewHash('#view=iso'), { view: 'isometric', focus: null });
+  assert.deepEqual(parseViewHash('#focus=ab12cd&view=iso'), { view: 'isometric', focus: 'ab12cd' });
   assert.deepEqual(parseViewHash('#view=sideways&focus=a'), { view: 'first-person', focus: 'a' });
+  assert.deepEqual(parseViewHash('#view=overview&focus=a'), { view: 'first-person', focus: 'a' }, 'the overview mode is gone (#173): an unknown view falls back to first person');
   assert.deepEqual(parseViewHash('#focus=<script>'), { view: 'first-person', focus: null });
   assert.deepEqual(parseViewHash(`#focus=${'a'.repeat(200)}`), { view: 'first-person', focus: null });
 });

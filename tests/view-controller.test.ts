@@ -60,27 +60,35 @@ test('first person stays the default and the camera does not move by itself', ()
   assert.equal(wall.visible, true);
 });
 
-test('key O switches to the overview and back, hiding near walls only in the overview', () => {
-  const { view, camera, wall, hint, press } = setup();
+test('key O does nothing: the overview mode is gone (#173)', () => {
+  const { view, camera, wall, press } = setup();
   press('KeyO');
-  assert.equal(view.mode, 'overview');
+  assert.equal(view.mode, 'first-person');
+  assert.equal(wall.visible, true);
+  assert.deepEqual(camera.position.toArray(), [-12, 5.5, 11], 'the camera does not move');
+});
+
+test('key I switches to the isometric view and back, hiding near walls only there', () => {
+  const { view, camera, wall, hint, press } = setup();
+  press('KeyI');
+  assert.equal(view.mode, 'isometric');
   assert.equal(wall.visible, false);
   assert.match(hint!.textContent ?? '', /wheel/i);
   for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
-  assert.ok(camera.position.y > 15, `overview camera is high above the floor (${camera.position.y})`);
+  assert.notEqual(view.activeCamera, camera, 'isometric draws through its own orthographic camera');
 
-  press('KeyO');
+  press('KeyI');
   for (let i = 0; i < 60; i++) view.update(1 + i / 60, 1 / 60);
   assert.equal(view.mode, 'first-person');
   assert.equal(wall.visible, true);
   assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, 5.5, 11)) < 1e-6);
 });
 
-test('#view=overview starts in the overview', () => {
-  const { view, camera } = setup('#view=overview');
+test('#view=iso starts in the isometric view', () => {
+  const { view } = setup('#view=iso');
   view.update(0, 1 / 60);
-  assert.equal(view.mode, 'overview');
-  assert.ok(camera.position.y > 15);
+  assert.equal(view.mode, 'isometric');
+  assert.ok((view.activeCamera as THREE.OrthographicCamera).isOrthographicCamera);
 });
 
 test('a click picks a tombstone, not just an agent figure (issue #127)', () => {
@@ -144,7 +152,7 @@ test('an open tombstone card survives a routine agent poll (issue #127)', () => 
 });
 
 test('#focus selects the agent once it appears, and flies the camera to it', () => {
-  const { view, manager, selection, camera } = setup('#view=overview&focus=agent-1');
+  const { view, manager, selection, camera } = setup('#focus=agent-1');
   view.agentsChanged(manager.getAgents());
   assert.equal(selection.selected, null);
 
@@ -153,7 +161,7 @@ test('#focus selects the agent once it appears, and flies the camera to it', () 
   assert.equal(selection.selected, 'agent-1');
   for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
   const lookAt = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-  const toAgent = new THREE.Vector3(4, 0, -3).sub(camera.position).normalize();
+  const toAgent = new THREE.Vector3(4, 1.1, -3).sub(camera.position).normalize(); // chest height, where flyToAgent aims
   assert.ok(lookAt.dot(toAgent) > 0.99, 'the camera looks at the selected agent');
 
   selection.clear();
@@ -199,8 +207,8 @@ test('reselect flies the camera to the already-selected agent again (a marker or
   assert.ok(camera.position.distanceTo(figurePosition) < 7, `expected the camera back near the agent, got ${camera.position.toArray()}`);
 });
 
-test('zoomDistance reports the overview camera distance and follows the wheel', () => {
-  const { view } = setup('#view=overview');
+test('zoomDistance reports the isometric camera distance and follows the wheel', () => {
+  const { view } = setup('#view=iso');
   const before = view.zoomDistance;
   assert.ok(Number.isFinite(before) && before > 0);
   const canvases = dom.window.document.querySelectorAll('canvas');
@@ -209,30 +217,30 @@ test('zoomDistance reports the overview camera distance and follows the wheel', 
   assert.ok(view.zoomDistance < before, `zoomed in (${view.zoomDistance} < ${before})`);
 });
 
-function screenX(camera: THREE.PerspectiveCamera, point: THREE.Vector3): number {
+function screenX(camera: THREE.Camera, point: THREE.Vector3): number {
   camera.updateMatrixWorld();
   return point.clone().project(camera).x;
 }
 
-for (const hash of ['#view=overview', '']) {
-  const mode = hash ? 'overview' : 'first person';
+for (const hash of ['#view=iso', '']) {
+  const mode = hash ? 'isometric' : 'first person';
   test(`${mode}: with an open agent card the camera frames the figure left of the card`, () => {
-    const { view, manager, selection, camera } = setup(hash, () => 300);
+    const { view, manager, selection } = setup(hash, () => 300);
     manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
     selection.select('a');
     for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
     const target = hash ? new THREE.Vector3(4, 0, -3) : new THREE.Vector3(4, 1.1, -3);
     // 300 px left of the center of a 1600 px canvas is -0.375 in normalized device coordinates.
-    assert.ok(Math.abs(screenX(camera, target) + 0.375) < 0.02, `figure at x=${screenX(camera, target)}`);
+    assert.ok(Math.abs(screenX(view.activeCamera, target) + 0.375) < 0.02, `figure at x=${screenX(view.activeCamera, target)}`);
   });
 
   test(`${mode}: without a card shift the camera centers the figure (old behavior)`, () => {
-    const { view, manager, selection, camera } = setup(hash);
+    const { view, manager, selection } = setup(hash);
     manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
     selection.select('a');
     for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
     const target = hash ? new THREE.Vector3(4, 0, -3) : new THREE.Vector3(4, 1.1, -3);
-    assert.ok(Math.abs(screenX(camera, target)) < 0.02, `figure at x=${screenX(camera, target)}`);
+    assert.ok(Math.abs(screenX(view.activeCamera, target)) < 0.02, `figure at x=${screenX(view.activeCamera, target)}`);
   });
 }
 
@@ -256,9 +264,9 @@ test('a drag release is never misread as a closing click (issue #133)', () => {
   assert.equal(selection.selected, 'a', 'the drag release does not clear the card');
 });
 
-test('an out-and-back pan in the overview is never misread as a closing click (issue #133)', () => {
+test('an out-and-back pan in the isometric view is never misread as a closing click (issue #133)', () => {
   const { view, manager, selection, canvas, press } = setup();
-  press('KeyO'); // overview: the only mode that pans on drag
+  press('KeyI'); // isometric: the only mode that pans on drag
   manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
   selection.select('a');
   canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));

@@ -104,7 +104,7 @@ test('floorUnder finds the floor that holds a point, or null outside every floor
   assert.equal(floorUnder(scene, new THREE.Vector3(100, 0, 100)), null);
 });
 
-function viewSetup(options: { hash?: string; seat?: THREE.Vector3; floors?: THREE.Box3[]; view?: 'overview' | 'first-person'; modes?: string[] } = {}) {
+function viewSetup(options: { hash?: string; seat?: THREE.Vector3; floors?: THREE.Box3[]; view?: 'isometric' | 'first-person'; modes?: string[] } = {}) {
   const document = dom.window.document;
   const scene = new THREE.Scene();
   for (const box of options.floors ?? []) scene.add(floorPlane(box));
@@ -176,41 +176,41 @@ test('key F fix: refocus on an agent no longer in the scene does nothing', () =>
 // --- Start view and remembered view ---
 
 test('the start view: a #view hash, then the saved view, then the layout default', () => {
-  assert.equal(chooseViewMode('', undefined, 'overview'), 'overview');
+  assert.equal(chooseViewMode('', undefined, 'isometric'), 'isometric');
   assert.equal(chooseViewMode('', undefined, 'first-person'), 'first-person');
-  assert.equal(chooseViewMode('', memoryStorage({ [VIEW_STORAGE_KEY]: 'first-person' }), 'overview'), 'first-person');
-  assert.equal(chooseViewMode('#view=overview', memoryStorage({ [VIEW_STORAGE_KEY]: 'first-person' }), 'first-person'), 'overview');
-  assert.equal(chooseViewMode('#view=first-person', memoryStorage({ [VIEW_STORAGE_KEY]: 'overview' }), 'overview'), 'first-person');
-  assert.equal(chooseViewMode('#view=sideways', memoryStorage({ [VIEW_STORAGE_KEY]: 'junk' }), 'overview'), 'overview');
+  assert.equal(chooseViewMode('', memoryStorage({ [VIEW_STORAGE_KEY]: 'first-person' }), 'isometric'), 'first-person');
+  assert.equal(chooseViewMode('#view=iso', memoryStorage({ [VIEW_STORAGE_KEY]: 'first-person' }), 'first-person'), 'isometric');
+  assert.equal(chooseViewMode('#view=first-person', memoryStorage({ [VIEW_STORAGE_KEY]: 'isometric' }), 'isometric'), 'first-person');
+  assert.equal(chooseViewMode('#view=sideways', memoryStorage({ [VIEW_STORAGE_KEY]: 'junk' }), 'isometric'), 'isometric');
   const throwing = { getItem: () => { throw new Error('blocked'); } };
-  assert.equal(chooseViewMode('', throwing, 'overview'), 'overview');
+  assert.equal(chooseViewMode('', throwing, 'isometric'), 'isometric');
 });
 
 test('the view mode is saved in the browser and a blocked storage does not break it', () => {
   const storage = memoryStorage();
   rememberViewMode('first-person', storage);
   assert.equal(storage.data.get(VIEW_STORAGE_KEY), 'first-person');
-  assert.doesNotThrow(() => rememberViewMode('overview', { setItem: () => { throw new Error('full'); } }));
+  assert.doesNotThrow(() => rememberViewMode('isometric', { setItem: () => { throw new Error('full'); } }));
 });
 
-test('the view controller starts in the given view and reports each mode change', () => {
+test('the view controller starts in the given view and reports each mode change (#173: key I, not O)', () => {
   const modes: string[] = [];
-  const { view, press, camera } = viewSetup({ view: 'overview', modes });
+  const { view, press, camera } = viewSetup({ view: 'isometric', modes });
   view.update(0, 1 / 60);
-  assert.equal(view.mode, 'overview');
-  assert.ok(camera.position.y > 15);
-  press('KeyO');
+  assert.equal(view.mode, 'isometric');
+  assert.notEqual(view.activeCamera, camera, 'isometric draws through its own orthographic camera');
+  press('KeyI');
   assert.equal(view.mode, 'first-person');
-  assert.deepEqual(modes, ['overview', 'first-person']);
+  assert.deepEqual(modes, ['isometric', 'first-person']);
 });
 
 test('without a given view the hash still decides and first person stays the default', () => {
   assert.equal(viewSetup().view.mode, 'first-person');
-  assert.equal(viewSetup({ hash: '#view=overview' }).view.mode, 'overview');
+  assert.equal(viewSetup({ hash: '#view=iso' }).view.mode, 'isometric');
 });
 
 test('the header text names the layout and the view', () => {
-  assert.equal(viewStatusText(registry.layoutName('building'), 'overview'), 'Building layout · Overview');
+  assert.equal(viewStatusText(registry.layoutName('building'), 'isometric'), 'Building layout · Isometric');
   assert.equal(viewStatusText(registry.layoutName('activity'), 'first-person'), 'Activity layout · First person');
 });
 
@@ -236,14 +236,14 @@ test('the layout changes only when the user confirms', () => {
   assert.match(questions[0], new RegExp(registry.layoutName(next)));
 });
 
-test('a layout can ask for the overview as its start view; others keep first person', () => {
-  registry.registerLayout('nav-overview', () => ({ id: 'nav-overview', seatFor: () => null, release: () => undefined }), { defaultView: 'overview' });
-  assert.equal(registry.defaultViewFor('nav-overview'), 'overview');
+test('a layout can ask for the isometric view as its start view; others keep first person', () => {
+  registry.registerLayout('nav-isometric', () => ({ id: 'nav-isometric', seatFor: () => null, release: () => undefined }), { defaultView: 'isometric' });
+  assert.equal(registry.defaultViewFor('nav-isometric'), 'isometric');
   assert.equal(registry.defaultViewFor('activity'), 'first-person');
   assert.equal(registry.defaultViewFor('unknown'), 'first-person');
 });
 
-// --- Ceiling: hidden above the ceiling height and in the overview ---
+// --- Ceiling: hidden above the ceiling height and in the isometric view ---
 
 test('the ceiling is its own marked mesh so it can hide without a static merge rebuild', () => {
   const ceilings = findCeilings(createWalls());
@@ -251,7 +251,7 @@ test('the ceiling is its own marked mesh so it can hide without a static merge r
   assert.equal(ceilings[0].userData.dynamic, true);
 });
 
-test('the ceiling hides above the ceiling height and in the overview, and comes back below', () => {
+test('the ceiling hides above the ceiling height and in the isometric view, and comes back below', () => {
   const ceilings = findCeilings(createWalls());
   assert.equal(applyCeilingCut(ceilings, 1.7, false), false, 'nothing changes below the ceiling');
   assert.equal(ceilings[0].visible, true);

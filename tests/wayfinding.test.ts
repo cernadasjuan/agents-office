@@ -20,7 +20,8 @@ const {
   OVERVIEW_DOOR_HEIGHT, OVERVIEW_LABEL_BOTTOM,
 } = await import('../src/addons/building/rooms.js');
 const { buildRealSizeOffice } = await import('./real-size-office.js');
-const { ViewController } = await import('../src/scene/ViewController.js');
+const { IsometricController } = await import('../src/scene/IsometricCamera.js');
+const { overviewBounds } = await import('../src/scene/OverviewCamera.js');
 const { buildMissionRoom } = await import('../src/addons/building/missionRooms.js');
 const { applyCutaway, OVERVIEW_WALL_HEIGHT } = await import('../src/scene/Cutaway.js');
 const { StaticBatch, STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
@@ -129,23 +130,30 @@ test('issue #87 AC3: two compact chips that share their first 9 characters still
 });
 
 test('in the overview a plate grows with the zoom distance but never gets wider than a room', () => {
-  const near = roomLabelPose({ viewMode: 'overview', zoomDistance: 20, detail: false }, 2);
-  const far = roomLabelPose({ viewMode: 'overview', zoomDistance: 80, detail: false }, 2);
+  const near = roomLabelPose({ viewMode: 'isometric', zoomDistance: 20, detail: false }, 2);
+  const far = roomLabelPose({ viewMode: 'isometric', zoomDistance: 80, detail: false }, 2);
   assert.ok(far.height > near.height * 1.9, 'twice the distance, about twice the size');
   assert.ok(near.y - near.height / 2 >= OVERVIEW_LABEL_BOTTOM - 1e-6 && near.onTop);
-  const wide = roomLabelPose({ viewMode: 'overview', zoomDistance: 200, detail: false }, 6);
+  const wide = roomLabelPose({ viewMode: 'isometric', zoomDistance: 200, detail: false }, 6);
   assert.ok(wide.width <= 12 - 1 + 1e-6, `width ${wide.width}`);
   const fp = roomLabelPose({ viewMode: 'first-person', zoomDistance: 200, detail: true }, 2);
   assert.equal(fp.onTop, false);
   assert.equal(fp.height, FIRST_PERSON_LABEL_HEIGHT);
 });
 
-/** Screen rect (px) of a sprite for a perspective camera, viewport 1600x1000. */
-function screenRect(sprite: THREE.Object3D, camera: THREE.PerspectiveCamera, size = { w: 1600, h: 1000 }) {
+/** Screen rect (px) of a sprite for a perspective or an orthographic camera, viewport 1600x1000. */
+function screenRect(sprite: THREE.Object3D, camera: THREE.PerspectiveCamera | THREE.OrthographicCamera, size = { w: 1600, h: 1000 }) {
   const center = sprite.getWorldPosition(new THREE.Vector3());
-  const view = center.clone().applyMatrix4(camera.matrixWorldInverse);
-  const depth = -view.z;
-  const pxPerUnit = size.h / (2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+  let pxPerUnit: number;
+  if ((camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
+    const perspective = camera as THREE.PerspectiveCamera;
+    const view = center.clone().applyMatrix4(camera.matrixWorldInverse);
+    const depth = -view.z;
+    pxPerUnit = size.h / (2 * depth * Math.tan(THREE.MathUtils.degToRad(perspective.fov) / 2));
+  } else {
+    const ortho = camera as THREE.OrthographicCamera;
+    pxPerUnit = (size.h * ortho.zoom) / (ortho.top - ortho.bottom);
+  }
   const ndc = center.clone().project(camera);
   const x = (ndc.x + 1) / 2 * size.w;
   const y = (1 - ndc.y) / 2 * size.h;
@@ -154,25 +162,27 @@ function screenRect(sprite: THREE.Object3D, camera: THREE.PerspectiveCamera, siz
   return { left: x - w / 2, right: x + w / 2, top: y - h / 2, bottom: y + h / 2, height: h };
 }
 
-test('real size, default overview at 1600x1000: every room label plate is at least 22 px tall and no two overlap', () => {
-  const { scene, manager } = buildRealSizeOffice();
-  const camera = new THREE.PerspectiveCamera(60, 1600 / 1000, 0.1, 100);
-  const canvas = dom.window.document.createElement('canvas');
-  const view = new ViewController({ camera, canvas, scene, agents: () => manager.getAgents(), keys: dom.window, hash: '#view=overview' });
-  view.update(0, 0);
-  camera.updateMatrixWorld();
+test('real size, default isometric view at 1600x1000: every room label plate is at least 22 px tall and no two overlap', () => {
+  const { scene } = buildRealSizeOffice();
   scene.updateMatrixWorld();
+  const camera = new THREE.OrthographicCamera();
+  const isometric = new IsometricController();
+  isometric.frame(overviewBounds(scene), 1600 / 1000);
+  isometric.applyTo(camera, 1600 / 1000, 60);
+  camera.updateMatrixWorld();
+  const canvas = dom.window.document.createElement('canvas');
+  const zoomDistance = isometric.equivalentDistance(60);
   const controller = new LabelDetailController({
     agents: () => [], camera, canvas, keys: dom.window, scene,
-    viewMode: () => view.mode, zoomDistance: () => view.zoomDistance, pick: () => null, selected: () => null,
+    viewMode: () => 'isometric', zoomDistance: () => zoomDistance, pick: () => null, selected: () => null,
   });
   controller.refresh();
   scene.updateMatrixWorld();
   const labels = labelsIn(scene);
   assert.equal(labels.length, 25);
   const rects = labels.map((label) => ({ text: label.userData.roomLabel as string, rect: screenRect(label, camera) }));
-  console.log(`room label plates: min ${Math.min(...rects.map((r) => r.rect.height)).toFixed(1)} px at zoom ${view.zoomDistance.toFixed(1)}`);
-  for (const { text, rect } of rects) assert.ok(rect.height >= 22, `${text}: ${rect.height.toFixed(1)} px at zoom ${view.zoomDistance.toFixed(1)}`);
+  console.log(`room label plates: min ${Math.min(...rects.map((r) => r.rect.height)).toFixed(1)} px at zoom ${zoomDistance.toFixed(1)}`);
+  for (const { text, rect } of rects) assert.ok(rect.height >= 22, `${text}: ${rect.height.toFixed(1)} px at zoom ${zoomDistance.toFixed(1)}`);
   for (let i = 0; i < rects.length; i++) {
     for (let j = i + 1; j < rects.length; j++) {
       const a = rects[i].rect;
@@ -181,7 +191,7 @@ test('real size, default overview at 1600x1000: every room label plate is at lea
       assert.ok(!overlap, `${rects[i].text} overlaps ${rects[j].text}`);
     }
   }
-  // The default overview shows the compact face; a war room title fits short lines
+  // The default isometric view shows the compact face; a war room title fits short lines
   const war = labels.find((label) => label.userData.roomLabel === 'Mission 3')!;
   assert.deepEqual(war.userData.labelLines, ['MISSION', '3']);
   // Each text line is readable too, not only the plate
@@ -189,7 +199,7 @@ test('real size, default overview at 1600x1000: every room label plate is at lea
     const lines = (labels.find((label) => label.userData.roomLabel === text)!.userData.labelLines as string[]).length;
     assert.ok(rect.height / lines >= 11, `${text}: ${(rect.height / lines).toFixed(1)} px per line`);
   }
-  for (const label of labels) assert.equal(label.userData.onTop, true, 'drawn on top in the overview');
+  for (const label of labels) assert.equal(label.userData.onTop, true, 'drawn on top in the isometric view');
 });
 
 test('every room label of the scene draws in one instanced call; a hidden label gets scale 0', () => {
@@ -240,7 +250,7 @@ test('a room label shows its full name when zoomed in or with labels: all', () =
   let changes = 0;
   const controller = new LabelDetailController({
     agents: () => [], camera, canvas: dom.window.document.createElement('canvas'), keys: dom.window, scene, changed: () => { changes++; },
-    viewMode: () => 'overview', zoomDistance: () => state.zoom, pick: () => null, selected: () => null,
+    viewMode: () => 'isometric', zoomDistance: () => state.zoom, pick: () => null, selected: () => null,
   });
   controller.refresh();
   const [label] = labelsIn(room.group);
@@ -264,7 +274,7 @@ test('the sign list is collected once, and again after sceneChanged', () => {
   scene.traverse = (callback) => { traversals++; traverse(callback); };
   const controller = new LabelDetailController({
     agents: () => [], camera, canvas: dom.window.document.createElement('canvas'), keys: dom.window, scene,
-    viewMode: () => 'overview', zoomDistance: () => 80, pick: () => null, selected: () => null,
+    viewMode: () => 'isometric', zoomDistance: () => 80, pick: () => null, selected: () => null,
   });
   controller.refresh();
   controller.refresh();
@@ -300,7 +310,7 @@ test('a war room label follows the mission title', () => {
 test('a room label hides in first person while the camera is inside its room, so it does not block the view', () => {
   assert.equal(roomLabelVisible({ viewMode: 'first-person', cameraInside: true }), false);
   assert.equal(roomLabelVisible({ viewMode: 'first-person', cameraInside: false }), true);
-  assert.equal(roomLabelVisible({ viewMode: 'overview', cameraInside: true }), true);
+  assert.equal(roomLabelVisible({ viewMode: 'isometric', cameraInside: true }), true);
 });
 
 test('the label controller applies the room label rule from the camera position', () => {
@@ -314,7 +324,7 @@ test('the label controller applies the room label rule from the camera position'
   const inside = center(slot.rect);
   camera.position.set(inside.x, 1.6, inside.z);
   camera.updateMatrixWorld();
-  let viewMode: 'overview' | 'first-person' = 'first-person';
+  let viewMode: 'isometric' | 'first-person' = 'first-person';
   const controller = new LabelDetailController({
     agents: () => [], camera, canvas: dom.window.document.createElement('canvas'), keys: dom.window, scene,
     viewMode: () => viewMode, zoomDistance: () => 40, pick: () => null, selected: () => null,
@@ -326,7 +336,7 @@ test('the label controller applies the room label rule from the camera position'
   controller.refresh();
   assert.equal(label.visible, true, 'from the hall');
   camera.position.set(inside.x, 1.6, inside.z);
-  viewMode = 'overview';
+  viewMode = 'isometric';
   controller.refresh();
   assert.equal(label.visible, true, 'always in the overview');
 });
@@ -491,7 +501,7 @@ test('the render loop applies the cutaway in the frame of the mode switch and re
   addLighting(scene);
   const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
   camera.position.set(-12, 5.5, 11);
-  let mode: 'first-person' | 'overview' = 'first-person';
+  let mode: 'first-person' | 'isometric' = 'first-person';
   let renders = 0;
   const renderer = {
     render: () => { renders++; }, info: { render: { calls: 0, triangles: 0 }, reset: () => undefined },
@@ -502,7 +512,7 @@ test('the render loop applies the cutaway in the frame of the mode switch and re
     update: () => undefined, figures: () => [], mode: () => mode,
   });
   loop.frame(0);
-  mode = 'overview';
+  mode = 'isometric';
   const before = renders;
   loop.frame(1000);
   assert.equal(renders, before + 1);
@@ -553,7 +563,7 @@ test('the render loop redraws the shadows when only the cutaway changes', () => 
   };
   const loop = new FrameLoop({
     scene, camera, renderer: renderer as never, labelRenderer: { render: () => undefined },
-    update: () => undefined, figures: () => [], mode: () => 'overview',
+    update: () => undefined, figures: () => [], mode: () => 'isometric',
   });
   loop.frame(0);
   loop.frame(100);
@@ -572,8 +582,8 @@ test('the render loop redraws the shadows when only the cutaway changes', () => 
 
 // --- AC5: quieter mission signs ---
 
-const view = (overrides: Partial<{ mode: 'smart' | 'all'; viewMode: 'overview' | 'first-person'; zoomDistance: number }> = {}) =>
-  ({ mode: 'smart' as const, viewMode: 'overview' as const, zoomDistance: OVERVIEW_SIGN_ZOOM + 20, ...overrides });
+const view = (overrides: Partial<{ mode: 'smart' | 'all'; viewMode: 'isometric' | 'first-person'; zoomDistance: number }> = {}) =>
+  ({ mode: 'smart' as const, viewMode: 'isometric' as const, zoomDistance: OVERVIEW_SIGN_ZOOM + 20, ...overrides });
 
 test('a mission sign shows only when you zoom in or hover; the past sessions sign only on hover', () => {
   const far = FIRST_PERSON_SIGN_DISTANCE + 5;
@@ -613,7 +623,7 @@ test('the label controller hides war room signs in the default overview and show
   const state = { zoom: OVERVIEW_SIGN_ZOOM + 30 };
   const controller = new LabelDetailController({
     agents: () => [], camera, canvas, keys: dom.window, scene,
-    viewMode: () => 'overview', zoomDistance: () => state.zoom, pick: () => null, selected: () => null,
+    viewMode: () => 'isometric', zoomDistance: () => state.zoom, pick: () => null, selected: () => null,
   });
   const signs = room.group.children.filter((child): child is CSS2DObject => child instanceof CSS2DObject);
   controller.refresh();

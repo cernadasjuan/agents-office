@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
 import { focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
 import { IsometricController, IsometricTween, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
-import { OverviewController, PoseTween, floorUnder, overviewBounds, zoomTowardCursor as zoomOverviewTowardCursor, type CameraPose } from './OverviewCamera.js';
+import { PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
 import { SelectionMarker } from './SelectionMarker.js';
 import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, type PickTarget, type ScreenPoint, type SelectionState, type ViewMode } from './Selection.js';
 
@@ -14,9 +14,8 @@ const PAN_SPEED_PER_DISTANCE = 0.9;
 const FAST_MULTIPLIER = 2.5;
 
 export const VIEW_HINTS: Record<ViewMode, string> = {
-  'first-person': 'Click to look around — WASD to move — Space/Q up/down — Shift = fast — ESC to release — Click a figure to select — O = overview — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
-  overview: 'Overview — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — O = first person — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
-  isometric: 'Isometric — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — I = back — O = overview — Shift+L = layout — N = next — F = focus — / = filter',
+  'first-person': 'Click to look around — WASD to move — Space/Q up/down — Shift = fast — ESC to release — Click a figure to select — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
+  isometric: 'Isometric — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — I = back — Shift+L = layout — N = next — F = focus — / = filter',
 };
 
 export interface ViewControllerOptions {
@@ -31,10 +30,10 @@ export interface ViewControllerOptions {
   /** Where key presses arrive (the window). */
   keys: Pick<Window, 'addEventListener'>;
   hint?: HTMLElement | null;
-  /** The URL hash: `#view=overview`, `#view=iso`, `#focus=<agent id>`. */
+  /** The URL hash: `#view=iso`, `#focus=<agent id>`. */
   hash?: string;
   selection?: SelectionState;
-  /** The start view. Without it the hash decides (`#view=overview`), else first person. */
+  /** The start view. Without it the hash decides (`#view=iso`), else first person. */
   view?: ViewMode;
   /** Called with the start mode and after each mode change (the header, the saved view). */
   modeChanged?: (mode: ViewMode) => void;
@@ -49,19 +48,17 @@ function isFormField(target: EventTarget | null): boolean {
 }
 
 /**
- * Owns the camera mode (first person, overview or isometric), click to select,
- * the selection ring and the camera flights. First person stays the default.
+ * Owns the camera mode (first person or isometric), click to select, the
+ * selection ring and the camera flights. First person stays the default.
  * The isometric view draws through its own orthographic camera (`activeCamera`).
  */
 export class ViewController {
   private currentMode: ViewMode = 'first-person';
-  private overview = new OverviewController();
   private isometric = new IsometricController();
   private isometricCamera: THREE.OrthographicCamera;
   private flight: { tween: PoseTween; end: CameraPose } | null = null;
   private isometricFlight: IsometricTween | null = null;
   private savedFirstPerson: CameraPose | null = null;
-  private beforeIsometric: ViewMode = 'overview';
   private hiddenInOverview: THREE.Object3D[] = [];
   private panKeys = new Set<string>();
   private pressPoint: ScreenPoint | null = null;
@@ -99,21 +96,16 @@ export class ViewController {
   }
 
   /**
-   * The zoom as an overview camera distance. Label detail reads it. The
-   * isometric view reports the overview distance with the same screen size.
+   * The zoom as an overview-equivalent camera distance. Label detail reads
+   * it. Meaningless outside the isometric view (nothing reads it then).
    */
   get zoomDistance(): number {
-    return this.currentMode === 'isometric' ? this.isometric.equivalentDistance(this.options.camera.fov) : this.overview.distance;
+    return this.isometric.equivalentDistance(this.options.camera.fov);
   }
 
-  /** Key O: first person and the overview. From the isometric view it goes to the overview. */
-  toggleMode(): void {
-    this.setMode(this.currentMode === 'overview' ? 'first-person' : 'overview', true);
-  }
-
-  /** Key I: into the isometric view, and back to the view before it. */
+  /** Key I: into the isometric view, and back to first person. */
   toggleIsometric(): void {
-    this.setMode(this.currentMode === 'isometric' ? this.beforeIsometric : 'isometric', true);
+    this.setMode(this.currentMode === 'isometric' ? 'first-person' : 'isometric', true);
   }
 
   setMode(mode: ViewMode, animate: boolean): void {
@@ -121,7 +113,6 @@ export class ViewController {
     const previous = this.currentMode;
     const from = this.currentPose();
     if (previous === 'first-person') this.savedFirstPerson = from;
-    if (mode === 'isometric') this.beforeIsometric = previous;
     this.currentMode = mode;
     this.isometricFlight = null;
     // The camera changes kind when the isometric view starts or ends: cut, do not fly
@@ -138,9 +129,6 @@ export class ViewController {
       this.flight = null;
       this.frameIsometric();
       this.applyIsometric();
-    } else if (mode === 'overview') {
-      this.frameOverview();
-      this.flyTo(from, this.overview.pose(), fly);
     } else {
       this.flyTo(from, this.savedFirstPerson ?? from, fly);
     }
@@ -180,9 +168,6 @@ export class ViewController {
         if (this.currentMode === 'first-person') setFreeCameraLook(camera, this.flight.end.position, this.flight.end.lookAt);
         this.flight = null;
       }
-    } else if (this.currentMode === 'overview') {
-      this.panWithKeys(delta);
-      this.applyPose(this.overview.pose());
     } else {
       updateFreeCamera(camera, delta);
     }
@@ -215,8 +200,7 @@ export class ViewController {
 
     keys.addEventListener('keydown', (event: KeyboardEvent) => {
       if (isFormField(event.target)) return;
-      if (event.code === 'KeyO') this.toggleMode();
-      else if (event.code === 'KeyI') this.toggleIsometric();
+      if (event.code === 'KeyI') this.toggleIsometric();
       else if (event.code === 'Escape') this.selection.clear();
       else this.panKeys.add(event.code);
     });
@@ -236,8 +220,7 @@ export class ViewController {
       this.isometricFlight = null;
       const dx = point.x - this.dragPoint.x;
       const dy = point.y - this.dragPoint.y;
-      if (this.currentMode === 'isometric') this.isometric.drag(dx, dy, canvas.clientHeight || 1);
-      else this.overview.drag(dx, dy, canvas.clientHeight || 1, this.options.camera.fov);
+      this.isometric.drag(dx, dy, canvas.clientHeight || 1);
       this.dragPoint = point;
     });
     document.addEventListener('pointerup', () => {
@@ -264,14 +247,12 @@ export class ViewController {
       const rect = canvas.getBoundingClientRect();
       const aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
       if (rect.width === 0 || rect.height === 0) {
-        if (this.currentMode === 'isometric') this.isometric.zoom(event.deltaY);
-        else this.overview.zoom(event.deltaY);
+        this.isometric.zoom(event.deltaY);
         return;
       }
       const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      if (this.currentMode === 'isometric') zoomIsometricTowardCursor(this.isometric, ndcX, ndcY, event.deltaY, aspect);
-      else zoomOverviewTowardCursor(this.overview, ndcX, ndcY, event.deltaY, this.options.camera.fov, aspect);
+      zoomIsometricTowardCursor(this.isometric, ndcX, ndcY, event.deltaY, aspect);
     }, { passive: false });
   }
 
@@ -312,12 +293,6 @@ export class ViewController {
       return;
     }
     const from = this.currentPose();
-    if (this.currentMode === 'overview') {
-      this.overview.focusOn(point);
-      this.overview.pan(this.shiftOnScreen(this.overview.distance), 0);
-      this.flyTo(from, this.overview.pose(), true);
-      return;
-    }
     const lookAt = new THREE.Vector3(point.x, point.y + FIGURE_CHEST, point.z);
     const away = new THREE.Vector3().subVectors(from.position, lookAt);
     away.y = 0;
@@ -362,8 +337,7 @@ export class ViewController {
     if (this.currentMode === 'first-person' && !this.flight) return freeCameraLook(this.options.camera);
     const camera = this.options.camera;
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    const reach = this.currentMode === 'overview' ? this.overview.distance : 5;
-    return { position: camera.position.clone(), lookAt: camera.position.clone().addScaledVector(forward, reach) };
+    return { position: camera.position.clone(), lookAt: camera.position.clone().addScaledVector(forward, 5) };
   }
 
   private applyPose(pose: CameraPose): void {
@@ -385,18 +359,6 @@ export class ViewController {
     return canvas.clientWidth > 0 && canvas.clientHeight > 0 ? canvas.clientWidth / canvas.clientHeight : camera.aspect;
   }
 
-  private frameOverview(): void {
-    const { camera, scene } = this.options;
-    const bounds = overviewBounds(scene);
-    this.overview.frame(bounds, camera.fov, camera.aspect);
-    const radius = bounds.getBoundingSphere(new THREE.Sphere()).radius;
-    const far = Math.max(100, this.overview.maxDistance + radius * 2);
-    if (far !== camera.far) {
-      camera.far = far;
-      camera.updateProjectionMatrix();
-    }
-  }
-
   private panWithKeys(delta: number): void {
     let right = 0;
     let forward = 0;
@@ -407,8 +369,7 @@ export class ViewController {
     if (right === 0 && forward === 0) return;
     const fast = this.panKeys.has('ShiftLeft') || this.panKeys.has('ShiftRight') ? FAST_MULTIPLIER : 1;
     const step = this.zoomDistance * PAN_SPEED_PER_DISTANCE * fast * delta;
-    if (this.currentMode === 'isometric') this.isometric.pan(right * step, forward * step);
-    else this.overview.pan(right * step, forward * step);
+    this.isometric.pan(right * step, forward * step);
   }
 
   /** Walls and lamps marked `userData.overviewHidden` would block the overview; hide them there. */

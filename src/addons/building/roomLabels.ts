@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ROOM_SIZE, type Rect } from './RoomPlanner.js';
+import type { ViewMode } from '../../scene/Selection.js';
 
 /** First person: a small plate high in the room; its top (2.55) stays below the wall top, so walls hide it. */
 export const FIRST_PERSON_LABEL_Y = 2.2;
@@ -92,8 +93,8 @@ export function compactLabelLines(text: string): string[] {
 
 /** What the label controller tells a room label each refresh. */
 export interface RoomLabelView {
-  /** First person, or a view from above (the overview, the isometric view). */
-  viewMode: 'overview' | 'first-person' | 'isometric';
+  /** First person, or the isometric view from above. */
+  viewMode: ViewMode;
   zoomDistance: number;
   /** Zoomed in, pointed at or labels: all: the full name. */
   detail: boolean;

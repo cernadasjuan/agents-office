@@ -50,8 +50,8 @@ const agentCard = new AgentCard(document.body, { anchor: document.getElementById
 // since a tombstone id never matches an agent id, so only one of the two ever shows.
 const tombstoneCard = new TombstoneCard(document.body, { anchor: document.getElementById('ui-panel')! });
 
-// Camera mode (key O toggles first person and the overview, key I the isometric view) and click to select.
-// Start view: `#view=overview|first-person|iso`, then the last view, then the layout default.
+// Camera mode (key I toggles first person and the isometric view) and click to select.
+// Start view: `#view=first-person|iso`, then the last view, then the layout default.
 // `#focus=<agent id>` selects that agent once it appears. The panel header shows the layout and the view.
 const viewStatus = document.getElementById('view-status');
 const view = new ViewController({
