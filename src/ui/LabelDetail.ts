@@ -28,6 +28,8 @@ export interface LabelFacts {
   hovered: boolean;
   /** Distance from the camera to the figure, in world units. */
   distance: number;
+  /** Busy with no transcript write for a long while: like a fresh wait, always full. */
+  stuck?: boolean;
 }
 
 export interface LabelView {
@@ -45,7 +47,7 @@ export interface LabelView {
 export function labelDetail(facts: LabelFacts, view: LabelView): LabelLevel {
   if (view.mode === 'all') return 'full';
   const blockedRecently = facts.attention === 'waiting' && attentionBand({ attention: facts.attention, waitMinutes: facts.waitMinutes }) !== 'cold';
-  if (blockedRecently || facts.selected || facts.hovered) return 'full';
+  if (blockedRecently || facts.stuck || facts.selected || facts.hovered) return 'full';
   if (isViewFromAbove(view.viewMode)) return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
   return facts.distance <= FIRST_PERSON_FULL_LABEL_DISTANCE ? 'full' : 'compact';
 }
@@ -129,7 +131,7 @@ export function applyLabelDetail(element: HTMLElement, level: LabelLevel): boole
 
 /** The part of a managed agent this module reads. */
 export interface LabelAgent {
-  info: { id: string; extras?: { attention?: string; waitMinutes?: number } };
+  info: { id: string; extras?: { attention?: string; waitMinutes?: number; stuck?: boolean } };
   figure: { group: THREE.Object3D; label: { element: HTMLElement } };
 }
 
@@ -214,6 +216,7 @@ export class LabelDetailController {
         selected: agent.info.id === selected,
         hovered: agent.info.id === hovered,
         distance: this.figurePosition.distanceTo(this.cameraPosition),
+        stuck: agent.info.extras?.stuck,
       }, view);
       applyLabelDetail(agent.figure.label.element, level);
     }

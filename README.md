@@ -120,7 +120,7 @@ Subagents never ask; their parent does. Without a status in the session file, no
 
 ### Stuck sessions
 
-A session can stay busy with no progress; today it looks the same as a session that is actually working. A busy session with no transcript write for 60 min shows "Stuck?" in its label and in its panel row, in place of the activity. A long tool call still counts as progress: only the transcript's write time matters, not how long the call runs. The mark clears on its own on the next poll once the session writes again. The threshold is one constant, `STUCK_AFTER_MINUTES` in `src/ui/attention.ts`, next to `ATTENTION_BANDS`. Subagents never get this mark; their parent does. A session without a status, a transcript, or a known write time keeps the old behavior.
+A session can stay busy with no progress; today it looks the same as a session that is actually working. A busy session with no transcript write for 60 min shows "Stuck?" in its label and in its panel row, in place of the activity. A long tool call still counts as progress: only the transcript's write time matters, not how long the call runs. The mark clears on its own on the next poll once the session writes again. The threshold is one constant, `STUCK_AFTER_MINUTES` in `src/ui/attention.ts`, next to `ATTENTION_BANDS`. Subagents never get this mark; their parent does. A session without a status, a transcript, or a known write time keeps the old behavior. Like a fresh wait, a stuck mark always gets the full floating label, so it shows even on a figure far from the camera and not selected.
 
 ### Triage list
 
