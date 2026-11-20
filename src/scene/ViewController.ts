@@ -147,10 +147,15 @@ export class ViewController {
     this.options.modeChanged?.(mode);
   }
 
-  /** Call after each poll: applies `#focus` once and drops a selection whose agent left. */
+  /**
+   * Call after each poll: applies `#focus` once and drops a selection whose agent left.
+   * A tombstone is not an agent and never appears in `agents`, so its id is kept too: an open
+   * tombstone card must survive the routine 3 s agent poll, not just the next `worldChanged`.
+   */
   agentsChanged(agents: ManagedAgent[]): void {
     const ids = agents.map((agent) => agent.info.id);
-    this.selection.keepOnly(ids);
+    const tombstoneIds = (this.options.tombstones?.() ?? []).map((target) => target.id);
+    this.selection.keepOnly([...ids, ...tombstoneIds]);
     if (this.pendingFocus && ids.includes(this.pendingFocus)) {
       const focus = this.pendingFocus;
       this.pendingFocus = null;

@@ -108,6 +108,41 @@ test('a click picks a tombstone, not just an agent figure (issue #127)', () => {
   assert.equal(view.pickAt(800, 450), 'tomb-1');
 });
 
+test('an open tombstone card survives a routine agent poll (issue #127)', () => {
+  const document = dom.window.document;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
+  const canvas = document.createElement('canvas');
+  Object.defineProperty(canvas, 'clientWidth', { value: 1600 });
+  Object.defineProperty(canvas, 'clientHeight', { value: 900 });
+  document.body.appendChild(canvas);
+  const manager = new AgentManager(scene, fixedLayout);
+  const selection = new SelectionState();
+  const tombstone = new THREE.Object3D();
+  const view = new ViewController({
+    camera, canvas, scene, selection,
+    agents: () => manager.getAgents(),
+    tombstones: () => [{ id: 'tomb-1', object: tombstone }],
+    keys: dom.window,
+  });
+
+  selection.select('tomb-1');
+  // The 3 s agent poll calls this with no agents at all in an otherwise empty office;
+  // a tombstone never appears in `agents`, so it must not look like it "left".
+  view.agentsChanged(manager.getAgents());
+  assert.equal(selection.selected, 'tomb-1');
+
+  // A tombstone that genuinely goes away (the room's world update removed it) still deselects.
+  const otherView = new ViewController({
+    camera, canvas, scene, selection,
+    agents: () => manager.getAgents(),
+    tombstones: () => [],
+    keys: dom.window,
+  });
+  otherView.agentsChanged(manager.getAgents());
+  assert.equal(selection.selected, null);
+});
+
 test('#focus selects the agent once it appears, and flies the camera to it', () => {
   const { view, manager, selection, camera } = setup('#view=overview&focus=agent-1');
   view.agentsChanged(manager.getAgents());
