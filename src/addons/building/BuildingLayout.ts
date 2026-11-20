@@ -48,8 +48,6 @@ interface AgentState {
 
 interface RoomRecord {
   kind: RoomKind;
-  /** The herdr workspace a desk room belongs to, by name. */
-  tag?: string;
   index: number;
   group: THREE.Group;
   extraDoors: Door[];
@@ -85,7 +83,7 @@ export class BuildingLayout implements LayoutStrategy {
     this.storage = options.storage;
     this.hideHallSideWalls();
     const remembered = this.rememberedRooms();
-    for (const { kind, tag } of remembered.length > 0 ? remembered : [{ kind: 'office' as RoomKind }]) this.addRoom(kind, false, tag);
+    for (const kind of remembered.length > 0 ? remembered : (['office'] as RoomKind[])) this.addRoom(kind, false);
     // The Library is its own room from the start: research trips and librarians go there
     if (!this.roomKinds.includes('library')) this.addRoom('library', false);
     this.saveRooms();
@@ -133,12 +131,6 @@ export class BuildingLayout implements LayoutStrategy {
 
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
     const state = this.stateOf(agent);
-    if (this.needsRehome(state)) {
-      if (state.seat === state.home) state.seat = null;
-      this.free(state.home);
-      state.home = null;
-      if (state.target === 'home') return this.assign(state, 'home');
-    }
     const desired = this.targetFor(state);
     if (previous === null || state.target === null) return this.assign(state, desired);
     if (desired === state.target) {
@@ -208,32 +200,41 @@ export class BuildingLayout implements LayoutStrategy {
   }
 
   /**
-   * The agent's desk for life. A session in a herdr workspace gets a desk in that
-   * workspace's desk room (one is rented when needed); others use the hall desks.
+   * The agent's desk for life, in the shared desk pool (the hall desks, then a
+   * rented `desks` room when those run out). A session in a herdr workspace
+   * prefers a free desk next to one already held by the same workspace.
    */
   private homeOf(state: AgentState): string {
     if (state.home) return state.home;
-    const workspace = state.agent.extras?.parentId ? undefined : state.agent.extras?.group?.label;
-    const desks = () => this.keysOfType('implementing').filter((key) => this.roomTagOf(key) === workspace);
-    let free = desks().find((key) => !this.stations.get(key)!.occupied);
+    const workspace = this.workspaceOf(state);
+    let free = this.pickDesk(workspace);
     if (!free) {
-      this.addRoom('desks', true, workspace);
-      free = desks().find((key) => !this.stations.get(key)!.occupied)!;
+      this.addRoom('desks');
+      free = this.pickDesk(workspace)!;
     }
     this.stations.get(free)!.occupied = true;
     state.home = free;
     return free;
   }
 
-  private roomTagOf(key: string): string | undefined {
-    const match = /^room(\d+)_/.exec(key);
-    return match ? this.rooms[Number(match[1])]?.tag : undefined;
+  private workspaceOf(state: AgentState): string | undefined {
+    return state.agent.extras?.parentId ? undefined : state.agent.extras?.group?.label;
   }
 
-  /** A session whose workspace became known after it got a desk moves once to its workspace room. */
-  private needsRehome(state: AgentState): boolean {
-    const workspace = state.agent.extras?.parentId ? undefined : state.agent.extras?.group?.label;
-    return state.home !== null && workspace !== undefined && this.roomTagOf(state.home) !== workspace;
+  /** A free desk next to one already held by the same workspace, else any free desk. */
+  private pickDesk(workspace: string | undefined): string | undefined {
+    const free = this.keysOfType('implementing').filter((key) => !this.stations.get(key)!.occupied);
+    if (free.length === 0) return undefined;
+    if (workspace === undefined) return free[0];
+    const occupiedByWorkspace = [...this.agents.values()].filter((other) => other.home && this.workspaceOf(other) === workspace).map((other) => other.home!);
+    if (occupiedByWorkspace.length === 0) return free[0];
+    // "Next to" is physical, not a key suffix: desks stand in rows, so an adjacent
+    // suffix can be a row apart while the true nearest desk carries a far suffix.
+    const distanceToWorkspace = (key: string): number => {
+      const position = this.stations.get(key)!.position;
+      return Math.min(...occupiedByWorkspace.map((occupied) => position.distanceTo(this.stations.get(occupied)!.position)));
+    };
+    return free.reduce((closest, key) => (distanceToWorkspace(key) < distanceToWorkspace(closest) ? key : closest));
   }
 
   /** A seat in a war room, or a lounge seat when the room is full. */
@@ -344,11 +345,11 @@ export class BuildingLayout implements LayoutStrategy {
     return state;
   }
 
-  private addRoom(kind: RoomKind, save = true, tag?: string): void {
+  private addRoom(kind: RoomKind, save = true): void {
     const index = this.rooms.length;
     const slot = slotFor(index);
-    const built = buildRoom(kind, slot, index, [], roomTitle(kind, this.roomKinds, tag));
-    const record: RoomRecord = { kind, index, group: built.group, extraDoors: [], ...(tag ? { tag } : {}) };
+    const built = buildRoom(kind, slot, index, [], roomTitle(kind, this.roomKinds));
+    const record: RoomRecord = { kind, index, group: built.group, extraDoors: [] };
     this.rooms.push(record);
     this.scene.add(built.group);
     if (kind === 'office') showLoadedPortrait(built.group);
@@ -397,17 +398,21 @@ export class BuildingLayout implements LayoutStrategy {
     this.scene.add(this.hallWalls);
   }
 
-  /** Remembered rooms: a kind, or `desks@<workspace name>` for a workspace desk room. */
-  private rememberedRooms(): Array<{ kind: RoomKind; tag?: string }> {
+  /**
+   * Remembered rooms, one kind each. A `kind@<tag>` entry is a retired
+   * per-workspace desk room (roadmap item 20, superseded by floors, #118): it
+   * is dropped, without error, and its sessions resettle in the shared pool.
+   */
+  private rememberedRooms(): RoomKind[] {
     try {
       const parsed: unknown = JSON.parse(this.storage?.getItem(BUILDING_STORAGE_KEY) ?? '[]');
       const kinds = Object.keys(ROOM_STATION_TYPE);
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter((entry): entry is string => typeof entry === 'string').slice(0, 200).flatMap((entry) => {
-        const [kind, ...rest] = entry.split('@');
-        const tag = rest.join('@').trim().slice(0, 40);
-        return kinds.includes(kind) ? [{ kind: kind as RoomKind, ...(tag ? { tag } : {}) }] : [];
-      });
+      return parsed
+        .filter((entry): entry is string => typeof entry === 'string')
+        .slice(0, 200)
+        .filter((entry) => !entry.includes('@'))
+        .filter((kind): kind is RoomKind => kinds.includes(kind));
     } catch {
       return [];
     }
@@ -415,7 +420,7 @@ export class BuildingLayout implements LayoutStrategy {
 
   private saveRooms(): void {
     try {
-      this.storage?.setItem(BUILDING_STORAGE_KEY, JSON.stringify(this.rooms.map((room) => (room.tag ? `${room.kind}@${room.tag}` : room.kind))));
+      this.storage?.setItem(BUILDING_STORAGE_KEY, JSON.stringify(this.rooms.map((room) => room.kind)));
     } catch {
       // Storage full or blocked: the building still works for this page
     }

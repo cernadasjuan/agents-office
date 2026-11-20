@@ -44,12 +44,8 @@ export function roomFloorColor(kind: RoomKind): number {
   return FLOOR_TINT[kind];
 }
 
-/**
- * The room name: lounges are numbered in the order they are rented, a workspace
- * desk room carries its workspace name.
- */
-export function roomTitle(kind: RoomKind, earlierKinds: RoomKind[], tag?: string): string {
-  if (kind === 'desks' && tag) return `Desks · ${tag}`;
+/** The room name: lounges and waiting rooms are numbered in the order they are rented. */
+export function roomTitle(kind: RoomKind, earlierKinds: RoomKind[]): string {
   if (kind === 'lounge') return `Lounge ${earlierKinds.filter((earlier) => earlier === 'lounge').length + 1}`;
   // Only the first office is the user's; later ones are overflow waiting rooms
   if (kind === 'office' && earlierKinds.includes('office')) return `Waiting room ${earlierKinds.filter((earlier) => earlier === 'office').length + 1}`;
