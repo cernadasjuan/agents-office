@@ -211,7 +211,7 @@ npx agents-office --plugin name1 --plugin name2
 
 A plugin is a folder `plugins/<name>/` with an `index.ts` (server: sources, enrichers, rooms and boards) and an optional `client.ts` (browser rendering). The server copies only whitelisted, cleaned fields to the browser.
 
-`pnpm dev:fork` starts the office with the plugins of this fork (`herdr`, `github`, `bmad`, `missions`, `library`) and turns on herdr focus (`AGENTS_OFFICE_HERDR_FOCUS=1`).
+`pnpm dev:fork` starts the office with the plugins of this fork (`herdr`, `github`, `bmad`, `missions`, `library`, `peek`) and turns on herdr focus (`AGENTS_OFFICE_HERDR_FOCUS=1`).
 
 ### bmad: persona hats
 
@@ -300,6 +300,22 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 - **Closed missions:** the room locks, its door closes and no agent goes in. The room stays.
 - Without `AGENTS_OFFICE_MISSION_ROOTS`, the plugin adds nothing. It reads files only, with a size cap.
 
+### peek: recent lines, assets and equipment in the agent card
+
+The `peek` plugin adds three sections to the agent card: "Recent", "Assets" and "Equipment". It is off by default. `pnpm dev:fork` turns it on.
+
+```bash
+AGENTS_OFFICE_PLUGINS=peek pnpm dev
+```
+
+- **Recent:** the last 10 lines of the selected agent, newest at the bottom, each 200 characters or less. A line is assistant text or a tool call. A tool call shows only its name and a short summary (for example `Bash · git commit`, `Edit · app.ts`, `Skill · tdd`), never its input. Prompts and tool results never show. When the agent waits for you and its newest line is its own text, that line is pinned on top in an amber box.
+- **Masking:** the server masks secret patterns before it cuts a line: GitHub, GitLab (also runner, deploy and trigger tokens), Slack (also webhook URLs), Anthropic, OpenAI, Stripe, npm, Hugging Face, AWS and Google tokens, JWTs and private key blocks. It also masks `key=value`, `key: value` and JSON `"key": "value"` secrets, `password:` phrases to the end of the line, command-line passwords (`-p…` for mysql, `sshpass -p`, `--password`), bearer tokens, the password in `scheme://user:password@host`, long hex runs, random-looking base64 runs (also with `/`, for example AWS secret keys) and emails. White space collapses before the cut, and a cut never splits a `[secret]` placeholder. Masking is a best effort, not a guarantee: a token split across two lines is masked only when its first part starts with a known prefix.
+- **Assets:** up to 10 links found in the agent's tool calls, newest first: GitHub issues and pull requests, GitLab merge requests and Jira keys. A Jira key links only when its prefix has a site. The default map is `KTP` and `INS` to `https://beklever.atlassian.net/browse/` and `SPV` to `https://origin8cares.atlassian.net/browse/`. `AGENTS_OFFICE_PEEK_JIRA=ABC=https://example.atlassian.net/browse/,XYZ=...` replaces it.
+- **Equipment:** the skills the agent used (Skill tool calls), its personas (badges) and the repositories it changed (Edit and Write calls, git commit, push and similar), as short repository names. A worktree shows the name of its main repository. Never a path.
+- **Only on request:** the card asks `GET /api/views/peek?agent=<public id>` for the selected agent only: when you select it, then every 5 s while the card stays open. The refresh stops when the card closes. The route has the same loopback, Host and Origin checks as the other routes. It answers GET only (POST gets 405), 400 for a malformed ID, and 404 for an unknown agent or when the plugin is off. `/api/agents` and `/api/world` never carry transcript text.
+- **Reads:** the plugin reads the end of the transcript (2 MB) the first time, then only the new bytes (at most 4 MB per request).
+- **Screen sharing:** Recent shows file base names and web hosts, and Assets show internal hosts and Jira keys. A private mode (#91) can hide all peek sections through `setPeekTextHidden` in `plugins/peek/client.ts`.
+
 ## Controls
 
 - **Click** to engage camera
@@ -312,7 +328,7 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 - **O** to switch between first person (the default of the original layout) and the overview, a view from above at an angle that shows the whole floor. In the overview, drag to pan, use the mouse wheel to zoom, and use W/A/S/D to pan
 - **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on a row in the triage list also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
 - **Esc** clears the selection (in first person it first releases the camera)
-- **Agent card:** a selection opens a card left of the triage panel. It shows the name, the activity, the attention band and wait, the herdr workspace, the provider, the personas, the subagents (a click selects one) and up to 10 linked issues, newest first, or "No linked issues". An issue reads `<repo>#N` when the server knows its repository. With the github plugin, such an issue of a configured repository is a link to GitHub. An issue number alone never links. The card updates in place on each poll. A click on another agent changes the card content. Esc or the close button closes it. The camera puts the selected figure in the free area left of the card
+- **Agent card:** a selection opens a card left of the triage panel. It shows the name, the activity, the attention band and wait, the herdr workspace, the provider, the personas, the subagents (a click selects one) and up to 10 linked issues, newest first, or "No linked issues". An issue reads `<repo>#N` when the server knows its repository. With the github plugin, such an issue of a configured repository is a link to GitHub. An issue number alone never links. With the `peek` plugin, the card also shows Recent, Assets and Equipment (see the peek plugin). The card updates in place on each poll. A click on another agent changes the card content. Esc or the close button closes it. The camera puts the selected figure in the free area left of the card
 - **V** to switch the labels between `smart` (the default) and `all` full labels. `#labels=all` in the URL starts with all labels
 
 - `?dwell=<seconds>` in the URL (0 to 30, default 0) makes an agent in the original `activity` layout wait that long before it walks to a new station. A change back before the time cancels the walk. The figure shows the new activity at once.
