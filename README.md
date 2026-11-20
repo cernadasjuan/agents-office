@@ -147,7 +147,7 @@ The panel tells you how fresh its data is:
 - After 2 failed polls in a row (no answer, an HTTP error or bad JSON), the footer turns amber and adds "retrying". After 5, it turns red and says "Server not reachable". The scene keeps the last known agents. The next good answer clears the warning.
 - A subagent at rest gave its final answer, so its label reads "Done", not "Taking a break". A main session at rest keeps "Taking a break".
 
-The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, the attention bands, the "Done" label, the "Stuck?" mark, the rooms (building layout only) and the keys. Beds, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it.
+The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, the attention bands, the "Done" label, the "Stuck?" mark, the rooms (building layout only) and the keys. Tombstones, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it.
 
 ### Location: stations
 
@@ -311,8 +311,8 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 
 - **Who works there:** a session joins a mission's room when its own tool calls touch that mission (a `mission` script command with the slug, or a file under `missions/<slug>/`). Its subagents stand near it. A session that waits for you still goes to your office first.
 - **Walls:** the mission statement, the documents, the GitHub issues and a kanban of the mission's threads (needs you, open, done).
-- **Past sessions:** one bed with a sleeping agent per finished session (up to 12), and a count.
-- **Signs:** the room name is a large label above the room, like the other rooms. The small title sign shows only when you zoom in (overview camera distance 24 or less), come near it in first person (12 units), or point at the room. The past sessions count shows only when you point at the room. `#labels=all` (key V) shows all signs. The "You" sign at your desk follows the same rule.
+- **Past sessions:** one small tombstone per finished session (up to 12), and a count. A session that returns removes its own tombstone, by id, not whichever is oldest. A click or hover on a tombstone opens a card (the same look as the agent card) naming which session it was and when it ended; no 3D label sits over it by default.
+- **Signs:** the room name is a large label above the room, like the other rooms. The small title sign shows only when you zoom in (overview camera distance 24 or less), come near it in first person (12 units), or point at the room. The past sessions count, and each tombstone's own end-date sign, show only when you point at them. `#labels=all` (key V) shows all signs. The "You" sign at your desk follows the same rule.
 - **Closed missions:** the room locks, its door closes and no agent goes in. The room stays.
 - Without `AGENTS_OFFICE_MISSION_ROOTS`, the plugin adds nothing. It reads files only, with a size cap.
 

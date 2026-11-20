@@ -82,15 +82,15 @@ test('the legend explains the beacon, the raised hand, the attention bands, the 
   assert.match(overlay().textContent!, /24 h/);
 });
 
-test('beds, cards and hats appear only while their plugin is active', (t) => {
+test('tombstones, cards and hats appear only while their plugin is active', (t) => {
   const plain = legendSections('building', []).flatMap((section) => section.entries.map((entry) => entry.sign));
-  assert.ok(!plain.includes('Beds'));
+  assert.ok(!plain.includes('Tombstones'));
   assert.ok(!plain.includes('Cards'));
   assert.ok(!plain.includes('Hats'));
 
   const { button, signs } = setup(t, { plugins: ['missions', 'github', 'bmad'] });
   button.click();
-  for (const sign of ['Beds', 'Cards', 'Hats']) assert.ok(signs().includes(sign), `missing ${sign}`);
+  for (const sign of ['Tombstones', 'Cards', 'Hats']) assert.ok(signs().includes(sign), `missing ${sign}`);
 });
 
 test('the rooms appear only in the building layout', () => {

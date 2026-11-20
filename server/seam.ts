@@ -64,7 +64,8 @@ export interface RoomInput {
   kind: 'mission' | 'workspace';
   title: string;
   state: 'open' | 'locked';
-  sleepers?: number;
+  /** One entry per ended session, its own id and the day it ended (a tombstone). */
+  sleepers?: Array<{ id: string; endedAt?: string }>;
   walls?: {
     statement?: string;
     docs?: string[];
@@ -185,6 +186,13 @@ function wholeNumber(value: unknown, max: number): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max ? value : undefined;
 }
 
+/** A plain `YYYY-MM-DD` date, the date part of an ISO timestamp kept and the rest dropped. */
+const ISO_DATE = /^(\d{4}-\d{2}-\d{2})/;
+
+function isoDate(value: unknown): string | undefined {
+  return typeof value === 'string' ? ISO_DATE.exec(value)?.[1] : undefined;
+}
+
 const REPO_SHORT = /^[A-Za-z0-9_.-]{1,40}$/;
 
 /** The repository name after the last slash, or undefined when it is not a plain short token. */
@@ -296,13 +304,19 @@ export function projectPeek(input: PeekInput) {
 export function projectWorld(parts: WorldInput[], pluginNames: string[], publicId: PublicId) {
   const rooms = parts.flatMap((part) => part.rooms ?? []).slice(0, 100).map((room) => {
     const walls = room.walls ?? {};
-    const sleepers = wholeNumber(room.sleepers, 500);
+    const sleepers = (Array.isArray(room.sleepers) ? room.sleepers : []).slice(0, 48)
+      .flatMap((entry) => {
+        const rawId = displayText(entry?.id, 64);
+        if (!rawId) return [];
+        const endedAt = isoDate(entry?.endedAt);
+        return [{ id: publicId(`sleeper:${room.key}:${rawId}`), ...(endedAt ? { endedAt } : {}) }];
+      });
     return {
       id: publicId(`room:${room.key}`),
       kind: room.kind === 'workspace' ? 'workspace' : 'mission',
       title: displayText(room.title, 60),
       state: room.state === 'locked' ? 'locked' : 'open',
-      ...(sleepers !== undefined ? { sleepers } : {}),
+      ...(sleepers.length > 0 ? { sleepers } : {}),
       walls: {
         ...(walls.statement ? { statement: displayText(walls.statement, 240) } : {}),
         ...(Array.isArray(walls.docs) ? { docs: walls.docs.slice(0, 8).map((doc) => displayText(doc, 60)) } : {}),

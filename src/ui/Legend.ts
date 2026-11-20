@@ -48,7 +48,7 @@ const SECTIONS: LegendSection[] = [
       { sign: 'Your office', meaning: 'Agents that wait for you stand in line in front of your desk. A "Waiting room" gives the line more space.', layout: 'building' },
       { sign: 'Desks', meaning: 'Each session has a home desk. The room label names the workspace.', layout: 'building' },
       { sign: 'Lounge', meaning: 'Agents at rest, and extra seats when a room is full.', layout: 'building' },
-      { sign: 'Beds', meaning: 'In a mission room, one bed for each finished session of the mission.', plugin: 'missions' },
+      { sign: 'Tombstones', meaning: 'In a mission room, one tombstone for each finished session of the mission. Click or hover one to see which session it was.', plugin: 'missions' },
     ],
   },
   {
