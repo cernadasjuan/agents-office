@@ -200,7 +200,7 @@ The panel tells you how fresh its data is:
 - After 2 failed polls in a row (no answer, an HTTP error or bad JSON), the footer turns amber and adds "retrying". After 5, it turns red and says "Server not reachable". The scene keeps the last known agents. The next good answer clears the warning.
 - A subagent at rest gave its final answer, so its label reads "Done", not "Taking a break". A main session at rest keeps "Taking a break".
 
-The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, hands on hips, the attention bands, the "Done" label, the "Stuck?" mark, the rooms (building layout only) and the keys. Tombstones, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it. The beacon's meaning is also reachable without opening the legend: hovering a figure's floating label while the beacon shows gives the same explanation as a title tooltip.
+The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, hands on hips, the attention bands, the "Done" label, the "Stuck?" mark, the rooms (building layout only) and the keys. Tombstones, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it. The beacon's meaning is also reachable without opening the legend. The selected agent's card shows the same explanation on its own line whenever its beacon is on. Hovering a figure while its beacon is on shows a small tooltip near the cursor with the same text.
 
 ### Location: stations
 

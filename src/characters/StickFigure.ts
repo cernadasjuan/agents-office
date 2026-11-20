@@ -4,7 +4,7 @@ import { buildSkeleton, Joints } from './StickFigureParts.js';
 import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
 import { ACTIVITY_LABELS, activityLabelFor } from '../agents/AgentData.js';
-import { attentionLine, BEACON_HINT, callsForYou, formatWaitShort } from '../ui/attention.js';
+import { attentionLine, callsForYou, formatWaitShort } from '../ui/attention.js';
 import type { AgentExtras } from '../agents/AgentData.js';
 import { getToonMaterial } from '../utils/Materials.js';
 import type { Posture } from '../layout/LayoutStrategy.js';
@@ -104,9 +104,6 @@ export class StickFigure {
       this.joints.root.add(this.beacon);
     }
     if (this.beacon) this.beacon.visible = this.callsForYou;
-    // The beacon's meaning, reachable without opening the legend (issue #170): a hover title on
-    // the label, present only while the beacon itself shows.
-    this.label.element.title = this.callsForYou ? BEACON_HINT : '';
   }
 
   /** Busy with no transcript write for a long while: the label reads "Stuck?" instead of the activity. */

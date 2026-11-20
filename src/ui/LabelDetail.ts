@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { isViewFromAbove, type ViewMode } from '../scene/Selection.js';
 import { projectToClip } from '../scene/OffscreenMarker.js';
-import { attentionBand, type Wait } from './attention.js';
+import { attentionBand, BEACON_HINT, callsForYou, type Wait } from './attention.js';
 import { declutterLabels, labelPriority, labelRect, type DeclutterCandidate } from './LabelDeclutter.js';
 
 /** `smart` shows full labels only where they matter; `all` is the original behavior. */
@@ -166,7 +166,7 @@ export function applyLabelVisibility(element: HTMLElement, visible: boolean): bo
 
 /** The part of a managed agent this module reads. */
 export interface LabelAgent {
-  info: { id: string; activity?: string; extras?: { attention?: string; waitMinutes?: number; stuck?: boolean } };
+  info: { id: string; activity?: string; extras?: { attention?: string; waitMinutes?: number; stuck?: boolean; orchestrating?: boolean } };
   figure: { group: THREE.Object3D; label: { element: HTMLElement; getWorldPosition: (target: THREE.Vector3) => THREE.Vector3 } };
 }
 
@@ -190,6 +190,14 @@ export interface LabelDetailOptions {
   scene?: THREE.Object3D;
   /** A room label changed (pose, face or visibility): the scene needs a new frame. */
   changed?: () => void;
+  /**
+   * Called each refresh with the beacon's meaning and the cursor position, or both null, for
+   * the hovered agent (issue #170 review): labels have `pointer-events: none`, so a title
+   * attribute there never shows. The caller owns rendering a small DOM tooltip near the point;
+   * this module only decides when one applies, reusing the hover detection it already runs for
+   * label declutter.
+   */
+  onHoverHint?: (hint: string | null, point: { x: number; y: number } | null) => void;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -273,6 +281,16 @@ export class LabelDetailController {
       applyLabelDetail(agent.figure.label.element, level);
       prepared.push({ agent, level, isSelected, isHovered });
     }
+    // The hovered agent's beacon hint (issue #170 review), reusing the hover detection above.
+    // Pointer-locked (first person): `this.pointer` is null, there is no cursor to put a
+    // tooltip near, so this never fires there — the card line is the fallback in that view.
+    const hoveredAgent = prepared.find((candidate) => candidate.isHovered)?.agent;
+    const hoveredCallsForYou = hoveredAgent !== undefined && this.pointer !== null && callsForYou({
+      attention: hoveredAgent.info.extras?.attention as NonNullable<Wait>['attention'],
+      waitMinutes: hoveredAgent.info.extras?.waitMinutes,
+      orchestrating: hoveredAgent.info.extras?.orchestrating,
+    });
+    this.options.onHoverHint?.(hoveredCallsForYou ? BEACON_HINT : null, hoveredCallsForYou ? this.pointer : null);
     // Pass 2, reads only (when declutter runs at all).
     const candidates: DeclutterCandidate[] = [];
     if (canDeclutter) {

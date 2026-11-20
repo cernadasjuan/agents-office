@@ -198,7 +198,7 @@ function agent(id: string, x: number, attention?: 'waiting' | 'your-turn', stuck
   };
 }
 
-function controllerSetup(options: { hash?: string; viewMode?: 'first-person' | 'overview'; zoom?: number } = {}) {
+function controllerSetup(options: { hash?: string; viewMode?: 'first-person' | 'overview'; zoom?: number; onHoverHint?: (hint: string | null, point: { x: number; y: number } | null) => void } = {}) {
   const document = dom.window.document;
   const canvas = document.createElement('canvas');
   document.body.appendChild(canvas);
@@ -218,6 +218,7 @@ function controllerSetup(options: { hash?: string; viewMode?: 'first-person' | '
     selected: () => state.selected,
     hash: options.hash,
     indicator,
+    onHoverHint: options.onHoverHint,
   });
   const compact = () => agents.filter((a) => a.figure.label.element.classList.contains('compact')).map((a) => a.info.id);
   const press = (code: string, target?: Element) => {
@@ -248,6 +249,36 @@ test('controller: the selected and the hovered agents become full', () => {
   canvas.dispatchEvent(new dom.window.MouseEvent('pointerleave'));
   controller.refresh();
   assert.deepEqual(compact(), ['mine'], 'the pointer left: the hover ends');
+});
+
+// --- The beacon hint on hover (issue #170 review): labels have pointer-events none, so a
+// title attribute there never shows. This reuses the same hover detection as label declutter. ---
+
+test('hovering an agent that calls for you reports the beacon hint and the cursor position', () => {
+  const calls: Array<[string | null, { x: number; y: number } | null]> = [];
+  const { controller, canvas, state } = controllerSetup({ onHoverHint: (hint, point) => calls.push([hint, point]) });
+  state.picked = 'blocked';
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 42, clientY: 24 }));
+  controller.refresh();
+  const [hint, point] = calls[calls.length - 1];
+  assert.ok(hint && hint.length > 0, 'the agent calls for you (a block, no wait time keeps the old behavior): a hint is reported');
+  assert.deepEqual(point, { x: 42, y: 24 });
+});
+
+test('hovering an agent that does not call for you reports no hint', () => {
+  const calls: Array<[string | null, { x: number; y: number } | null]> = [];
+  const { controller, canvas, state } = controllerSetup({ onHoverHint: (hint, point) => calls.push([hint, point]) });
+  state.picked = 'near';
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 5, clientY: 5 }));
+  controller.refresh();
+  assert.deepEqual(calls[calls.length - 1], [null, null]);
+});
+
+test('without a hover, no hint is reported even while an agent calls for you elsewhere', () => {
+  const calls: Array<[string | null, { x: number; y: number } | null]> = [];
+  const { controller } = controllerSetup({ onHoverHint: (hint, point) => calls.push([hint, point]) });
+  controller.update(0);
+  assert.deepEqual(calls[calls.length - 1], [null, null]);
 });
 
 test('controller, overview: far zoom compacts all but the waiting agent, close zoom shows all full', () => {

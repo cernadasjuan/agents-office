@@ -113,13 +113,10 @@ test('an orchestrating fresh your-turn shows no beacon and no raised hand, and s
   assert.equal(activityText(figure), 'Your turn · 4 min', 'the label text is unchanged: only the pose and the signal differ');
 });
 
-test('the beacon carries a hover hint with its meaning, present only while it shows (issue #170)', () => {
+test('the label never carries a title attribute, even while the beacon shows (issue #170 review: pointer-events none means it would never show anyway)', () => {
   const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
   figure.setAttention('waiting', 4);
-  assert.ok(figure.label.element.title.length > 0, 'a hover hint explains the beacon without opening the legend');
-
-  figure.setAttention('your-turn', 4, true);
-  assert.equal(figure.label.element.title, '', 'no hint without a beacon to explain: orchestrating never calls for you');
+  assert.equal(figure.label.element.title, '', 'the beacon hint moved to the card status line and figure hover; the dead title attribute is gone');
 });
 
 test('an aging or cold block keeps its label, with no beacon and no raised hand', () => {
