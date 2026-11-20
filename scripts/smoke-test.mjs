@@ -100,8 +100,9 @@ async function waitForServer(url, timeoutMs) {
 }
 
 /** Opens one headless page, lets the office load and poll once, and collects every page
- * error and console error. `#view=overview&zoom=20` also exercises the issue #89 view hooks
- * on the same run, at no extra browser cost. */
+ * error and console error. `?layout=building#view=overview&zoom=20&room=office` also
+ * exercises the issue #89 view hooks on the same run, at no extra browser cost: the building
+ * layout is the one that actually has a room named "office" for `#room=` to frame. */
 async function runBrowserCheck(port) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -111,7 +112,7 @@ async function runBrowserCheck(port) {
     page.on('console', (message) => {
       if (message.type() === 'error') errors.push(`console.error: ${message.text()}`);
     });
-    await page.goto(`http://127.0.0.1:${port}/#view=overview&zoom=20`, { waitUntil: 'load', timeout: BROWSER_NAV_TIMEOUT_MS });
+    await page.goto(`http://127.0.0.1:${port}/?layout=building#view=overview&zoom=20&room=office`, { waitUntil: 'load', timeout: BROWSER_NAV_TIMEOUT_MS });
     await page.waitForSelector('#ui-panel', { timeout: 10000 });
     await page.waitForTimeout(1000); // the first agent poll and the first render settle here
     return errors;

@@ -149,6 +149,8 @@ export interface ViewHash {
   focus: string | null;
   /** The overview-equivalent camera distance to start at (`zoomDistance` units), or null for the view's own default framing. */
   zoom: number | null;
+  /** A room name or mission id to frame on load (`office`, `library`, a mission slug), lowercased, or null. */
+  room: string | null;
 }
 
 const PUBLIC_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -167,13 +169,19 @@ function parseZoom(value: string | null): number | null {
  * (issue #89): the overview reads it as `OverviewController.distance` directly, the isometric
  * view converts it to the equivalent `halfHeight`, so one number means the same zoom level in
  * both, the same way `ViewController.zoomDistance` already reports both in one unit.
+ * `#room=office`, `#room=library` or `#room=<mission id>` frames that room instead, in the
+ * current view (fly to its bounds in the overview or the isometric view, stand inside it
+ * facing its main wall in first person); unknown names are ignored, read-only, no effect on
+ * the scene (issue #89, added so a reviewer can screenshot a room's boards from one URL).
  */
 export function parseViewHash(hash: string): ViewHash {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const focus = params.get('select') ?? params.get('focus');
+  const room = params.get('room');
   return {
     view: viewModeFromName(params.get('view')) ?? 'first-person',
     focus: focus && PUBLIC_ID.test(focus) ? focus : null,
     zoom: parseZoom(params.get('zoom')),
+    room: room && PUBLIC_ID.test(room) ? room.toLowerCase() : null,
   };
 }

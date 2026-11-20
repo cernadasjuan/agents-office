@@ -16,6 +16,16 @@ export interface Seat {
 
 export type Posture = 'seated' | 'standing';
 
+/**
+ * Where a camera should go to show a named room (issue #89, `#room=`): the room's world
+ * bounds, for a view from above, and a first-person standing pose inside it, facing its main
+ * wall. A layout with no rooms (the original activity layout) implements no `roomView`.
+ */
+export interface RoomView {
+  bounds: THREE.Box3;
+  standing: { position: THREE.Vector3; lookAt: THREE.Vector3 };
+}
+
 /** A seat change the layout decides on its own, applied by the manager. */
 export interface LayoutMove {
   agentId: string;
@@ -50,4 +60,6 @@ export interface LayoutStrategy {
    * activity change: a trip that starts after a dwell time, a queue that moves up.
    */
   update?(elapsed: number, delta: number): LayoutMove[] | void;
+  /** Where the camera should go to show a named room (issue #89, `#room=`), or null when the name matches no room. */
+  roomView?(name: string): RoomView | null;
 }

@@ -15,6 +15,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout, BUILDING_STORAGE_KEY } = await import('../src/addons/building/BuildingLayout.js');
+const { missionSlot } = await import('../src/addons/building/missionRooms.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -243,6 +244,56 @@ test('a waiting agent still goes to the user office before its war room', () => 
   layout.syncWorldRooms([missionRoom()]);
   const seat = layout.seatFor(agent('w', 'meeting', { room: 'room-1', attention: 'waiting' }), null)!;
   assert.match(seat.key, /^room0_queue_/);
+});
+
+// --- roomView (issue #89, #room=) ---
+
+test('roomView("office") frames the user\'s office, the room at slot 0, never a later waiting room', () => {
+  const { layout } = setup();
+  const view = layout.roomView('office')!;
+  assert.ok(view, 'office exists from the start');
+  const officeRect = slotFor(0).rect;
+  assert.deepEqual([view.bounds.min.x, view.bounds.max.x, view.bounds.min.z, view.bounds.max.z], [officeRect.minX, officeRect.maxX, officeRect.minZ, officeRect.maxZ]);
+  assert.ok(view.bounds.max.y > view.bounds.min.y, 'has floor-to-wall height, not a flat box');
+});
+
+test('roomView is case-insensitive and trims whitespace', () => {
+  const { layout } = setup();
+  assert.deepEqual(layout.roomView('OFFICE'), layout.roomView('office'));
+  assert.deepEqual(layout.roomView('  library  '), layout.roomView('library'));
+});
+
+test('roomView returns null for a kind that is not yet open and for any unknown name', () => {
+  const { layout } = setup();
+  assert.equal(layout.roomView('lab'), null, 'no test lab has been rented yet');
+  assert.equal(layout.roomView('not-a-room'), null);
+  assert.equal(layout.roomView(''), null);
+});
+
+test('roomView("<slug>") and roomView("mission:<slug>") both frame an open mission room, after syncWorldRooms', () => {
+  const { layout } = setup();
+  assert.equal(layout.roomView('roadmap'), null, 'not open yet');
+  layout.syncWorldRooms([{
+    id: 'mission:roadmap', kind: 'mission' as const, title: 'Roadmap', state: 'open' as const,
+    sleepers: [], walls: {},
+  }]);
+  const bySlug = layout.roomView('roadmap')!;
+  const byFullKey = layout.roomView('mission:roadmap')!;
+  assert.ok(bySlug);
+  assert.deepEqual(bySlug, byFullKey);
+  const missionRect = missionSlot(0).rect;
+  assert.deepEqual([bySlug.bounds.min.x, bySlug.bounds.max.x, bySlug.bounds.min.z, bySlug.bounds.max.z], [missionRect.minX, missionRect.maxX, missionRect.minZ, missionRect.maxZ]);
+});
+
+test('roomView\'s first-person standing point sits inside the room, facing further into it', () => {
+  const { layout } = setup();
+  const view = layout.roomView('office')!;
+  const rect = slotFor(0).rect;
+  assert.ok(view.standing.position.x > rect.minX && view.standing.position.x < rect.maxX, 'inside the room on x');
+  assert.ok(view.standing.position.z > rect.minZ && view.standing.position.z < rect.maxZ, 'inside the room on z');
+  assert.ok(view.standing.position.y > 0, 'a standing eye height, not on the floor');
+  const facing = view.standing.lookAt.clone().sub(view.standing.position);
+  assert.ok(facing.lengthSq() > 0, 'looks somewhere other than straight down at its own feet');
 });
 
 // --- Library and librarians ---

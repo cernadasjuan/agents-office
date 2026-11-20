@@ -26,7 +26,7 @@ const fixedLayout: LayoutStrategy = {
   release: () => undefined,
 };
 
-function setup(hash = '', figureShiftPx?: () => number) {
+function setup(hash = '', figureShiftPx?: () => number, roomView?: (name: string) => { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null) {
   const document = dom.window.document;
   const scene = new THREE.Scene();
   const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
@@ -47,6 +47,7 @@ function setup(hash = '', figureShiftPx?: () => number) {
     keys: dom.window,
     hash,
     ...(figureShiftPx ? { figureShiftPx } : {}),
+    ...(roomView ? { roomView } : {}),
   });
   const press = (code: string) => dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { code, key: code }));
   return { view, camera, canvas, manager, selection, wall, hint, press };
@@ -105,6 +106,59 @@ test('issue #89: #zoom= is clamped into the view’s own pan/zoom limits, like t
   view.update(0, 1 / 60);
   const overview = (view as unknown as { overview: { maxDistance: number } }).overview;
   assert.ok(view.zoomDistance <= overview.maxDistance + 1e-6, `clamped to the zoom-out limit (${view.zoomDistance} vs ${overview.maxDistance})`);
+});
+
+/** A room away from the default scene origin, so framing it looks different from the view's own default. */
+function fixtureRoomView(): { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } {
+  const bounds = new THREE.Box3(new THREE.Vector3(20, 0, -6), new THREE.Vector3(32, 2.6, 6));
+  return { bounds, standing: { position: new THREE.Vector3(24, 1.6, 0), lookAt: new THREE.Vector3(30, 1.6, 0) } };
+}
+
+test('issue #89: #room= frames a named room in the overview, via the active layout', () => {
+  const room = fixtureRoomView();
+  const { view } = setup('#view=overview&room=office', undefined, (name) => (name === 'office' ? room : null));
+  view.update(0, 1 / 60);
+  assert.equal(view.mode, 'overview');
+  const target = (view as unknown as { overview: { target: THREE.Vector3 } }).overview.target;
+  const center = room.bounds.getCenter(new THREE.Vector3());
+  assert.ok(Math.abs(target.x - center.x) < 0.5 && Math.abs(target.z - center.z) < 0.5, `target is near the room's center (${target.toArray()} vs ${center.toArray()})`);
+});
+
+test('issue #89: #room= frames a named room in the isometric view too', () => {
+  const room = fixtureRoomView();
+  const { view } = setup('#view=iso&room=office', undefined, (name) => (name === 'office' ? room : null));
+  view.update(0, 1 / 60);
+  assert.equal(view.mode, 'isometric');
+  const target = (view as unknown as { isometric: { target: THREE.Vector3 } }).isometric.target;
+  const center = room.bounds.getCenter(new THREE.Vector3());
+  assert.ok(Math.abs(target.x - center.x) < 0.5 && Math.abs(target.z - center.z) < 0.5, `target is near the room's center (${target.toArray()} vs ${center.toArray()})`);
+});
+
+test('issue #89: #room= in first person stands inside the room, facing its main wall', () => {
+  const room = fixtureRoomView();
+  const { view, camera } = setup('#room=library', undefined, (name) => (name === 'library' ? room : null));
+  view.update(0, 1 / 60);
+  assert.equal(view.mode, 'first-person');
+  assert.ok(camera.position.distanceTo(room.standing.position) < 1e-6, `camera stands at the room's standing point (${camera.position.toArray()})`);
+});
+
+test('issue #89: #room= with an unknown name, or no roomView at all, is a no-op (the view keeps its own default framing)', () => {
+  const baseline = setup('#view=overview');
+  baseline.view.update(0, 1 / 60);
+  const { view } = setup('#view=overview&room=not-a-room', undefined, () => null);
+  view.update(0, 1 / 60);
+  assert.equal(view.zoomDistance, baseline.view.zoomDistance);
+
+  const noCallback = setup('#view=overview&room=office');
+  noCallback.view.update(0, 1 / 60);
+  assert.equal(noCallback.view.zoomDistance, baseline.view.zoomDistance, 'no roomView option at all is the same as an unknown name');
+});
+
+test('issue #89: #room= wins over #zoom= when both are given and the room resolves', () => {
+  const room = fixtureRoomView();
+  const { view } = setup('#view=overview&zoom=5&room=office', undefined, (name) => (name === 'office' ? room : null));
+  view.update(0, 1 / 60);
+  assert.notEqual(view.zoomDistance, 5, 'the room framing wins, not the literal #zoom= value');
 });
 
 test('a click picks a tombstone, not just an agent figure (issue #127)', () => {

@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
 import { focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
-import { IsometricController, IsometricTween, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
-import { OverviewController, PoseTween, floorUnder, overviewBounds, zoomTowardCursor as zoomOverviewTowardCursor, type CameraPose } from './OverviewCamera.js';
+import { IsometricController, IsometricTween, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
+import { OverviewController, PoseTween, floorUnder, frameForBounds, overviewBounds, zoomTowardCursor as zoomOverviewTowardCursor, type CameraPose } from './OverviewCamera.js';
+import type { RoomView } from '../layout/LayoutStrategy.js';
 import { SelectionMarker } from './SelectionMarker.js';
 import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, type PickTarget, type ScreenPoint, type SelectionState, type ViewMode } from './Selection.js';
 
@@ -40,6 +41,8 @@ export interface ViewControllerOptions {
   modeChanged?: (mode: ViewMode) => void;
   /** Pixels to show a selected figure left of the canvas center (the agent card covers the right). */
   figureShiftPx?: () => number;
+  /** `#room=<name>` (issue #89): where the camera should go to show that room, from the active layout. Without it, or for a layout with no rooms, `#room=` does nothing. */
+  roomView?: (name: string) => RoomView | null;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -87,7 +90,9 @@ export class ViewController {
     const startView = options.view ?? start.view;
     if (startView !== 'first-person') this.setMode(startView, false);
     else options.modeChanged?.(this.currentMode);
-    if (start.zoom !== null) this.applyStartZoom(start.zoom);
+    const room = start.room !== null ? (this.options.roomView?.(start.room) ?? null) : null;
+    if (room) this.applyStartRoom(room);
+    else if (start.zoom !== null) this.applyStartZoom(start.zoom);
   }
 
   /** `#zoom=<distance>` (issue #89): starts the view at that camera distance instead of its own default framing. A no-op in first person, which has no zoom. */
@@ -102,6 +107,33 @@ export class ViewController {
     } else if (this.currentMode === 'overview') {
       this.overview.distance = THREE.MathUtils.clamp(zoomDistance, this.overview.minDistance, this.overview.maxDistance);
       this.applyPose(this.overview.pose());
+    }
+  }
+
+  /**
+   * `#room=<name>` (issue #89): frames that room instead of the view's own default framing
+   * or `#zoom=`, in whichever view is active. The overview and the isometric view fly to the
+   * room's bounds, using the same pure framing math a selection flight target would (never
+   * narrowing the view's own pan/zoom limits, unlike `frame`); first person stands inside the
+   * room, facing its main wall. Read-only: it never changes the scene, only the camera.
+   */
+  private applyStartRoom(room: RoomView): void {
+    if (this.currentMode === 'overview') {
+      const fit = frameForBounds(room.bounds, this.options.camera.fov, this.aspect());
+      this.overview.target.copy(fit.target);
+      this.overview.distance = THREE.MathUtils.clamp(fit.distance, this.overview.minDistance, this.overview.maxDistance);
+      this.applyPose(this.overview.pose());
+    } else if (this.currentMode === 'isometric') {
+      this.isometric.target.copy(room.bounds.getCenter(new THREE.Vector3()));
+      this.isometric.halfHeight = THREE.MathUtils.clamp(
+        framedHalfHeight(room.bounds, this.aspect()),
+        this.isometric.minHalfHeight,
+        this.isometric.maxHalfHeight,
+      );
+      this.applyIsometric();
+    } else {
+      this.applyPose(room.standing);
+      setFreeCameraLook(this.options.camera, room.standing.position, room.standing.lookAt);
     }
   }
 
