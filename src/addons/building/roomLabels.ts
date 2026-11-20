@@ -33,11 +33,31 @@ const ATLAS_COLUMNS = 8;
 const ATLAS_START_ROWS = 4;
 
 /**
+ * Cuts a single too-long word or line in the middle ("AGENT-…VIEW"), not at the
+ * front. Two names that share a long prefix still differ after the cut, since
+ * the tail survives too (issue #87, AC3: cutting only the front made compact
+ * chips that share their first characters collide). The ellipsis always costs
+ * one character of the budget; the rest splits as evenly as possible, the head
+ * getting the extra character on an odd budget. Splits on code points
+ * (`Array.from`), not UTF-16 units, so a surrogate pair (an emoji) never cuts in half.
+ */
+export function middleEllipsis(text: string, maxChars: number): string {
+  const chars = Array.from(text);
+  if (chars.length <= maxChars) return text;
+  if (maxChars <= 1) return '…';
+  const keep = maxChars - 1;
+  const head = Math.ceil(keep / 2);
+  const tail = keep - head;
+  return tail > 0 ? `${chars.slice(0, head).join('')}…${chars.slice(chars.length - tail).join('')}` : `${chars.slice(0, head).join('')}…`;
+}
+
+/**
  * Up to `maxLines` lines of at most `maxChars`, cut at word breaks, with an ellipsis
- * when the text is longer. A " · " starts a new line ("DESKS" / "WS10").
+ * when the text is longer. A " · " starts a new line ("DESKS" / "WS10"). A single
+ * word too long for one line cuts in the middle, not the front (`middleEllipsis`).
  */
 export function roomLabelLines(text: string, maxChars: number, maxLines = 2): string[] {
-  const cut = (part: string) => (part.length > maxChars ? `${part.slice(0, maxChars - 1)}…` : part);
+  const cut = (part: string) => middleEllipsis(part, maxChars);
   const lines: string[] = [];
   for (const part of text.trim().split(/\s+·\s+/)) {
     let first = true;
@@ -51,21 +71,23 @@ export function roomLabelLines(text: string, maxChars: number, maxLines = 2): st
   if (lines.length <= maxLines) return lines.map(cut);
   // More lines: the last kept line ends with an ellipsis after a whole word when it fits
   const last = lines[maxLines - 1];
-  return [...lines.slice(0, maxLines - 1).map(cut), last.length <= maxChars ? `${last}…` : `${last.slice(0, maxChars - 1)}…`];
+  return [...lines.slice(0, maxLines - 1).map(cut), last.length <= maxChars ? `${last}…` : cut(last)];
 }
 
 /**
  * The compact face of the default overview: two short lines. A longer name keeps
  * its first line and its last word ("MISSION" / "…3"), so rooms with a shared
- * prefix stay apart.
+ * first word stay apart. The last word itself cuts in the middle when it does
+ * not fit (`middleEllipsis`), so two names whose last words share a prefix
+ * ("…PERSI…" for both "…PERSISTENCE" and "…PERSONA" before this fix) still
+ * differ (issue #87, AC3).
  */
 export function compactLabelLines(text: string): string[] {
   const lines = roomLabelLines(text, COMPACT_LABEL_CHARS, 99);
   if (lines.length <= 2) return lines;
   const words = text.trim().split(/\s+/);
   const lastWord = words[words.length - 1];
-  const tail = `…${lastWord}`;
-  return [lines[0], tail.length <= COMPACT_LABEL_CHARS ? tail : `${tail.slice(0, COMPACT_LABEL_CHARS - 1)}…`];
+  return [lines[0], `…${middleEllipsis(lastWord, COMPACT_LABEL_CHARS - 1)}`];
 }
 
 /** What the label controller tells a room label each refresh. */
