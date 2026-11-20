@@ -1,4 +1,4 @@
-import type { AgentExtras } from '../agents/AgentData.js';
+import { STUCK_LABEL, type AgentExtras } from '../agents/AgentData.js';
 
 const TITLE = 'Agents Office';
 
@@ -7,6 +7,13 @@ const TITLE = 'Agents Office';
  * 24 h, cold from 24 h. Only a fresh wait calls for the user. Change the bands here.
  */
 export const ATTENTION_BANDS = { freshUnderMinutes: 15, coldFromMinutes: 24 * 60 } as const;
+
+/**
+ * A busy session with no transcript write for this long looks the same as a
+ * working one. The server marks it stuck; the label and the panel row then
+ * show "Stuck?" instead of the activity. Change the threshold here.
+ */
+export const STUCK_AFTER_MINUTES = 60;
 
 export type AttentionBand = 'fresh' | 'aging' | 'cold';
 
@@ -55,10 +62,11 @@ export function tabTitleFor(waits: Wait[]): string {
   return tabTitle(counted.filter((w) => w!.attention === 'waiting').length, counted.filter((w) => w!.attention === 'your-turn').length);
 }
 
-/** The label line: the activity, then how long the agent has waited for the user. */
-export function attentionLine(activityLabel: string, attention: string | undefined, waitMinutes: number | undefined): string {
+/** The label line: the activity, then how long the agent has waited for the user, or "Stuck?" when it has gone quiet. */
+export function attentionLine(activityLabel: string, attention: string | undefined, waitMinutes: number | undefined, stuck = false): string {
   if (attention === 'waiting') return `Waiting for you${waitMinutes !== undefined ? ` · ${formatWait(waitMinutes)}` : ''}`;
   if (attention === 'your-turn') return `Your turn${waitMinutes !== undefined ? ` · ${formatWait(waitMinutes)}` : ''}`;
+  if (stuck) return STUCK_LABEL;
   return activityLabel;
 }
 

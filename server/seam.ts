@@ -32,6 +32,8 @@ export interface DisplayExtras {
   actions?: ActionName[];
   /** One role token, for example 'librarian'. */
   role?: string;
+  /** Busy with no transcript write for STUCK_AFTER_MINUTES (src/ui/attention.ts). */
+  stuck?: boolean;
 }
 
 /** One agent as the server sees it. `internal` never leaves the server. */
@@ -245,6 +247,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
       ...(extras.roomKey ? { room: publicId(`room:${extras.roomKey}`) } : {}),
       ...(actions ? { actions } : {}),
       ...(typeof extras.role === 'string' && BADGE.test(extras.role) ? { role: extras.role } : {}),
+      ...(extras.stuck === true ? { stuck: true as const } : {}),
     };
   });
 }
