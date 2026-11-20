@@ -14,6 +14,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { activeExtensions, setWorld, EMPTY_WORLD } = await import('../src/extensions.js');
 const { bmadHats, MAX_HATS } = await import('../plugins/bmad/client.js');
+const { buildHat } = await import('../plugins/bmad/hats.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -159,4 +160,18 @@ test('hats are figure parts that share shapes and colors, so the figure batch dr
   scene.updateMatrixWorld();
   batch.sync(manager.getAgents().map((managed) => managed.figure.group));
   assert.equal(withHats - countDrawCalls(scene).main, 8);
+});
+
+test('a hat casts no shadow: a tiny topper does not earn its own shadow-pass bucket (render budget headroom)', () => {
+  const kinds = ['analyst', 'architect', 'dev', 'pm', 'qa', 'sm', 'debugger', 'spec-coach', 'data-engineer', 'ux-designer', 'tech-writer', 'party-colors-x'];
+  for (const kind of kinds) {
+    const hat = buildHat(kind);
+    let meshCount = 0;
+    hat.group.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      meshCount++;
+      assert.equal(object.castShadow, false, `${kind}: ${object.uuid} casts a shadow`);
+    });
+    assert.ok(meshCount > 0, `${kind}: built no mesh at all`);
+  }
 });
