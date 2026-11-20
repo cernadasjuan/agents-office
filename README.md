@@ -39,7 +39,7 @@ or after moving the clone, so the launcher keeps pointing at the right path.
 
 Opening "Agents Office":
 - **Cold start** (nothing answers the port): starts the dev server with this fork's plugins
-  (`herdr,github,bmad,missions,library,peek`, the same set as `pnpm dev:fork`) in the
+  (`herdr,github,bmad,missions,library,peek,skills`, the same set as `pnpm dev:fork`) in the
   background, then opens the office in your default browser.
 - **Warm start** (the office already answers the port): opens the office in your browser
   only; it never starts a second server.

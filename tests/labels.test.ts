@@ -18,12 +18,14 @@ function installDocument(t: TestContext): void {
   });
 }
 
-function assertPlainLabel(element: HTMLElement, name: string, activity: string): void {
+function assertPlainLabel(element: HTMLElement, name: string, activity: string, id = ''): void {
   assert.equal(element.querySelector('.name')?.textContent, name);
   assert.equal(element.querySelector('.activity')?.textContent, activity);
-  assert.equal(element.children.length, 2);
+  assert.equal(element.querySelector('.agent-id-tag')?.textContent, id);
+  assert.equal(element.children.length, 3);
   assert.equal(element.querySelector('.name')?.childElementCount, 0);
   assert.equal(element.querySelector('.activity')?.childElementCount, 0);
+  assert.equal(element.querySelector('.agent-id-tag')?.childElementCount, 0);
   assert.equal(element.querySelector('img, svg, script, iframe'), null);
   assert.equal(element.querySelector('[onerror], [onload], [onclick]'), null);
 }
@@ -37,8 +39,8 @@ const payloads = [
 for (const payload of payloads) {
   test(`createLabel treats markup as text: ${payload}`, (t) => {
     installDocument(t);
-    const label = createLabel(payload, payload);
-    assertPlainLabel(label.element, payload, payload);
+    const label = createLabel(payload, payload, undefined, payload);
+    assertPlainLabel(label.element, payload, payload, `#${payload}`);
     assert.equal(label.element.className, 'agent-label');
     assert.deepEqual(label.position.toArray(), [0, 2.1, 0]);
   });
@@ -46,8 +48,8 @@ for (const payload of payloads) {
   test(`updateLabel treats markup as text: ${payload}`, (t) => {
     installDocument(t);
     const label = createLabel('normal agent', 'idle');
-    updateLabel(label, payload, payload);
-    assertPlainLabel(label.element, payload, payload);
+    updateLabel(label, payload, payload, undefined, payload);
+    assertPlainLabel(label.element, payload, payload, `#${payload}`);
     assert.equal(label.element.className, 'agent-label');
   });
 }
@@ -69,4 +71,14 @@ test('a provider tag is appended to the activity line as text', (t) => {
   assertPlainLabel(label.element, 'billing-service', 'Idle · <b>codex</b>');
   updateLabel(label, 'claude-agent', 'Idle');
   assertPlainLabel(label.element, 'claude-agent', 'Idle');
+});
+
+test('issue #171: a short id is appended as its own line, hidden by CSS in compact mode, never as markup', (t) => {
+  installDocument(t);
+  const label = createLabel('billing-service', 'Testing', undefined, '12ab34cd');
+  assertPlainLabel(label.element, 'billing-service', 'Testing', '#12ab34cd');
+  updateLabel(label, 'billing-service', 'Idle', 'codex', '12ab34cd');
+  assertPlainLabel(label.element, 'billing-service', 'Idle · codex', '#12ab34cd');
+  updateLabel(label, 'billing-service', 'Idle', 'codex');
+  assertPlainLabel(label.element, 'billing-service', 'Idle · codex', '');
 });

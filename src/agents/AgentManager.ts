@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { StickFigure } from '../characters/StickFigure.js';
-import { AgentExtras, AgentInfo } from './AgentData.js';
+import { AgentExtras, AgentInfo, shortAgentId } from './AgentData.js';
 import { Activity } from './ActivityAnimations.js';
 import { Station } from '../scene/Office.js';
 import { Colors } from '../utils/Colors.js';
@@ -49,6 +49,7 @@ export class AgentManager {
     if (parentId) figure.group.scale.setScalar(SUBAGENT_SCALE);
     figure.setSubagent(parentId !== undefined);
     figure.setTag(info.extras?.provider);
+    figure.setId(shortAgentId(info.id));
     const managed: ManagedAgent = { info, figure, seat: null };
     this.agents.set(info.id, managed);
     this.scene.add(figure.group);
