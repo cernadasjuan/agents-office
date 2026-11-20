@@ -137,6 +137,34 @@ test('the queue puts fresh waits before aging ones, the oldest first inside each
     ['room0_queue_0', 'room0_queue_1', 'room0_queue_2', 'room0_queue_3']);
 });
 
+test('14 waiting agents fill three rows, longest wait at the front, a new one joins at the back and a leaver closes up the line (#132)', () => {
+  const { layout, agent, tick } = setup();
+  // Longest wait first: a14 waited 14 minutes, a1 waited 1.
+  for (let i = 14; i >= 1; i--) {
+    const id = `a${i}`;
+    layout.seatFor(agent(id, 'implementing'), null);
+    const seat = layout.seatFor(agent(id, 'meeting', { attention: 'waiting', waitMinutes: i }), 'implementing');
+    assert.match(seat!.key, /^room0_queue_/, `${id} goes to the office at once`);
+  }
+  tick(600);
+  const spotOf = (id: string) => (layout as unknown as { agents: Map<string, { seat: string }> }).agents.get(id)!.seat;
+  const seats = Array.from({ length: 14 }, (_, i) => spotOf(`a${14 - i}`));
+  assert.deepEqual(seats, Array.from({ length: 14 }, (_, i) => `room0_queue_${i}`), 'the longest wait (a14) holds queue_0, the front of the line');
+  assert.equal(layout.roomKinds.filter((k) => k === 'office').length, 1, '14 waits still fit in the first office: no second waiting room');
+
+  // A new wait joins at the back.
+  layout.seatFor(agent('new', 'implementing'), null);
+  layout.seatFor(agent('new', 'meeting', { attention: 'waiting', waitMinutes: 0 }), 'implementing');
+  tick(600);
+  assert.equal(spotOf('new'), 'room0_queue_14', 'the newest, shortest wait joins at the back');
+
+  // The front of the line leaves; everyone behind it closes up by one spot.
+  layout.release('a14');
+  tick(600);
+  assert.equal(spotOf('a13'), 'room0_queue_0', 'the next-longest wait now leads the line');
+  assert.equal(spotOf('new'), 'room0_queue_13', 'the line closed up behind the agent that left');
+});
+
 test('a cold wait leaves the queue for the lounge and never joins it', () => {
   const { layout, agent, tick } = setup();
   layout.seatFor(agent('b', 'implementing'), null);

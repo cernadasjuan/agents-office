@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { isViewFromAbove, type ViewMode } from '../scene/Selection.js';
-import { attentionBand } from './attention.js';
+import { attentionBand, type Wait } from './attention.js';
 
 /** `smart` shows full labels only where they matter; `all` is the original behavior. */
 export type LabelMode = 'smart' | 'all';
@@ -22,7 +22,7 @@ const MODE_TEXT: Record<LabelMode, string> = { smart: 'Labels: smart (V)', all: 
 
 export interface LabelFacts {
   attention: string | undefined;
-  /** Minutes the agent has waited for the user, when known. A cold block gets no full label. */
+  /** Minutes the agent has waited for the user, when known. Only a fresh block forces a full label; an aging or cold block does not. */
   waitMinutes?: number;
   selected: boolean;
   hovered: boolean;
@@ -44,7 +44,12 @@ export interface LabelView {
 /** Full or compact label for one agent. Pure: no DOM, no scene. */
 export function labelDetail(facts: LabelFacts, view: LabelView): LabelLevel {
   if (view.mode === 'all') return 'full';
-  const blockedRecently = facts.attention === 'waiting' && attentionBand({ attention: facts.attention, waitMinutes: facts.waitMinutes }) !== 'cold';
+  // A fresh wait always gets a full label (it calls for the user); an aging wait
+  // follows the normal distance/zoom rule instead, so a real queue (14+ agents,
+  // almost all aging) does not force every label full and overlap the others.
+  // Without a wait time (the old behavior), a block alone still forces it.
+  const band = attentionBand({ attention: facts.attention, waitMinutes: facts.waitMinutes } as Wait);
+  const blockedRecently = facts.attention === 'waiting' && (band === undefined || band === 'fresh');
   if (blockedRecently || facts.selected || facts.hovered) return 'full';
   if (isViewFromAbove(view.viewMode)) return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
   return facts.distance <= FIRST_PERSON_FULL_LABEL_DISTANCE ? 'full' : 'compact';

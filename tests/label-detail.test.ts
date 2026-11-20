@@ -43,17 +43,30 @@ test('smart mode, first person: an agent within the near distance gets a full la
   assert.equal(labelDetail(facts({ distance: FIRST_PERSON_FULL_LABEL_DISTANCE }), view()), 'full');
 });
 
-test('smart mode: a waiting (blocked) agent always gets a full label, in both views and at any zoom', () => {
+test('smart mode: a waiting agent without a known wait time always gets a full label (the old behavior), in both views and at any zoom', () => {
   const waiting = facts({ attention: 'waiting', distance: 500 });
   assert.equal(labelDetail(waiting, view()), 'full');
   assert.equal(labelDetail(waiting, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'full');
+});
+
+test('smart mode: a fresh wait always gets a full label, in both views and at any zoom (#132)', () => {
+  const fresh = facts({ attention: 'waiting', waitMinutes: 5, distance: 500 });
+  assert.equal(labelDetail(fresh, view()), 'full');
+  assert.equal(labelDetail(fresh, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'full');
 });
 
 test('smart mode: a cold block (waiting 24 h or more) gets a compact label like any other agent', () => {
   const coldBlock = facts({ attention: 'waiting', waitMinutes: 2 * 24 * 60, distance: 500 });
   assert.equal(labelDetail(coldBlock, view()), 'compact');
   assert.equal(labelDetail(coldBlock, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact');
-  assert.equal(labelDetail(facts({ attention: 'waiting', waitMinutes: 60, distance: 500 }), view()), 'full', 'an aging block stays full');
+});
+
+test('smart mode: an aging block follows the normal distance/zoom rule, not forced full (#132)', () => {
+  const agingFar = facts({ attention: 'waiting', waitMinutes: 60, distance: 500 });
+  assert.equal(labelDetail(agingFar, view()), 'compact', 'far in first person: compact, same as a real queue at scale');
+  assert.equal(labelDetail(agingFar, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact', 'zoomed out: compact');
+  const agingNear = facts({ attention: 'waiting', waitMinutes: 60, distance: near });
+  assert.equal(labelDetail(agingNear, view()), 'full', 'still full up close, like any other agent');
 });
 
 test('smart mode: "your turn" alone does not make a label full (most idle sessions have it)', () => {
