@@ -42,7 +42,8 @@ window.addEventListener('keydown', (event) => {
 });
 
 // Agent manager
-const agentManager = new AgentManager(scene, createLayout(layoutId, scene, stations));
+const layout = createLayout(layoutId, scene, stations);
+const agentManager = new AgentManager(scene, layout);
 
 // Agent card: opens on a selection, docked left of the triage panel. Plugins add buttons and links.
 const agentCard = new AgentCard(document.body, { anchor: document.getElementById('ui-panel')! });
@@ -52,7 +53,10 @@ const tombstoneCard = new TombstoneCard(document.body, { anchor: document.getEle
 
 // Camera mode (key O toggles first person and the overview, key I the isometric view) and click to select.
 // Start view: `#view=overview|first-person|iso`, then the last view, then the layout default.
-// `#focus=<agent id>` selects that agent once it appears. The panel header shows the layout and the view.
+// `#select=<agent id>` (`#focus=`, its older name, still works) selects that agent once it
+// appears. `#zoom=<distance>` starts at that camera distance. `#room=<name>` frames a room
+// from the active layout (issue #89); a layout with no rooms, or an unknown name, is a no-op.
+// The panel header shows the layout and the view.
 const viewStatus = document.getElementById('view-status');
 const view = new ViewController({
   camera,
@@ -60,6 +64,7 @@ const view = new ViewController({
   scene,
   agents: () => agentManager.getAgents(),
   tombstones: () => activeExtensions(scene).flatMap((extension) => extension.pickTargets?.() ?? []),
+  roomView: (name) => layout.roomView?.(name) ?? null,
   keys: window,
   hint: document.getElementById('pointer-hint'),
   hash: window.location.hash,
