@@ -22,7 +22,8 @@ export interface MissionSummary {
   state: 'open' | 'locked';
   statement: string;
   docs: string[];
-  issues: Array<{ number: number; title: string; state: 'open' | 'closed' }>;
+  /** The root issue (`root_issue` in mission.yaml), first in the list, when the record has one. */
+  issues: Array<{ number: number; repo?: string; title: string; state: 'open' | 'closed' }>;
   kanban: Array<{ column: string; cards: Array<{ number: number; title: string }> }>;
   /** One entry per ended session (a tombstone), its own journey id and the day it ended. */
   sleepers: Array<{ id: string; endedAt?: string }>;
@@ -40,10 +41,33 @@ function list(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null) : [];
 }
 
-/** The issue number of a GitHub member reference such as "owner/repo#46" or "#46". */
-function issueNumber(ref: unknown): number | undefined {
-  const match = /#(\d{1,7})$/.exec(text(ref));
-  return match ? Number(match[1]) : undefined;
+const GH_ISSUE_URL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d{1,7})(?:[/?#]|$)/;
+const OWNER_REPO_HASH = /^([\w.-]+\/[\w.-]+)#(\d{1,7})$/;
+const BARE_HASH = /^#(\d{1,7})$/;
+
+/**
+ * A GitHub issue reference, in any of three shapes a mission record uses: a full URL
+ * (`root_issue.url`), "owner/repo#46" (a member ref), or a bare "#46" (no repository, no link).
+ */
+function issueRef(ref: unknown): { number: number; repo?: string } | undefined {
+  const value = text(ref);
+  const url = GH_ISSUE_URL.exec(value);
+  if (url) return { repo: url[1], number: Number(url[2]) };
+  const ownerRepo = OWNER_REPO_HASH.exec(value);
+  if (ownerRepo) return { repo: ownerRepo[1], number: Number(ownerRepo[2]) };
+  const bare = BARE_HASH.exec(value);
+  return bare ? { number: Number(bare[1]) } : undefined;
+}
+
+/** `root_issue: { number, url }` (or a plain ref string): the mission's own tracking issue. */
+function rootIssue(mission: Record<string, unknown>): { number: number; repo?: string; title: string; state: 'open' } | undefined {
+  const raw = mission.root_issue;
+  if (raw === null || typeof raw !== 'object') return undefined;
+  const entry = raw as Record<string, unknown>;
+  const ref = issueRef(entry.url) ?? issueRef(entry.ref);
+  const number = ref?.number ?? (typeof entry.number === 'number' ? entry.number : undefined);
+  if (number === undefined) return undefined;
+  return { number, ...(ref?.repo ? { repo: ref.repo } : {}), title: text(entry.title) || 'Root issue', state: 'open' };
 }
 
 function threadNumber(id: unknown): number | undefined {
@@ -68,11 +92,17 @@ export function summarizeMission(slug: string, record: unknown): MissionSummary 
     state: status === 'done' || status === 'abandoned' ? 'locked' : 'open',
     statement: text(mission.destination),
     docs: list(mission.artifacts).map((artifact) => text(artifact.title)).filter(Boolean),
-    issues: list(mission.members)
-      .filter((member) => text(member.kind) === 'gh')
-      .map((member) => ({ number: issueNumber(member.ref), title: text(member.title),
-        state: (text(member.role) === 'done' || text(member.role) === 'superseded' ? 'closed' : 'open') as 'open' | 'closed' }))
-      .filter((issue): issue is { number: number; title: string; state: 'open' | 'closed' } => issue.number !== undefined),
+    issues: [
+      ...(rootIssue(mission) ? [rootIssue(mission)!] : []),
+      ...list(mission.members)
+        .filter((member) => text(member.kind) === 'gh')
+        .flatMap((member) => {
+          const ref = issueRef(member.ref);
+          if (!ref) return [];
+          return [{ ...ref, title: text(member.title),
+            state: (text(member.role) === 'done' || text(member.role) === 'superseded' ? 'closed' : 'open') as 'open' | 'closed' }];
+        }),
+    ],
     kanban: [
       { column: 'Needs you', cards: column(['needs_you']) },
       { column: 'Open', cards: column(['open', 'ready']) },

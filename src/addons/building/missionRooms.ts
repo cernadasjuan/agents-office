@@ -80,6 +80,8 @@ export interface MissionRoom {
   updateCounts(counts: WarRoomCounts): void;
   /** This room's tombstones, pickable by a click or hover (issue #127). */
   tombstonePickTargets(): PickTarget[];
+  /** This room's issue board, pickable by a click (issue #146): opens the real-link list. */
+  issuesBoardPickTarget(): PickTarget;
 }
 
 const FLOOR_OPEN = 0x6f7f9a;
@@ -201,6 +203,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
       rebuildFurniture();
     },
     tombstonePickTargets: () => [...tombstones].map(([id, { object }]) => ({ id, object })),
+    issuesBoardPickTarget: () => ({ id: `issues:${room.id}`, object: boards.issues.mesh }),
     update(next: WorldRoom) {
       result.locked = next.state === 'locked';
       title.element.textContent = next.title;

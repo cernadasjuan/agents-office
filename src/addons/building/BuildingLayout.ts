@@ -148,6 +148,11 @@ export class BuildingLayout implements LayoutStrategy {
     return [...this.missionRooms.values()].flatMap((room) => room.tombstonePickTargets());
   }
 
+  /** Every war room's issue board, pickable by a click (issue #146). */
+  issuesBoardPickTargets(): PickTarget[] {
+    return [...this.missionRooms.values()].map((room) => room.issuesBoardPickTarget());
+  }
+
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
     const state = this.stateOf(agent);
     const desired = this.targetFor(state);

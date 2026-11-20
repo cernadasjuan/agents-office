@@ -109,6 +109,22 @@ test('the world projection cleans rooms and boards and hashes their keys', () =>
   assert.deepEqual(world.boards[0].columns[0].cards, []);
 });
 
+test('a mission issue keeps a clean owner/repo, and drops one that does not match the shape (#146)', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    walls: { issues: [
+      { number: 46, title: 'Roadmap', state: 'open', repo: 'gabriel-amyot/agents-office' },
+      { number: 7, title: 'No repo match', state: 'open', repo: '../etc/passwd' },
+      { number: 8, title: 'Bare, no repo field', state: 'closed' },
+    ] } }] }],
+  ['missions'], publicId);
+
+  assert.deepEqual(world.rooms[0].walls.issues, [
+    { number: 46, title: 'Roadmap', state: 'open', repo: 'gabriel-amyot/agents-office' },
+    { number: 7, title: 'No repo match', state: 'open' },
+    { number: 8, title: 'Bare, no repo field', state: 'closed' },
+  ]);
+});
+
 test('plugin names cannot leave the plugins folder', () => {
   assert.deepEqual(parsePluginNames('herdr, ../etc,missions,herdr,BAD'), ['herdr', 'missions']);
   assert.equal(pluginEntry('/tmp/plugins', '../escape'), null);

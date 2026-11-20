@@ -69,7 +69,8 @@ export interface RoomInput {
   walls?: {
     statement?: string;
     docs?: string[];
-    issues?: Array<{ number: number; title: string; state: 'open' | 'closed' }>;
+    /** `repo` is a full `owner/name`, unlike an agent card issue's short name: a mission can span repos. */
+    issues?: Array<{ number: number; repo?: string; title: string; state: 'open' | 'closed' }>;
     kanban?: Array<{ column: string; cards: Array<{ number: number; title: string }> }>;
   };
 }
@@ -202,6 +203,13 @@ function repoShortName(value: unknown): string | undefined {
   return REPO_SHORT.test(short) && short !== '.' && short !== '..' ? short : undefined;
 }
 
+const OWNER_REPO = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
+
+/** A full `owner/name` pair, or undefined when the value does not match that shape. */
+function ownerRepo(value: unknown): string | undefined {
+  return typeof value === 'string' && OWNER_REPO.test(value) && value !== './.' ? value : undefined;
+}
+
 const HEX_COLOR = /^#?([0-9A-Fa-f]{6})$/;
 
 /** A 6-hex color as lowercase `rrggbb`, or undefined. */
@@ -321,8 +329,11 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         ...(walls.statement ? { statement: displayText(walls.statement, 240) } : {}),
         ...(Array.isArray(walls.docs) ? { docs: walls.docs.slice(0, 8).map((doc) => displayText(doc, 60)) } : {}),
         ...(Array.isArray(walls.issues) ? { issues: walls.issues.slice(0, 12)
-          .map((issue) => ({ number: wholeNumber(issue.number, 10_000_000), title: displayText(issue.title, 80),
-            state: issue.state === 'closed' ? 'closed' : 'open' }))
+          .map((issue) => {
+            const repo = ownerRepo(issue?.repo);
+            return { number: wholeNumber(issue.number, 10_000_000), title: displayText(issue.title, 80),
+              state: issue.state === 'closed' ? 'closed' : 'open', ...(repo ? { repo } : {}) };
+          })
           .filter((issue) => issue.number !== undefined) } : {}),
         ...(Array.isArray(walls.kanban) ? { kanban: walls.kanban.slice(0, 6).map((column) => ({
           column: displayText(column.column, 24),

@@ -179,3 +179,12 @@ test('AC124: the title and lock signs sit on the far wall, not near the door', a
     assert.ok(toFarWall < toDoor, `sign at ${sign.position.toArray()} is nearer the far wall than the door`);
   }
 });
+
+// --- Issue #146: a click on the issue board opens the real-link list ---
+
+test('the issue board is pickable, and its pick id points at this room', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const target = missionRoom.issuesBoardPickTarget();
+  assert.equal(target.id, 'issues:a');
+  assert.ok(target.object instanceof THREE.Object3D);
+});

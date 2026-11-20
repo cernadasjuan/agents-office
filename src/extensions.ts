@@ -12,7 +12,8 @@ export interface WorldRoom {
   walls: {
     statement?: string;
     docs?: string[];
-    issues?: Array<{ number: number; title: string; state: 'open' | 'closed' }>;
+    /** `repo` is a full `owner/name`: one mission can hold issues from more than one repository. */
+    issues?: Array<{ number: number; repo?: string; title: string; state: 'open' | 'closed' }>;
     kanban?: Array<{ column: string; cards: Array<{ number: number; title: string }> }>;
   };
 }
