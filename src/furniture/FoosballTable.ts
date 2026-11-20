@@ -25,13 +25,15 @@ export function createFoosballTable(): THREE.Group {
   felt.receiveShadow = true;
   group.add(felt);
 
-  // Four player rods, crossing the table's short axis. The same grey and flags as the
-  // water cooler's tray: no new batch.
+  // Four player rods, crossing the table's short axis (Z). The same grey and flags as the
+  // water cooler's tray: no new batch. Rotating around X, not Z, turns the cylinder's own
+  // long axis (Y) onto Z, so the rods run across the table's width, evenly spaced along its
+  // length, instead of collapsing into one overlapping line along X (review fix, issue #156).
   const rodGeo = new THREE.CylinderGeometry(0.015, 0.015, 1.1, 6);
   const rodMat = getToonMaterial(ROD_GREY);
   for (const x of [-0.675, -0.225, 0.225, 0.675]) {
     const rod = new THREE.Mesh(rodGeo, rodMat);
-    rod.rotation.z = Math.PI / 2;
+    rod.rotation.x = Math.PI / 2;
     rod.position.set(x, 0.85, 0);
     group.add(rod);
   }

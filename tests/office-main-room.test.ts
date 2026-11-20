@@ -11,6 +11,8 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   set: () => true,
 })) as never;
 const { createOffice } = await import('../src/scene/Office.js');
+const { createFoosballTable } = await import('../src/furniture/FoosballTable.js');
+const { createFridge } = await import('../src/furniture/Kitchen.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -93,4 +95,30 @@ test('the kitchen and play furniture sits in the open center, clear of every sta
       assert.ok(dx > 1 || dz > 1, `a piece at (${position.x}, ${position.z}) sits clear of the station at (${station.position.x}, ${station.position.z})`);
     }
   }
+});
+
+test('the foosball rods cross the table, each a separate bar, not one overlapping line (review fix)', () => {
+  const table = createFoosballTable();
+  table.updateMatrixWorld(true);
+  const rods = table.children.filter((child) => (child as THREE.Mesh).geometry instanceof THREE.CylinderGeometry);
+  assert.equal(rods.length, 4);
+  const boxes = rods.map((rod) => new THREE.Box3().setFromObject(rod));
+  for (const box of boxes) {
+    // Each rod spans the table's short (Z) axis, not its long (X) axis.
+    assert.ok(box.max.z - box.min.z > box.max.x - box.min.x, 'a rod runs across Z, not along X');
+  }
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      assert.ok(!boxes[i].intersectsBox(boxes[j]), `rod ${i} and rod ${j} do not overlap`);
+    }
+  }
+});
+
+test("the fridge handle sits outside the fridge body, not hidden inside it (review fix)", () => {
+  const fridge = createFridge();
+  fridge.updateMatrixWorld(true);
+  const body = new THREE.Box3().setFromObject(fridge.getObjectByProperty('type', 'Mesh')!);
+  const handle = fridge.children[1] as THREE.Mesh;
+  const handleBox = new THREE.Box3().setFromObject(handle);
+  assert.ok(handleBox.max.x > body.max.x, `the handle (max x=${handleBox.max.x}) sticks out past the body's own face (max x=${body.max.x})`);
 });

@@ -50,10 +50,13 @@ export function createFridge(): THREE.Group {
   body.castShadow = true;
   group.add(body);
 
+  // At x=0.415 the handle's inner face sits flush with the body's own face (x=0.4, half-width
+  // 0.4), so it sticks out past the opaque body instead of sitting fully inside it, invisible
+  // from every angle (review fix, issue #156).
   const handleGeo = new THREE.BoxGeometry(0.03, 0.5, 0.05);
   const handle = new THREE.Mesh(handleGeo, getToonMaterial(0x444444));
   handle.castShadow = true;
-  handle.position.set(0.37, 1.0, 0.3);
+  handle.position.set(0.415, 1.0, 0.3);
   group.add(handle);
 
   return group;
