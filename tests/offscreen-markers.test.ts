@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
-import { OffscreenMarkers } from '../src/ui/OffscreenMarkers.js';
+import { OffscreenMarkers, clusterBySpacing } from '../src/ui/OffscreenMarkers.js';
 import type { Wait } from '../src/ui/attention.js';
 
 const WIDTH = 1600;
@@ -130,6 +130,39 @@ test('markers close enough to collide merge into one, with a count, and fly to t
 
   el.click();
   assert.deepEqual(selected, ['longest'], 'expected the click to fly to the longest-waiting (oldest fresh) agent in the cluster');
+});
+
+test('two groups whose first members are far apart still merge, when their displayed (oldest-wait) points collide', () => {
+  // Hand-picked so the group comparing only first-arrival points would miss this:
+  // group A's first member a0=(0,0) and group B's first member b0=(70,0) are 70px apart
+  // (over CLUSTER_SPACING_PX, 34), so a naive "compare to the first member" check keeps
+  // them separate. But A's oldest member a1=(33,0) and B's oldest member b1=(37,0) are
+  // only 4px apart: the two groups would still draw overlapping markers.
+  const fresh = (waitMinutes: number): Wait => ({ attention: 'waiting', waitMinutes });
+  const a0 = { id: 'a0', point: { x: 0, y: 0, angle: 0 }, wait: fresh(1) };
+  const a1 = { id: 'a1', point: { x: 33, y: 0, angle: 0 }, wait: fresh(10) };
+  const b0 = { id: 'b0', point: { x: 70, y: 0, angle: 0 }, wait: fresh(1) };
+  const b1 = { id: 'b1', point: { x: 37, y: 0, angle: 0 }, wait: fresh(12) };
+
+  assert.ok(Math.hypot(a0.point.x - b0.point.x, a0.point.y - b0.point.y) >= 34, 'the first members must look far apart, to make this a real regression case');
+  assert.ok(Math.hypot(a1.point.x - b1.point.x, a1.point.y - b1.point.y) < 34, 'the oldest members must actually collide, to make this a real regression case');
+
+  const groups = clusterBySpacing([a0, a1, b0, b1]);
+
+  // Whatever the grouping, no two groups may display colliding points.
+  const displayed = groups.map((group) => {
+    const oldest = [...group].sort((x, y) => y.wait!.waitMinutes! - x.wait!.waitMinutes!)[0];
+    return oldest.point;
+  });
+  for (let i = 0; i < displayed.length; i++) {
+    for (let j = i + 1; j < displayed.length; j++) {
+      const distance = Math.hypot(displayed[i].x - displayed[j].x, displayed[i].y - displayed[j].y);
+      assert.ok(distance >= 34, `groups ${i} and ${j} still collide at distance ${distance}`);
+    }
+  }
+  // This exact case cascades into one group, with the longest wait (b1, 12 min) as its display point.
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].length, 4);
 });
 
 test('agents far enough apart on the edge each keep their own marker', (t) => {

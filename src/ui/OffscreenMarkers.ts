@@ -124,13 +124,46 @@ export class OffscreenMarkers {
   }
 }
 
-/** Group candidates whose screen points sit within `CLUSTER_SPACING_PX` of a cluster's first member. */
-function clusterBySpacing(candidates: Candidate[]): Candidate[][] {
-  const clusters: Candidate[][] = [];
-  for (const candidate of candidates) {
-    const cluster = clusters.find((group) => Math.hypot(candidate.point.x - group[0].point.x, candidate.point.y - group[0].point.y) < CLUSTER_SPACING_PX);
-    if (cluster) cluster.push(candidate);
-    else clusters.push([candidate]);
+interface Group<T> {
+  members: T[];
+  /** Where the group draws: the oldest fresh wait's own point, recomputed on every merge. */
+  point: EdgeMarker;
+}
+
+/**
+ * Group candidates by the point each group actually displays (the oldest
+ * fresh wait's own point), not by whichever candidate arrived first. Two
+ * groups merge whenever their current displayed points collide, and the
+ * merge may change which point the combined group displays next — so the
+ * check repeats until no two displayed points collide, however many rounds
+ * that takes. Comparing only first-arrival points let two groups each look
+ * clear of the other, while the points they actually drew sat on top of
+ * each other.
+ */
+export function clusterBySpacing<T extends { id: string; point: EdgeMarker; wait: Wait }>(candidates: T[]): T[][] {
+  const groups: Group<T>[] = candidates.map((candidate) => ({ members: [candidate], point: candidate.point }));
+  for (let merged = true; merged; ) {
+    merged = false;
+    for (let i = 0; i < groups.length && !merged; i++) {
+      for (let j = i + 1; j < groups.length; j++) {
+        if (!collide(groups[i].point, groups[j].point)) continue;
+        const members = [...groups[i].members, ...groups[j].members];
+        groups.splice(j, 1);
+        groups.splice(i, 1, { members, point: displayPoint(members) });
+        merged = true;
+        break;
+      }
+    }
   }
-  return clusters;
+  return groups.map((group) => group.members);
+}
+
+function collide(a: EdgeMarker, b: EdgeMarker): boolean {
+  return Math.hypot(a.x - b.x, a.y - b.y) < CLUSTER_SPACING_PX;
+}
+
+/** The point of the oldest fresh wait among `members`: the point a merged group displays and flies to. */
+function displayPoint<T extends { id: string; point: EdgeMarker; wait: Wait }>(members: T[]): EdgeMarker {
+  const primary = oldestFreshWait(members.map((member) => ({ id: member.id, extras: member.wait })))!;
+  return members.find((member) => member.id === primary.id)!.point;
 }
