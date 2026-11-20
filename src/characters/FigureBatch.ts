@@ -10,6 +10,11 @@ import * as THREE from 'three';
  * hits. Objects attached to a part stay on the default layer and draw as before,
  * unless they are marked as figure parts too (the BMAD hats, which share their
  * shapes): those join the batch on the next sync.
+ *
+ * A part may also carry `userData.tint` (a `THREE.Color` multiplier, issue #125
+ * part 3): written to the bucket's `instanceColor` buffer instead of a second
+ * material, so a part that needs more color variety than its bucket's one shared
+ * material (a mission's hand color, say) costs no extra draw call.
  */
 export const FIGURE_PART_LAYER = 30;
 const PART_LAYER_MASK = 1 << FIGURE_PART_LAYER;
@@ -86,7 +91,9 @@ export class FigureBatch {
     for (const [key, parts] of wanted) {
       const bucket = this.bucketFor(key, parts[0], parts.length);
       const array = bucket.mesh.instanceMatrix.array as Float32Array;
+      const colors = bucket.mesh.instanceColor!.array as Float32Array;
       let dirty = changed;
+      let colorDirty = changed;
       parts.forEach((part, i) => {
         const source = part.matrixWorld.elements;
         const offset = i * 16;
@@ -103,6 +110,19 @@ export class FigureBatch {
           dirty = true;
           moved.add(owner.get(part)!);
         }
+        // A per-instance color multiplier (issue #125 part 3): white (1,1,1, a no-op multiply)
+        // unless the part sets its own tint, so a mission's hand color costs no new bucket.
+        const tint = part.userData.tint as THREE.Color | undefined;
+        const cOffset = i * 3;
+        const r = tint ? tint.r : 1;
+        const g = tint ? tint.g : 1;
+        const b = tint ? tint.b : 1;
+        if (colors[cOffset] !== r || colors[cOffset + 1] !== g || colors[cOffset + 2] !== b) {
+          colors[cOffset] = r;
+          colors[cOffset + 1] = g;
+          colors[cOffset + 2] = b;
+          colorDirty = true;
+        }
       });
       bucket.parts = parts;
       bucket.mesh.count = parts.length;
@@ -110,6 +130,7 @@ export class FigureBatch {
       bucket.mesh.castShadow = parts.some((part) => part.castShadow);
       bucket.mesh.receiveShadow = parts.some((part) => part.receiveShadow);
       if (dirty) bucket.mesh.instanceMatrix.needsUpdate = true;
+      if (colorDirty) bucket.mesh.instanceColor!.needsUpdate = true;
     }
     for (const [key, bucket] of this.buckets) {
       if (wanted.has(key)) continue;
@@ -148,6 +169,11 @@ export class FigureBatch {
     const mesh = new THREE.InstancedMesh(sample.geometry, sample.material, capacity);
     mesh.name = 'figure-batch';
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    // A per-instance color multiplier (issue #125 part 3): lets one part (e.g. a mission's
+    // hand color) vary per instance without a second material, so it costs no extra bucket.
+    // three.js applies this in the shader whenever `instanceColor` is set, for any material.
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
+    mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     // Every instance moves; a bounding sphere would need a rebuild each frame
     mesh.frustumCulled = false;
     mesh.matrixAutoUpdate = false;
@@ -157,6 +183,8 @@ export class FigureBatch {
     this.buckets.set(key, bucket);
     // A new buffer holds no matrices yet: the caller writes all of them
     (mesh.instanceMatrix.array as Float32Array).fill(Number.NaN);
+    // White: a no-op color multiply, the default for every part until it sets its own tint
+    (mesh.instanceColor.array as Float32Array).fill(1);
     return bucket;
   }
 }

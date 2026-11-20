@@ -42,9 +42,16 @@ export function createLimb(length: number, radius = 0.035): THREE.Mesh {
   return part(geometry, getToonMaterial(Colors.limb));
 }
 
-/** `color`: a mission's second color (issue #125 part 3) instead of plain skin, on the same shared box. */
-export function createHand(color: THREE.Color = Colors.skin): THREE.Mesh {
-  return part(shared('hand', () => new THREE.BoxGeometry(0.06, 0.06, 0.06)), getToonMaterial(color));
+/**
+ * `color`: a mission's second color (issue #125 part 3) instead of plain skin. Every hand
+ * still shares the one skin-colored material and bucket (`FigureBatch.ts`); the color
+ * shows up as a per-instance tint (the ratio to skin, so the multiply lands on `color`
+ * exactly), never a second material, so a mission's hand color costs no extra draw call.
+ */
+export function createHand(color?: THREE.Color): THREE.Mesh {
+  const mesh = part(shared('hand', () => new THREE.BoxGeometry(0.06, 0.06, 0.06)), getToonMaterial(Colors.skin));
+  if (color) mesh.userData.tint = new THREE.Color(color.r / Colors.skin.r, color.g / Colors.skin.g, color.b / Colors.skin.b);
+  return mesh;
 }
 
 export function createFoot(): THREE.Mesh {
