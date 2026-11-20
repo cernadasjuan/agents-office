@@ -173,12 +173,19 @@ test('applyLabelDetail toggles only the compact class and keeps the label conten
 
 // --- Controller ---
 
-function agent(id: string, x: number, attention?: 'waiting' | 'your-turn', stuck?: boolean): LabelAgent {
+function agent(id: string, x: number, attention?: 'waiting' | 'your-turn', stuck?: boolean, waitMinutes?: number, activity = 'implementing'): LabelAgent {
   const group = new THREE.Group();
   group.position.set(x, 0, 0);
+  // A real child object, like the real label offset from the figure (Label.ts, createLabel): getWorldPosition works the same way.
+  const label = new THREE.Object3D();
+  label.position.set(0, 2.1, 0);
+  group.add(label);
+  const extras = attention || stuck || waitMinutes !== undefined
+    ? { ...(attention ? { attention } : {}), ...(stuck ? { stuck } : {}), ...(waitMinutes !== undefined ? { waitMinutes } : {}) }
+    : undefined;
   return {
-    info: { id, extras: attention || stuck ? { ...(attention ? { attention } : {}), ...(stuck ? { stuck } : {}) } : undefined },
-    figure: { group, label: { element: labelElement() } },
+    info: { id, activity, extras },
+    figure: { group, label: Object.assign(label, { element: labelElement() }) },
   };
 }
 
@@ -293,4 +300,73 @@ test('controller: a stuck agent far from the camera, unselected and unhovered, s
   agents.push(agent('stuck-far', 99, undefined, true));
   controller.update(0);
   assert.deepEqual(compact(), ['far', 'mine'], 'stuck-far is absent from the compact list');
+});
+
+// --- Declutter integration (#132): the real-scale queue overlap ---
+
+function hiddenIds(agents: LabelAgent[]): string[] {
+  return agents.filter((a) => a.figure.label.element.style.visibility === 'hidden').map((a) => a.info.id);
+}
+
+function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'overview'; zoom?: number } = {}) {
+  const document = dom.window.document;
+  const canvas = document.createElement('canvas');
+  document.body.appendChild(canvas);
+  // jsdom never computes real layout; stub the canvas size so the controller can project a screen point.
+  canvas.getBoundingClientRect = () => ({ width: 1600, height: 1000, left: 0, top: 0, right: 1600, bottom: 1000, x: 0, y: 0, toJSON: () => ({}) });
+  const camera = new THREE.PerspectiveCamera(60, 1.6, 0.1, 200);
+  camera.position.set(0, 1, 30);
+  camera.lookAt(0, 1, 0);
+  camera.updateMatrixWorld();
+  const agents: LabelAgent[] = [];
+  const state = { viewMode: options.viewMode ?? 'overview', zoom: options.zoom ?? 0, selected: null as string | null, picked: null as string | null };
+  const controller = new LabelDetailController({
+    agents: () => agents,
+    camera,
+    canvas,
+    keys: dom.window,
+    viewMode: () => state.viewMode,
+    zoomDistance: () => state.zoom,
+    pick: () => state.picked,
+    selected: () => state.selected,
+    hash: options.hash,
+  });
+  return { controller, agents, state, canvas };
+}
+
+test('declutter: a waiting agent overlapping a plain working one keeps the wait visible, hides the other', () => {
+  const { controller, agents } = declutterSetup();
+  agents.push(agent('working', 0, undefined, false, undefined, 'implementing'));
+  agents.push(agent('aging-wait', 0, 'waiting', false, 60));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['working'], 'the aging wait outranks a plain working agent and stays visible');
+});
+
+test('declutter: a selected agent overlapping a fresh wait still wins (selected outranks everything)', () => {
+  const { controller, agents, state } = declutterSetup();
+  agents.push(agent('fresh-wait', 0, 'waiting', false, 5));
+  agents.push(agent('picked', 0));
+  state.selected = 'picked';
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['fresh-wait']);
+});
+
+test('declutter: an agent with a clear screen spot of its own is never hidden, whatever its priority', () => {
+  const { controller, agents } = declutterSetup();
+  agents.push(agent('here', 0, undefined, false, undefined, 'idle'));
+  agents.push(agent('far-away', -8, undefined, false, undefined, 'implementing'));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), [], 'the two project to different screen points: no overlap, nothing hides');
+});
+
+test('declutter: #labels=all shows every label, even ones that would otherwise overlap', () => {
+  const { controller, agents, state } = declutterSetup({ hash: '#labels=all' });
+  agents.push(agent('a', 0), agent('b', 0));
+  state.viewMode = 'overview';
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), []);
 });

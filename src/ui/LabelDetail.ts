@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { isViewFromAbove, type ViewMode } from '../scene/Selection.js';
 import { attentionBand, type Wait } from './attention.js';
+import { declutterLabels, labelPriority, labelRect, type DeclutterCandidate } from './LabelDeclutter.js';
 
 /** `smart` shows full labels only where they matter; `all` is the original behavior. */
 export type LabelMode = 'smart' | 'all';
@@ -19,6 +20,12 @@ export const LABEL_DETAIL_INTERVAL_MS = 150;
 
 const COMPACT_CLASS = 'compact';
 const MODE_TEXT: Record<LabelMode, string> = { smart: 'Labels: smart (V)', all: 'Labels: all (V)' };
+
+/** A world point's screen position, in CSS pixels from the canvas top-left. Standard NDC-to-pixel conversion, the same math CSS2DRenderer itself uses to position a label's DOM element. */
+function projectToScreen(position: THREE.Vector3, camera: THREE.Camera, width: number, height: number): { x: number; y: number } {
+  const ndc = position.clone().project(camera);
+  return { x: (ndc.x + 1) / 2 * width, y: (1 - ndc.y) / 2 * height };
+}
 
 export interface LabelFacts {
   attention: string | undefined;
@@ -134,10 +141,18 @@ export function applyLabelDetail(element: HTMLElement, level: LabelLevel): boole
   return true;
 }
 
+/** Show or hide a label with `visibility`, which CSS2DRenderer leaves alone (same pattern as a sign). */
+export function applyLabelVisibility(element: HTMLElement, visible: boolean): boolean {
+  const value = visible ? '' : 'hidden';
+  if (element.style.visibility === value) return false;
+  element.style.visibility = value;
+  return true;
+}
+
 /** The part of a managed agent this module reads. */
 export interface LabelAgent {
-  info: { id: string; extras?: { attention?: string; waitMinutes?: number; stuck?: boolean } };
-  figure: { group: THREE.Object3D; label: { element: HTMLElement } };
+  info: { id: string; activity?: string; extras?: { attention?: string; waitMinutes?: number; stuck?: boolean } };
+  figure: { group: THREE.Object3D; label: { element: HTMLElement; getWorldPosition: (target: THREE.Vector3) => THREE.Vector3 } };
 }
 
 export interface LabelDetailOptions {
@@ -177,6 +192,7 @@ export class LabelDetailController {
   private lastRun = Number.NEGATIVE_INFINITY;
   private pointer: { x: number; y: number } | null = null;
   private figurePosition = new THREE.Vector3();
+  private labelPosition = new THREE.Vector3();
   private cameraPosition = new THREE.Vector3();
   private signPosition = new THREE.Vector3();
   private raycaster = new THREE.Raycaster();
@@ -213,17 +229,46 @@ export class LabelDetailController {
     const selected = this.options.selected();
     const hovered = view.mode === 'smart' ? this.hoveredAgent() : null;
     camera.getWorldPosition(this.cameraPosition);
-    for (const agent of this.options.agents()) {
+    const canvasRect = this.options.canvas.getBoundingClientRect();
+    const canDeclutter = view.mode === 'smart' && canvasRect.width > 0 && canvasRect.height > 0;
+    const agents = this.options.agents();
+    const candidates: DeclutterCandidate[] = [];
+    for (const agent of agents) {
       agent.figure.group.getWorldPosition(this.figurePosition);
+      const isSelected = agent.info.id === selected;
+      const isHovered = agent.info.id === hovered;
       const level = labelDetail({
         attention: agent.info.extras?.attention,
         waitMinutes: agent.info.extras?.waitMinutes,
-        selected: agent.info.id === selected,
-        hovered: agent.info.id === hovered,
+        selected: isSelected,
+        hovered: isHovered,
         distance: this.figurePosition.distanceTo(this.cameraPosition),
         stuck: agent.info.extras?.stuck,
       }, view);
       applyLabelDetail(agent.figure.label.element, level);
+      if (!canDeclutter) continue;
+      agent.figure.label.getWorldPosition(this.labelPosition);
+      const point = projectToScreen(this.labelPosition, camera, canvasRect.width, canvasRect.height);
+      candidates.push({
+        id: agent.info.id,
+        rect: labelRect(point.x, point.y, level),
+        priority: labelPriority({
+          selected: isSelected,
+          hovered: isHovered,
+          stuck: agent.info.extras?.stuck === true,
+          attention: agent.info.extras?.attention,
+          waitMinutes: agent.info.extras?.waitMinutes,
+          idle: agent.info.activity === 'idle',
+        }),
+        waitMinutes: agent.info.extras?.waitMinutes ?? -1,
+      });
+    }
+    if (canDeclutter) {
+      const visible = declutterLabels(candidates);
+      for (const agent of agents) applyLabelVisibility(agent.figure.label.element, visible.has(agent.info.id));
+    } else {
+      // `all` mode or a zero-size canvas: show every label, nothing hides.
+      for (const agent of agents) applyLabelVisibility(agent.figure.label.element, true);
     }
     this.refreshSigns(view);
   }
