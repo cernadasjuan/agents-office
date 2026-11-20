@@ -275,7 +275,9 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
   return observations.map((agent) => {
     const extras = agent.display ?? {};
     const badges = Array.isArray(extras.badges) ? extras.badges.filter((b) => BADGE.test(b)).slice(0, 6) : [];
-    const skills = Array.isArray(extras.skills) ? extras.skills.filter((s) => SKILL.test(s)).slice(0, 8) : [];
+    const skills = Array.isArray(extras.skills)
+      ? extras.skills.filter((s): s is string => typeof s === 'string' && SKILL.test(s)).slice(0, 8)
+      : [];
     const issues = issueList(extras.issues, 5);
     const waitMinutes = wholeNumber(extras.waitMinutes, 100_000);
     const actions = actionList(extras.actions, enabledActions);
