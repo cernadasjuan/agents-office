@@ -330,9 +330,10 @@ test('sessions of one workspace get neighboring desks', () => {
 });
 
 test('"next to" is physical distance, not a key suffix: a desk one row over beats one across the aisle (#138 fix)', () => {
-  // The hall desks sit in two rows of four. desk_3 (end of row 1) and desk_4 (start of
-  // row 2) are adjacent keys but 16 m apart; desk_3 and desk_7 are far apart in key order
-  // but stand in the same column, 3 m apart. The real nearest desk must win, not the key.
+  // The hall desks sit in two rows of four, in the back corners since issue #121. desk_3
+  // (end of row 1) and desk_4 (start of row 2) are adjacent keys but about 24 m apart (the
+  // two far corners); desk_3 and desk_7 are far apart in key order but stand in the same
+  // column, 3 m apart. The real nearest desk must win, not the key.
   const { layout, agent } = setup();
   layout.seatFor(agent('n0', 'implementing'), null); // desk_0
   layout.seatFor(agent('n1', 'implementing'), null); // desk_1
@@ -341,7 +342,7 @@ test('"next to" is physical distance, not a key suffix: a desk one row over beat
   assert.equal(a1.key, 'desk_3');
 
   const a2 = layout.seatFor(agent('a2', 'implementing', inWorkspace('Alpha')), null)!;
-  assert.equal(a2.key, 'desk_7', 'the true nearest free desk, not desk_4 (index-adjacent, 16 m away)');
+  assert.equal(a2.key, 'desk_7', 'the true nearest free desk, not desk_4 (index-adjacent, 24 m away)');
 });
 
 test('a stored desks@<workspace> room does not come back after a reload', () => {
