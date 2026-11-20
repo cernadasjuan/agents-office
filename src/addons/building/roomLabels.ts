@@ -38,15 +38,17 @@ const ATLAS_START_ROWS = 4;
  * the tail survives too (issue #87, AC3: cutting only the front made compact
  * chips that share their first characters collide). The ellipsis always costs
  * one character of the budget; the rest splits as evenly as possible, the head
- * getting the extra character on an odd budget.
+ * getting the extra character on an odd budget. Splits on code points
+ * (`Array.from`), not UTF-16 units, so a surrogate pair (an emoji) never cuts in half.
  */
 export function middleEllipsis(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
+  const chars = Array.from(text);
+  if (chars.length <= maxChars) return text;
   if (maxChars <= 1) return '…';
   const keep = maxChars - 1;
   const head = Math.ceil(keep / 2);
   const tail = keep - head;
-  return tail > 0 ? `${text.slice(0, head)}…${text.slice(text.length - tail)}` : `${text.slice(0, head)}…`;
+  return tail > 0 ? `${chars.slice(0, head).join('')}…${chars.slice(chars.length - tail).join('')}` : `${chars.slice(0, head).join('')}…`;
 }
 
 /**

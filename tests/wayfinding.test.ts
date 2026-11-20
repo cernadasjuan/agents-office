@@ -102,18 +102,29 @@ test('middleEllipsis cuts a too-long word in the middle, not the front', () => {
   assert.equal(middleEllipsis('ABCDE', 2), 'A…', 'a one-character budget after the ellipsis keeps only the head');
 });
 
+test('middleEllipsis keeps a surrogate pair whole, even at the cut boundary', () => {
+  // A supplementary character (an emoji) is two UTF-16 units; slicing by index
+  // alone can split the pair and leave a lone surrogate. Split by code point instead.
+  const cut = middleEllipsis('AGENT-NAME\uD83D\uDE80XY', 7);
+  const lonelySurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  assert.equal(lonelySurrogate.test(cut), false, `no lone surrogate in ${JSON.stringify(cut)}`);
+  assert.ok(Array.from(cut).length <= 7);
+});
+
 test('issue #87 AC3: two compact chips that share their first 9 characters still differ', () => {
-  // Both single-token names share "AGENT-83-" would be a contrived example; what matters
-  // in practice is two missions whose compact face used to collide on the old front cut.
+  // Both names share the word "AGENT" and a numbered mission slug, the real shape of
+  // two mission rooms today (see docs/roadmap.md item 20's examples).
   const reviewFace = compactLabelLines('AGENT 83 BUILD REVIEW');
   const launcherFace = compactLabelLines('AGENT 83 BUILD LAUNCHER');
   assert.notDeepEqual(reviewFace, launcherFace);
 
   // The exact collision from before this fix: two last words sharing a 5-character
-  // prefix used to cut to the identical "…PERSI…" (front-truncated twice).
+  // prefix ("PERSI") both front-cut to the identical "…PERSI…". Confirmed against the
+  // pre-fix compactLabelLines: both produced the same string, so this pair is a real
+  // regression check, not just two names that already read apart.
   const persistence = compactLabelLines('MEDIA PLAN SALESFORCE PERSISTENCE');
-  const personas = compactLabelLines('MEDIA PLAN SALESFORCE PERSONAS');
-  assert.notDeepEqual(persistence, personas);
+  const persistage = compactLabelLines('MEDIA PLAN SALESFORCE PERSISTAGE');
+  assert.notDeepEqual(persistence, persistage);
 });
 
 test('in the overview a plate grows with the zoom distance but never gets wider than a room', () => {

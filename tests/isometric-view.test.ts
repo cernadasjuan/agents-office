@@ -113,11 +113,15 @@ test('issue #87: the isometric zoom still respects the pan/zoom limits (min/max 
 
   for (let step = 0; step < 50; step++) zoomTowardCursor(iso, 0.9, 0.9, -100000, aspect);
   assert.ok(iso.halfHeight >= iso.minHalfHeight - 1e-9);
+  assert.ok(iso.target.x >= BUILDING.min.x - 1e-6 && iso.target.x <= BUILDING.max.x + 1e-6, `target.x ${iso.target.x} stayed in bounds`);
+  assert.ok(iso.target.z >= BUILDING.min.z - 1e-6 && iso.target.z <= BUILDING.max.z + 1e-6, `target.z ${iso.target.z} stayed in bounds`);
 
   const { iso: iso2 } = framedCamera(aspect);
   for (let step = 0; step < 50; step++) zoomTowardCursor(iso2, -0.9, -0.9, 100000, aspect);
   assert.ok(iso2.halfHeight <= iso2.maxHalfHeight + 1e-9);
   assert.ok(iso2.halfHeight <= framed * 1.5 + 1e-6);
+  assert.ok(iso2.target.x >= BUILDING.min.x - 1e-6 && iso2.target.x <= BUILDING.max.x + 1e-6, `target.x ${iso2.target.x} stayed in bounds`);
+  assert.ok(iso2.target.z >= BUILDING.min.z - 1e-6 && iso2.target.z <= BUILDING.max.z + 1e-6, `target.z ${iso2.target.z} stayed in bounds`);
 });
 
 test('the same zoom gives the same screen size as the overview at that distance', () => {
