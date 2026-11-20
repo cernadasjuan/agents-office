@@ -17,7 +17,8 @@ import { IsometricController } from '../src/scene/IsometricCamera.js';
  */
 export const REAL_SIZE = { buildingRooms: 16, missionRooms: 9, agents: 40, hatWearers: 20, cardHolders: 10 } as const;
 
-const PERSONAS = ['dev', 'architect', 'qa', 'pm', 'analyst', 'sm', 'debugger', 'spec-coach', 'data-engineer', 'ux-designer', 'tech-writer'];
+// 'librarian' included (issue #128 review): the budget fixture must wear every hat it pins.
+const PERSONAS = ['dev', 'architect', 'qa', 'pm', 'analyst', 'sm', 'debugger', 'spec-coach', 'data-engineer', 'ux-designer', 'tech-writer', 'librarian'];
 
 function badgesFor(i: number): string[] | undefined {
   if (i >= REAL_SIZE.hatWearers) return undefined;

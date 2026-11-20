@@ -196,10 +196,12 @@ export class BuildingLayout implements LayoutStrategy {
     // It brings what it found back to its agent otherwise, through the pod branch below.
     if (isLibrarian(agent.extras) && agent.activity === 'researching') return 'trip:researching';
     if (parent && (parent.home || parent.target?.startsWith('room:'))) return 'pod';
-    // A non-librarian main session's research trip never reaches the library-knowledge
-    // room either: with a war room it already stayed there (the room check above); without
-    // one it keeps its own desk, the same as desk work (issue #128 AC2).
-    if (DESK_WORK.has(agent.activity) || (agent.activity === 'researching' && !parentId)) return 'home';
+    // A non-librarian's research trip never reaches the library-knowledge room either: with
+    // a war room it already stayed there (the room check above). Without one it keeps its
+    // own desk, the same as desk work (issue #128 AC2) — this covers a subagent whose parent
+    // has no seat yet too (the pod check above falls through on that exact timing, issue #128
+    // review), not only a main session; the generic trip below is never reached for research.
+    if (DESK_WORK.has(agent.activity) || agent.activity === 'researching') return 'home';
     return `trip:${TRIP_STATION[agent.activity] ?? 'idle'}`;
   }
 

@@ -129,11 +129,13 @@ test('a saved building with an old writing room in storage drops it silently (#1
 });
 
 test('a short tool call does not make the agent walk', () => {
+  // Uses 'testing' (not 'researching', issue #128 review): a non-librarian's research no
+  // longer creates a pending trip at all, so it could no longer prove cancellation works.
   const { layout, agent, tick } = setup();
   layout.seatFor(agent('a', 'implementing'), null);
-  layout.seatFor(agent('a', 'researching'), 'implementing');
+  layout.seatFor(agent('a', 'testing'), 'implementing');
   tick(1000);
-  layout.seatFor(agent('a', 'implementing'), 'researching');
+  layout.seatFor(agent('a', 'implementing'), 'testing');
   assert.deepEqual(tick(5000).filter((m) => m.agentId === 'a'), []);
 });
 
@@ -222,6 +224,26 @@ test('the building rents a desk room when the hall desks are taken, and rebuilds
 
   const reloaded = setup(storage).layout;
   assert.deepEqual(reloaded.roomKinds, ['office', 'library', 'desks']);
+});
+
+test('a saved 3-room layout rents each kind at the slot its index gives it, the same way on every reload (issue #128 review)', () => {
+  // Rooms are remembered by kind, in rental order, and rented back in that same order on
+  // reload (`roomKinds` above): slotFor(index) decides where each one physically sits, by
+  // index alone, not by kind. For office/library/desks that is slot 0 (east-center, unmoved),
+  // slot 1 (south-east since issue #120's swap) and slot 2 (north-east, where the Library
+  // itself used to sit before that swap). This is the one-time move the swap causes for
+  // anyone with an existing saved building of 3 or more rooms: whatever room was third stays
+  // third, but the ground under it moved. Noted in README.md and CHANGELOG.md.
+  const storage = new Map([[BUILDING_STORAGE_KEY, JSON.stringify(['office', 'library', 'desks'])]]);
+  const { layout } = setup(storage);
+  assert.deepEqual(layout.roomKinds, ['office', 'library', 'desks']);
+  assert.deepEqual(slotFor(0).rect, { minX: 15, maxX: 27, minZ: -6, maxZ: 6 }, 'office: east-center, unmoved');
+  assert.ok(slotFor(1).rect.minZ > 0, 'library: south-east (issue #120)');
+  assert.ok(slotFor(2).rect.minZ < 0, 'desks: north-east, where the library used to be');
+
+  // Reloading the same saved kind order again lands every room on the same physical slot.
+  const again = setup(new Map(storage)).layout;
+  assert.deepEqual(again.roomKinds, layout.roomKinds);
 });
 
 test('idle agents beyond the hall seats get a lounge room', () => {
@@ -331,6 +353,16 @@ test('an ordinary subagent that researches stays at its parent desk', () => {
   const { layout, agent } = setup();
   layout.seatFor(agent('parent', 'implementing'), null);
   assert.match(layout.seatFor(agent('helper', 'researching', { parentId: 'parent' }), null)!.key, /_pod\d$/);
+});
+
+test('a non-librarian subagent whose parent has no seat yet never reaches the Library, even on this exact timing (issue #128 review)', () => {
+  // A real race: a subagent is polled in the same cycle as its freshly spawned, not-yet-seated
+  // parent. The persona check and the pod check both fall through; the generic research
+  // routing must still never land on the Library's own shelves.
+  const { layout, agent } = setup();
+  const seat = layout.seatFor(agent('helper', 'researching', { parentId: 'parent' }), null)!;
+  assert.doesNotMatch(seat.key, /^room1_researching_/, 'never the Library, even with an unseated parent');
+  assert.doesNotMatch(seat.key, /_pod\d$/, 'there is no parent seat yet to anchor a pod spot to');
 });
 
 test('a librarian subagent still reaches the Library even though its parent already has a desk (the badge wins over the pod rule)', () => {

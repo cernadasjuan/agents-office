@@ -106,8 +106,10 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // desks and furniture), then dropped to 367 once the perf-shadow-budget PR recovered
   // headroom and moved DRAW_CALL_BUDGET to 430. It is 368 after the library wing move, the
   // persona-badge routing fix and the Librarian hat (issues #120/#128/#149): +1 against that
-  // baseline. Each PR gets up to 5 more before it must recover headroom elsewhere, not just
-  // add to the margin left by the last one.
+  // baseline. This fixture now actually wears the Librarian hat (`tests/real-size-office.ts`'s
+  // own PERSONAS list, issue #128 review: the first fixture claimed +1 without ever including
+  // it). Each PR gets up to 5 more before it must recover headroom elsewhere, not just add to
+  // the margin left by the last one.
   assert.ok(after.total <= 372, `worst case ${after.total} exceeds the current baseline (367) + 5`);
 });
 
