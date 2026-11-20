@@ -249,6 +249,42 @@ test('issue #89: #select= selects the agent once it appears, the same as #focus=
   assert.equal(selection.selected, 'agent-1');
 });
 
+test('issue #89 review (fix 1): #zoom= and #select=/#focus= together both survive — the pending selection flight honors the requested zoom', () => {
+  const { view, manager, selection } = setup('#view=overview&zoom=20&select=agent-1');
+  view.agentsChanged(manager.getAgents());
+
+  manager.addAgent({ id: 'agent-1', name: 'One', activity: 'idle' });
+  view.agentsChanged(manager.getAgents()); // the pending #select= fires here, starting the flight
+  assert.equal(selection.selected, 'agent-1');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60); // let the 0.6 s flight finish
+  assert.ok(Math.abs(view.zoomDistance - 20) < 0.5, `settles at the requested zoom, 20 (got ${view.zoomDistance})`);
+});
+
+test('issue #89 review (fix 1): the same, in the isometric view', () => {
+  const { view, manager, selection } = setup('#view=iso&zoom=20&select=agent-1');
+  view.agentsChanged(manager.getAgents());
+
+  manager.addAgent({ id: 'agent-1', name: 'One', activity: 'idle' });
+  view.agentsChanged(manager.getAgents());
+  assert.equal(selection.selected, 'agent-1');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.ok(Math.abs(view.zoomDistance - 20) < 0.5, `settles at the requested zoom, 20 (got ${view.zoomDistance})`);
+});
+
+test('issue #89 review (fix 1): #zoom= is consumed only once — a later selection uses the normal fixed framing distance', () => {
+  const { view, manager, selection } = setup('#view=overview&zoom=20&select=agent-1');
+  view.agentsChanged(manager.getAgents());
+  manager.addAgent({ id: 'agent-1', name: 'One', activity: 'idle' });
+  manager.addAgent({ id: 'agent-2', name: 'Two', activity: 'idle' });
+  view.agentsChanged(manager.getAgents());
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.ok(Math.abs(view.zoomDistance - 20) < 0.5, 'the first (pending #select=) flight honors #zoom=');
+
+  selection.select('agent-2'); // a second, ordinary selection: #zoom= no longer applies
+  for (let i = 0; i < 60; i++) view.update(1 + i / 60, 1 / 60);
+  assert.ok(Math.abs(view.zoomDistance - 20) > 1, `a later selection is not pinned to the stale #zoom= value (got ${view.zoomDistance})`);
+});
+
 test('Esc clears the selection and an agent that leaves is deselected', () => {
   const { view, manager, selection, press } = setup();
   manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });

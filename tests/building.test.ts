@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac, randomBytes } from 'node:crypto';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
@@ -16,6 +17,17 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout, BUILDING_STORAGE_KEY } = await import('../src/addons/building/BuildingLayout.js');
 const { missionSlot } = await import('../src/addons/building/missionRooms.js');
+const { projectWorld } = await import('../server/seam.js');
+
+/** The same hashing `server/vitePlugin.ts` uses for `publicId`, with its own random key held
+ * for the whole call (one key, so the same raw string always hashes the same, the way one
+ * server run does): a room's real client-facing `id` never carries the raw `mission:<slug>`
+ * key it came from (issue #89 review, fix 2 — `roomView` must match through this, not an
+ * injected raw id). */
+function createFakePublicId(): (raw: string) => string {
+  const key = randomBytes(32).toString('hex');
+  return (raw: string) => createHmac('sha256', key).update(raw).digest('hex');
+}
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -270,19 +282,34 @@ test('roomView returns null for a kind that is not yet open and for any unknown 
   assert.equal(layout.roomView(''), null);
 });
 
-test('roomView("<slug>") and roomView("mission:<slug>") both frame an open mission room, after syncWorldRooms', () => {
+test('roomView matches a mission room by its slugified title or its public id — through the real projectWorld projection (review fix 2)', () => {
   const { layout } = setup();
-  assert.equal(layout.roomView('roadmap'), null, 'not open yet');
-  layout.syncWorldRooms([{
-    id: 'mission:roadmap', kind: 'mission' as const, title: 'Roadmap', state: 'open' as const,
-    sleepers: [], walls: {},
-  }]);
-  const bySlug = layout.roomView('roadmap')!;
-  const byFullKey = layout.roomView('mission:roadmap')!;
-  assert.ok(bySlug);
-  assert.deepEqual(bySlug, byFullKey);
+  assert.equal(layout.roomView('media-plan-q1'), null, 'not open yet');
+
+  // The real server projection: the client only ever sees the hashed id and the display
+  // title, never the raw `mission:<slug>` key this started from.
+  const publicId = createFakePublicId();
+  const projected = projectWorld(
+    [{ rooms: [{ key: 'mission:media-plan-q1', kind: 'mission', title: 'Media Plan Q1', state: 'open', walls: {} }] }],
+    ['missions'],
+    publicId,
+  ).rooms[0]!;
+  assert.notEqual(projected.id, 'mission:media-plan-q1', 'the id a client sees is hashed, not the raw key');
+  assert.equal(projected.title, 'Media Plan Q1');
+
+  layout.syncWorldRooms([{ id: projected.id, kind: 'mission', title: projected.title, state: 'open', sleepers: [], walls: {} }]);
+
+  assert.equal(layout.roomView('mission:media-plan-q1'), null, 'the raw server-side key never works on the client');
+  const byTitle = layout.roomView('media-plan-q1')!;
+  assert.ok(byTitle, 'matches by the slugified title instead');
+  const byUppercaseTitle = layout.roomView('Media-Plan-Q1')!;
+  assert.deepEqual(byUppercaseTitle, byTitle, 'case-insensitive, like every other roomView name');
+  const byId = layout.roomView(projected.id)!;
+  assert.deepEqual(byId, byTitle, 'the exact public id also works, for a reviewer who copies it from /api/world');
+
   const missionRect = missionSlot(0).rect;
-  assert.deepEqual([bySlug.bounds.min.x, bySlug.bounds.max.x, bySlug.bounds.min.z, bySlug.bounds.max.z], [missionRect.minX, missionRect.maxX, missionRect.minZ, missionRect.maxZ]);
+  assert.deepEqual([byTitle.bounds.min.x, byTitle.bounds.max.x, byTitle.bounds.min.z, byTitle.bounds.max.z],
+    [missionRect.minX, missionRect.maxX, missionRect.minZ, missionRect.maxZ]);
 });
 
 test('roomView\'s first-person standing point sits inside the room, facing further into it', () => {

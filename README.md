@@ -23,9 +23,19 @@ pnpm dev
 ```
 
 `pnpm smoke` is a separate, opt-in check (issue #89): it starts the dev server against a
-fixture agent list, opens it in one headless Chromium page (`pnpm install` also fetches
-Chromium, since `playwright` is a dev dependency, never a runtime one, P6), and fails on any
-page error. It never runs as part of `pnpm test` and never touches port 5173.
+fixture agent list on an OS-assigned free port (never a fixed one, never 5173), opens it in
+one headless Chromium page (`playwright` is a dev dependency, never a runtime one, P6), and
+fails on any page error. It never runs as part of `pnpm test`.
+
+`pnpm install` does not fetch Chromium for this `playwright` version; run this once, on a
+fresh clone or after a `playwright` upgrade:
+
+```bash
+npx playwright install chromium
+```
+
+`pnpm smoke` checks Chromium is installed before it starts anything, and prints this exact
+command if it is missing.
 
 ## macOS launcher (this fork)
 

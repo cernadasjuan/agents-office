@@ -39,6 +39,16 @@ const ROOM_KINDS: readonly string[] = ['office', 'desks', 'library', 'lab', 'lou
 const ROOM_VIEW_EYE_HEIGHT = 1.6;
 
 /**
+ * Lowercased, non-alphanumeric runs collapsed to one `-`, leading/trailing `-` trimmed
+ * (issue #89 review, fix 2): `#room=<mission id>` matches a human-typed name against a
+ * mission room's own displayed title this way, never against `id` (the server's opaque hash
+ * of the mission key; a client never sees the raw slug the server hashed).
+ */
+function slugify(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/**
  * The camera framing for a room's slot (issue #89, `#room=`): its world bounds, floor to
  * wall height, and a first-person standing pose a third of the way in from the door,
  * looking further inward toward the room's main (far) wall. Pure: no scene, no layout state.
@@ -156,9 +166,13 @@ export class BuildingLayout implements LayoutStrategy {
   /**
    * Where the camera should go to show a named room (issue #89, `#room=`). A room kind
    * ("office": always the first one, "Your office", never a later overflow waiting room;
-   * "desks", "library", "lab", "lounge": the first room of that kind) or a mission id
-   * (`mission:<slug>` or the bare slug). Unknown names return null; this never changes the
-   * scene, only reports where a camera could go.
+   * "desks", "library", "lab", "lounge": the first room of that kind), or a mission room.
+   * A mission room never matches by a raw `mission:<slug>` key: `id` is the server's opaque
+   * hash of that key (`projectWorld`'s `publicId`), so a client never sees the slug it was
+   * hashed from (issue #89 review, fix 2). It matches instead by the room's own displayed
+   * title, slugified (`#room=media-plan` against the title "Media Plan"), or by the exact
+   * public id a reviewer could copy from `/api/world`. Unknown names return null; this never
+   * changes the scene, only reports where a camera could go.
    */
   roomView(name: string): RoomView | null {
     const query = name.trim().toLowerCase();
@@ -169,8 +183,7 @@ export class BuildingLayout implements LayoutStrategy {
       if (record) slot = slotFor(record.index);
     }
     if (!slot) {
-      const key = query.startsWith('mission:') ? query : `mission:${query}`;
-      const mission = this.missionRooms.get(key);
+      const mission = [...this.missionRooms.values()].find((room) => room.id === name || slugify(room.title) === query);
       if (mission) slot = mission.slot;
     }
     return slot ? roomViewFromSlot(slot) : null;

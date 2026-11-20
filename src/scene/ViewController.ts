@@ -72,6 +72,14 @@ export class ViewController {
   /** True once the current gesture has panned, even if it ends back near the press point (issue #133). */
   private dragged = false;
   private pendingFocus: string | null;
+  /**
+   * `#zoom=` paired with `#select=`/`#focus=` (issue #89 review): the pending `#select=`
+   * selection has not happened yet when `applyStartZoom` runs, so its own flight (`flyToAgent`,
+   * through `focusOn`) would otherwise override the requested zoom with its own fixed framing
+   * distance on the very next poll. Consumed once, by the first flight only; a later selection
+   * (a click, a different `#select=`) uses the normal fixed distance, as before.
+   */
+  private pendingStartZoom: number | null;
   private marker: SelectionMarker;
   private selection: SelectionState;
   private raycaster = new THREE.Raycaster();
@@ -82,6 +90,7 @@ export class ViewController {
     this.marker = new SelectionMarker(options.scene);
     const start = parseViewHash(options.hash ?? '');
     this.pendingFocus = start.focus;
+    this.pendingStartZoom = start.zoom;
 
     setPointerLockFilter((event) => this.currentMode === 'first-person' && this.pickAt(event.clientX, event.clientY) === null);
     this.listen();
@@ -351,9 +360,20 @@ export class ViewController {
   }
 
   private flyToAgent(point: THREE.Vector3): void {
+    // #zoom= paired with #select=/#focus= (issue #89 review): consumed once, so this flight
+    // (and only this one) honors the requested zoom instead of focusOn's own fixed distance.
+    const startZoom = this.pendingStartZoom;
+    this.pendingStartZoom = null;
     if (this.currentMode === 'isometric') {
       const from: IsometricState = this.isometric.state();
       this.isometric.focusOn(point);
+      if (startZoom !== null) {
+        this.isometric.halfHeight = THREE.MathUtils.clamp(
+          startZoom * Math.tan(THREE.MathUtils.degToRad(this.options.camera.fov) / 2),
+          this.isometric.minHalfHeight,
+          this.isometric.maxHalfHeight,
+        );
+      }
       this.isometric.pan(this.cardShiftPx() * this.isometric.unitsPerPixel(this.options.canvas.clientHeight), 0);
       this.isometricFlight = new IsometricTween(from, this.isometric.state(), FLIGHT_SECONDS);
       this.isometric.setState(from);
@@ -362,6 +382,9 @@ export class ViewController {
     const from = this.currentPose();
     if (this.currentMode === 'overview') {
       this.overview.focusOn(point);
+      if (startZoom !== null) {
+        this.overview.distance = THREE.MathUtils.clamp(startZoom, this.overview.minDistance, this.overview.maxDistance);
+      }
       this.overview.pan(this.shiftOnScreen(this.overview.distance), 0);
       this.flyTo(from, this.overview.pose(), true);
       return;
