@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
 import type { Activity } from '../src/agents/ActivityAnimations.js';
 import type { AgentExtras } from '../src/agents/AgentData.js';
+import type { RoomKind } from '../src/addons/building/rooms.js';
 
 // Furniture paints toon gradients on a canvas; signs need a document.
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
@@ -141,6 +142,22 @@ test('the real slots have only these door positions', async () => {
 
 test('no office piece stands on a queue spot, in the door path or in the far wall door, at every real door position', () => {
   for (const doorAlong of REAL_DOOR_POSITIONS) assertPathsClear('office', doorAlong);
+});
+
+/** Every room kind keeps the far-wall gap clear: an outer room's door may open there. */
+function assertFarWallDoorClear(kind: RoomKind, doorAlong: number) {
+  const plan = roomFurnishing(kind, { doorAlong });
+  for (const placement of plan.pieces.filter(standsOnFloor)) {
+    const box = footprint(placement);
+    const name = `${kind} ${placement.piece.name} at (${placement.a}, ${placement.d})`;
+    assert.ok(!hitsRect(box, -DOOR_WIDTH / 2, DOOR_WIDTH / 2, ROOM_SIZE - 1, ROOM_SIZE), `${name} blocks the far wall door`);
+  }
+}
+
+test('no piece in any room kind blocks the far-wall door gap an outer room may need', () => {
+  for (const kind of ['office', 'desks', 'planning', 'library', 'lab', 'review', 'lounge'] as const) {
+    for (const doorAlong of REAL_DOOR_POSITIONS) assertFarWallDoorClear(kind, doorAlong);
+  }
 });
 
 test('the lounge corner of an office goes to the side away from the door', () => {
