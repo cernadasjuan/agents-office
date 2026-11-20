@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 
-/** The draw-call budget per frame at the real size (25 rooms, 40 agents). */
-export const DRAW_CALL_BUDGET = 500;
+/**
+ * The draw-call budget per frame at the real size (25 rooms, 40 agents).
+ * Lowered from 500 (#96, #98 headroom): a hat casts no shadow (plugins/bmad/hats.ts),
+ * which drops the worst case (200 GitHub cards) from 466 to 364. 430 keeps real
+ * headroom above that instead of a cap the real size barely clears.
+ */
+export const DRAW_CALL_BUDGET = 430;
 
 export interface DrawCallCount {
   /** Meshes the camera pass draws (an instanced or merged mesh is one call). */

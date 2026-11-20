@@ -12,6 +12,10 @@ import { createMeetingTable } from '../furniture/MeetingTable.js';
 import { createSofa } from '../furniture/Sofa.js';
 import { createWaterCooler } from '../furniture/WaterCooler.js';
 import { createPrinter } from '../furniture/Printer.js';
+import { createBarStool, createFridge, createKitchenCounter } from '../furniture/Kitchen.js';
+import { createFoosballTable } from '../furniture/FoosballTable.js';
+import { createAirHockeyTable } from '../furniture/AirHockeyTable.js';
+import { createArcadeCabinet } from '../furniture/ArcadeCabinet.js';
 import { markStatic } from './StaticMerge.js';
 
 /** Scene name of the hall walls group. */
@@ -66,16 +70,19 @@ export function createOffice(scene: THREE.Scene): Map<string, Station> {
     occupied: false,
   });
 
-  // --- Coding Desks (2 rows of 3) ---
+  // --- Coding Desks, in the back corners (issue #121): the center stays open for the kitchen and play zones below ---
+  // Two rows of four, one pair of desks per corner, indexed row-major (desk_0..3 the back row,
+  // desk_4..7 the row in front of it) so a same-column desk (desk_3 and desk_7, 3 m apart)
+  // stays a near neighbor and a same-row desk across the room (desk_3 and desk_4) stays far.
   const deskPositions: [number, number][] = [
-    [-8, -5],
-    [-3, -5],
-    [3, -5],
-    [8, -5],
-    [-8, -2],
-    [-3, -2],
-    [3, -2],
-    [8, -2],
+    [-12, -10],
+    [-9, -10],
+    [9, -10],
+    [12, -10],
+    [-12, -7],
+    [-9, -7],
+    [9, -7],
+    [12, -7],
   ];
   deskPositions.forEach(([x, z], i) => {
     const desk = createDesk(true);
@@ -88,6 +95,36 @@ export function createOffice(scene: THREE.Scene): Map<string, Station> {
       occupied: false,
     });
   });
+
+  // --- Kitchen zone (issue #122), in the center the desks left: a counter, a fridge, two stools ---
+  const kitchenCounter = createKitchenCounter();
+  kitchenCounter.position.set(0, 0, -9.3);
+  hall.add(kitchenCounter);
+
+  const fridge = createFridge();
+  fridge.position.set(-2.6, 0, -9.3);
+  hall.add(fridge);
+
+  const stoolPositions: [number, number][] = [[-0.5, -8], [0.5, -8]];
+  stoolPositions.forEach(([x, z]) => {
+    const stool = createBarStool();
+    stool.position.set(x, 0, z);
+    hall.add(stool);
+  });
+
+  // --- Play zone (issue #122): a foosball table, an air hockey table and a video game cabinet ---
+  const foosball = createFoosballTable();
+  foosball.position.set(-2.5, 0, -1);
+  hall.add(foosball);
+
+  const airHockey = createAirHockeyTable();
+  airHockey.position.set(2.5, 0, -1);
+  hall.add(airHockey);
+
+  const arcadeCabinet = createArcadeCabinet();
+  arcadeCabinet.position.set(0, 0, -3.2);
+  arcadeCabinet.rotation.y = Math.PI;
+  hall.add(arcadeCabinet);
 
   // --- Bookshelves (Researching) — along left wall ---
   const bookshelf1 = createBookshelf();
