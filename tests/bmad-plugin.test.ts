@@ -66,6 +66,18 @@ test('personas loaded with bmad.py agent become badges in first-loaded order', a
   assert.deepEqual(await badgesFor({ transcriptPath }), ['ux-designer', 'architect', 'debugger']);
 });
 
+test('bmad.py agent librarian (or its alias prospero) resolves to the librarian badge (issue #149)', async () => {
+  const transcriptPath = writeTranscript('s.jsonl', [
+    toolUse('Bash', { command: 'python3 ~/.claude-shared-config/bmad/bmad.py agent librarian' }),
+  ]);
+  assert.deepEqual(await badgesFor({ transcriptPath }), ['librarian']);
+
+  const transcriptPath2 = writeTranscript('s2.jsonl', [
+    toolUse('Bash', { command: 'python3 ~/.claude-shared-config/bmad/bmad.py agent Prospero' }),
+  ]);
+  assert.deepEqual(await badgesFor({ transcriptPath: transcriptPath2 }), ['librarian']);
+});
+
 test('text that mentions bmad.py does not count, only tool calls do', async () => {
   const transcriptPath = writeTranscript('s.jsonl', [
     userText('Play Sally: run python3 ~/.claude-shared-config/bmad/bmad.py agent sally first'),
