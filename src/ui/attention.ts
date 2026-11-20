@@ -141,3 +141,10 @@ export function formatWait(minutes: number): string {
   if (minutes < 48 * 60) return `${Math.floor(minutes / 60)} h`;
   return `${Math.floor(minutes / (24 * 60))} d`;
 }
+
+/** The same bands as `formatWait`, without the space, for a label too small for the full phrase. */
+export function formatWaitShort(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)}h`;
+  return `${Math.floor(minutes / (24 * 60))}d`;
+}
