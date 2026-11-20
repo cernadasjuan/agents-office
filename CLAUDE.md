@@ -16,6 +16,36 @@ pnpm test       # node:test suites in tests/ (tsx)
 
 Read `docs/design-principles.md` before any feature change: it lists the design rules (P1 to P15, S1 to S8) and the rules for every change. `docs/roadmap.md` holds the tiers, the planned slices and the conflict matrix.
 
+## macOS launcher (fork tooling, scripts/launcher/)
+
+`scripts/launcher/agents-office-launcher.mjs` is the entry point a generated `Agents
+Office.app` bundle execs (built by `scripts/build-launcher-app.sh`, installed by
+`scripts/install-launcher.sh`; see the README's "macOS launcher" section for the command and
+what it does). Plain `.mjs`, not `.ts`: the warm-start path has a 1 s budget and skips the tsx
+loader. `scripts/launcher/config.mjs` and `detect.mjs` hold the pure, unit-tested logic
+(`tests/launcher-config.test.ts`, `tests/launcher-detect.test.ts`); `allowJs` is on in
+`tsconfig.json` so `typecheck` still covers the tests that import them. This tooling is outside
+`package.json`'s `files`, so it never ships in the published npm package — the mitigation for
+bending P6 (no daemon) in this fork only.
+
+`detect.mjs`'s `probeOffice` GETs the office root `/`, not `/api/agents` (that endpoint can
+take over 400 ms under herdr enrichment, which could misread a live, slow office as down). It
+returns `{ reachable, isOffice }`: `isOffice` is true only when the answer carries this
+office's own `index.html` markers (`isOfficeHtml`, the `<title>` and the `#ui-panel` id), so a
+different app already holding the port never gets treated as a warm start. The launcher spawns
+`vite` only when `reachable` is false; a reachable-but-not-office answer logs it and shows a
+macOS notification (`osascript -e 'display notification ...'`) instead of opening a browser or
+a second server. `readConfigEnv` requires the config file to be a plain regular file
+(`lstatSync`, so a symlink is rejected too) under `CONFIG_MAX_BYTES` (64 KB); anything else
+reads as no overrides rather than stalling the launcher. `build-launcher-app.sh` never writes
+the repo path into the generated shell source: it `printf`s it to
+`Contents/Resources/repo-root.txt` and the generated script (now a fully quoted heredoc, the
+same bytes for any `repo_root`) reads it back with `cat` into a quoted variable at run time —
+`tests/launcher-build.test.ts` builds the app with a repo root holding a space, a quote and a
+`$` and asserts the path reaches disk unchanged and the payload never runs. `find_node` in the
+generated script also resolves an nvm default alias (one level of indirection, then the
+highest installed version by `sort -V`) before falling back to the first match.
+
 ## Architecture
 
 3D office visualization (Three.js + Vite) that shows running Claude Code agents as animated stick figures. Each agent's activity is detected from real session data and mapped to a physical station in the office.
@@ -158,6 +188,8 @@ Subagents (spawned via the Agent tool) are detected only from the parent's own `
 ### Camera
 
 Three modes, owned by `src/scene/ViewController.ts`. The start view: `#view=overview|first-person|iso`, then the last view saved in the browser (`agents-office.view`, `ViewMemory.ts`), then `defaultViewFor(layout)`; main.ts passes it as the `view` option, and the `modeChanged` option saves each change and writes `#view-status` in the panel header (`viewStatusText`). First person: pointer lock + WASD free camera (`FreeCamera.ts`), Shift for speed, no bounding box (only `MIN_EYE_HEIGHT` above the floor), no wall collision. Fly-to in first person: `focusPosition` keeps the camera inside the floor box of the figure's room (`floorUnder(scene, point)`, the smallest `userData.floor` object under the figure), so it never ends behind or inside a wall; too close to the figure, it backs off toward the room center. The ceiling (`userData.ceiling`, marked `dynamic`, so not merged) hides through `applyCeilingCut` in the frame loop when the camera is above `CEILING_HEIGHT` (6 m) or in the overview. Key O switches to the overview (`OverviewCamera.ts`): a fixed angle from above, mouse wheel to zoom, drag or WASD to pan. The overview frames the box from `setOverviewBounds(box)` when a layout sets one, else the union of every object with `userData.floor`, else the fixed room. A layout that adds floor outside the room marks it with `userData.floor` or calls `setOverviewBounds`. Objects with `userData.overviewHidden` (the front and left walls, the ceiling lamps) are hidden while the overview is on. The building walls drop in the overview through cutaway zones (see Rendering budget, Cutaway); the activity layout has none. `#view=overview` starts in the overview. Key I toggles the isometric view (`IsometricCamera.ts`, `#view=iso`, saved as `isometric`) and back to the mode before it; key O from it goes to the overview. It draws through its own `THREE.OrthographicCamera`: `ViewController.activeCamera` returns it in that mode, and main.ts passes `activeCamera` to `FrameLoop` (render, animation sleep, ceiling, label renderer) and `LabelDetailController` (hover raycast); without the option both use `camera` as before. `IsometricController` keeps a floor target and `halfHeight` (the zoom): `frame` fits every corner of `overviewBounds`, the wheel zooms, a drag keeps the floor point under the pointer, a selection eases target and zoom (`IsometricTween`) and pans by the card shift in pixels. `applyTo` puts the camera at `equivalentDistance(fov)` (the overview distance with the same screen size) with a near plane behind it, so `zoomDistance`, the label and sign thresholds, the room label size and animation sleep read the isometric zoom like the overview distance. `isViewFromAbove(mode)` (overview or isometric) drives the cutaway, the ceiling, the near-wall hiding, the render quality and the label rules. Entering or leaving the isometric view cuts (no flight), because the camera changes kind.
+
+**Zoom toward the cursor (issue #87):** `ViewController`'s wheel handler no longer calls `zoom()` directly. It turns the pointer position into NDC and calls `zoomTowardCursor` (`OverviewCamera.ts`, `IsometricCamera.ts`): a pure function that reads the floor point (y = 0) under the cursor through `floorPointUnderCursor` before the zoom, applies the existing clamped `zoom()`, reads the floor point again, then shifts `target` by the difference through `shiftTarget` (the same x/z clamp as `pan`). This is exact, not an approximation: both cameras keep a fixed forward/right/up axis set as distance (overview) or `halfHeight` (isometric) changes, so a `target` shift of `(dx, 0, dz)` moves the floor intersection by exactly `(dx, 0, dz)` too (the camera position shifts by the same amount; the ray direction never changes). `floorPointUnderCursor` and `zoomTowardCursor` take no camera object and no scene, so the unit tests (`tests/overview-camera.test.ts`, `tests/isometric-view.test.ts`) check the projected NDC directly, with no DOM, canvas or render.
 
 ### Selection
 
