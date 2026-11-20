@@ -7,6 +7,7 @@ import { bmadHats } from '../plugins/bmad/client.js';
 import { GithubOfficeExtension } from '../plugins/github/client.js';
 import { setFreeCameraLook } from '../src/scene/FreeCamera.js';
 import { frameForBounds, overviewBounds, overviewDirection } from '../src/scene/OverviewCamera.js';
+import { IsometricController } from '../src/scene/IsometricCamera.js';
 
 /**
  * Gabriel's real size: the hall, 16 building rooms, 9 mission rooms (one locked)
@@ -58,7 +59,7 @@ export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManag
 }
 
 /** The two cameras the browser starts with: first person at its start pose, and the overview of the whole building. */
-export function realSizeCameras(scene: THREE.Scene, aspect = 1280 / 800): { firstPerson: THREE.PerspectiveCamera; overview: THREE.PerspectiveCamera } {
+export function realSizeCameras(scene: THREE.Scene, aspect = 1280 / 800): { firstPerson: THREE.PerspectiveCamera; overview: THREE.PerspectiveCamera; isometric: THREE.OrthographicCamera } {
   const firstPerson = new THREE.PerspectiveCamera(60, aspect, 0.1, 100);
   firstPerson.position.set(-12, 5.5, 11);
   setFreeCameraLook(firstPerson, firstPerson.position, new THREE.Vector3(2, 1, -2));
@@ -66,9 +67,13 @@ export function realSizeCameras(scene: THREE.Scene, aspect = 1280 / 800): { firs
   const frame = frameForBounds(overviewBounds(scene), 60, aspect);
   overview.position.copy(frame.target).addScaledVector(overviewDirection(), frame.distance);
   overview.lookAt(frame.target);
-  for (const camera of [firstPerson, overview]) {
+  const isometric = new THREE.OrthographicCamera();
+  const iso = new IsometricController();
+  iso.frame(overviewBounds(scene), aspect);
+  iso.applyTo(isometric, aspect, 60);
+  for (const camera of [firstPerson, overview, isometric]) {
     camera.updateMatrixWorld();
     camera.updateProjectionMatrix();
   }
-  return { firstPerson, overview };
+  return { firstPerson, overview, isometric };
 }

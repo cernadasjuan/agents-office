@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ViewMode } from '../scene/Selection.js';
+import { isViewFromAbove, type ViewMode } from '../scene/Selection.js';
 import { attentionBand } from './attention.js';
 
 /** `smart` shows full labels only where they matter; `all` is the original behavior. */
@@ -33,7 +33,11 @@ export interface LabelFacts {
 export interface LabelView {
   mode: LabelMode;
   viewMode: ViewMode;
-  /** Overview camera distance; ignored in first person. */
+  /**
+   * Overview camera distance; ignored in first person. The isometric view
+   * reports the overview distance with the same screen size, so one set of
+   * zoom thresholds serves both views.
+   */
   zoomDistance: number;
 }
 
@@ -42,7 +46,7 @@ export function labelDetail(facts: LabelFacts, view: LabelView): LabelLevel {
   if (view.mode === 'all') return 'full';
   const blockedRecently = facts.attention === 'waiting' && attentionBand({ attention: facts.attention, waitMinutes: facts.waitMinutes }) !== 'cold';
   if (blockedRecently || facts.selected || facts.hovered) return 'full';
-  if (view.viewMode === 'overview') return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
+  if (isViewFromAbove(view.viewMode)) return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
   return facts.distance <= FIRST_PERSON_FULL_LABEL_DISTANCE ? 'full' : 'compact';
 }
 
@@ -69,7 +73,7 @@ export interface RoomLabelHookView {
 }
 
 export function roomLabelVisible(facts: RoomLabelFacts): boolean {
-  return facts.viewMode === 'overview' || !facts.cameraInside;
+  return isViewFromAbove(facts.viewMode) || !facts.cameraInside;
 }
 
 export interface SignFacts {
@@ -88,7 +92,7 @@ export interface SignFacts {
 export function signVisible(facts: SignFacts, view: LabelView): boolean {
   if (view.mode === 'all' || facts.hovered) return true;
   if (facts.hoverOnly) return false;
-  if (view.viewMode === 'overview') return view.zoomDistance <= OVERVIEW_SIGN_ZOOM;
+  if (isViewFromAbove(view.viewMode)) return view.zoomDistance <= OVERVIEW_SIGN_ZOOM;
   return facts.distance <= FIRST_PERSON_SIGN_DISTANCE;
 }
 
@@ -132,6 +136,8 @@ export interface LabelAgent {
 export interface LabelDetailOptions {
   agents: () => LabelAgent[];
   camera: THREE.Camera;
+  /** The camera that draws now (the isometric view uses an orthographic camera). Default: `camera`. */
+  activeCamera?: () => THREE.Camera;
   canvas: HTMLCanvasElement;
   /** Where key presses arrive (the window). */
   keys: Pick<Window, 'addEventListener'>;
@@ -195,7 +201,7 @@ export class LabelDetailController {
 
   /** Recompute now, for example after a selection change. */
   refresh(): void {
-    const { camera } = this.options;
+    const camera = this.camera();
     const view: LabelView = { mode: this.currentMode, viewMode: this.options.viewMode(), zoomDistance: this.options.zoomDistance() };
     const selected = this.options.selected();
     const hovered = view.mode === 'smart' ? this.hoveredAgent() : null;
@@ -241,8 +247,9 @@ export class LabelDetailController {
       const roomRect = object.userData.roomRect as DetailSign['rect'] | undefined;
       if (roomRect) {
         const visible = roomLabelVisible({ viewMode: view.viewMode, cameraInside: inRect(this.cameraPosition, roomRect) });
-        const detail = view.mode === 'all' || inRect(pointed, roomRect) || (view.viewMode === 'overview' && view.zoomDistance <= OVERVIEW_SIGN_ZOOM);
-        const key = `${visible}|${view.viewMode}|${detail}|${view.viewMode === 'overview' ? view.zoomDistance.toFixed(2) : ''}`;
+        const fromAbove = isViewFromAbove(view.viewMode);
+        const detail = view.mode === 'all' || inRect(pointed, roomRect) || (fromAbove && view.zoomDistance <= OVERVIEW_SIGN_ZOOM);
+        const key = `${visible}|${view.viewMode}|${detail}|${fromAbove ? view.zoomDistance.toFixed(2) : ''}`;
         if (object.userData.labelViewKey === key) continue;
         object.userData.labelViewKey = key;
         object.visible = visible;
@@ -263,7 +270,8 @@ export class LabelDetailController {
 
   /** The floor point under the pointer (or the screen center while the pointer is locked), or null. */
   private pointedFloor(): THREE.Vector3 | null {
-    const { canvas, camera } = this.options;
+    const { canvas } = this.options;
+    const camera = this.camera();
     const rect = canvas.getBoundingClientRect();
     if (!(rect.width > 0 && rect.height > 0)) return null;
     const locked = canvas.ownerDocument.pointerLockElement === canvas;
@@ -297,6 +305,10 @@ export class LabelDetailController {
     canvas.addEventListener('pointerleave', () => {
       this.pointer = null;
     });
+  }
+
+  private camera(): THREE.Camera {
+    return this.options.activeCamera?.() ?? this.options.camera;
   }
 
   private showMode(): void {

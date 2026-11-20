@@ -42,8 +42,8 @@ const agentManager = new AgentManager(scene, createLayout(layoutId, scene, stati
 // Agent card: opens on a selection, docked left of the triage panel. Plugins add buttons and links.
 const agentCard = new AgentCard(document.body, { anchor: document.getElementById('ui-panel')! });
 
-// Camera mode (key O toggles first person and the overview) and click to select.
-// Start view: `#view=overview|first-person`, then the last view, then the layout default.
+// Camera mode (key O toggles first person and the overview, key I the isometric view) and click to select.
+// Start view: `#view=overview|first-person|iso`, then the last view, then the layout default.
 // `#focus=<agent id>` selects that agent once it appears. The panel header shows the layout and the view.
 const viewStatus = document.getElementById('view-status');
 const view = new ViewController({
@@ -77,6 +77,7 @@ onSelectionChange((agentId) => panel.setSelected(agentId));
 const labelDetail = new LabelDetailController({
   agents: () => agentManager.getAgents(),
   camera,
+  activeCamera: () => view.activeCamera,
   scene,
   changed: () => frameLoop.scheduler.request(),
   canvas: renderer.domElement,
@@ -134,6 +135,7 @@ const stats = isDebugMode(window.location.search) ? new FrameStats() : null;
 const frameLoop = new FrameLoop({
   scene,
   camera,
+  activeCamera: () => view.activeCamera,
   renderer,
   labelRenderer,
   update(elapsed, delta) {
@@ -149,5 +151,5 @@ const frameLoop = new FrameLoop({
   devicePixelRatio: () => window.devicePixelRatio,
   stats,
 });
-if (stats) Object.assign(window, { __officeStats: Object.assign(stats, { drawCalls: () => frameLoop.drawCalls(), cameraPosition: () => camera.position.toArray() }) });
+if (stats) Object.assign(window, { __officeStats: Object.assign(stats, { drawCalls: () => frameLoop.drawCalls(), cameraPosition: () => view.activeCamera.position.toArray(), viewMode: () => view.mode }) });
 frameLoop.start((callback) => requestAnimationFrame(callback));

@@ -3,7 +3,7 @@ import type { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { FigureBatch } from '../characters/FigureBatch.js';
 import { casterSignature, countDrawCalls } from './RenderBudget.js';
 import { FrameStats, RenderScheduler, inShadowReach, renderOnScreenLabels, renderQuality, shadowFrustums } from './RenderScheduler.js';
-import type { ViewMode } from './Selection.js';
+import { isViewFromAbove, type ViewMode } from './Selection.js';
 import { sleepUnseenFigures } from './AnimationSleep.js';
 import { StaticBatch } from './StaticMerge.js';
 import { applyCeilingCut, applyCutaway, findCeilings } from './Cutaway.js';
@@ -11,6 +11,8 @@ import { applyCeilingCut, applyCutaway, findCeilings } from './Cutaway.js';
 export interface FrameLoopOptions {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /** The camera that draws now (the isometric view draws through an orthographic camera). Default: `camera`. */
+  activeCamera?(): THREE.Camera;
   renderer: Pick<THREE.WebGLRenderer, 'render' | 'info' | 'shadowMap' | 'getPixelRatio' | 'setPixelRatio'> & {
     /** The canvas: a WebGL context restore must redraw the shadow maps. */
     domElement?: Pick<HTMLCanvasElement, 'addEventListener'>;
@@ -95,7 +97,7 @@ export class FrameLoop {
   /** One animation frame. Returns true when it rendered. */
   frame(now: number): boolean {
     if (!this.scheduler.shouldTick(now)) return false;
-    const { scene, camera, renderer, stats } = this.options;
+    const { scene, renderer, stats } = this.options;
     if (this.startedAt === null) {
       this.startedAt = now;
       this.lastNow = now;
@@ -105,14 +107,17 @@ export class FrameLoop {
     this.lastNow = now;
     stats?.tick();
 
-    sleepUnseenFigures(camera, this.options.figures());
+    sleepUnseenFigures(this.camera(), this.options.figures());
     this.options.update(elapsed, delta);
+    // The update may switch the view and with it the camera
+    const camera = this.camera();
     const modeChanged = this.applyQuality();
+    const fromAbove = isViewFromAbove(this.options.mode());
     scene.updateMatrixWorld();
     const rebuilt = this.staticBatch.update();
-    const cut = applyCutaway(scene, this.options.mode() === 'overview');
+    const cut = applyCutaway(scene, fromAbove);
     this.ceilings ??= findCeilings(scene);
-    const ceilingChanged = applyCeilingCut(this.ceilings, camera.position.y, this.options.mode() === 'overview');
+    const ceilingChanged = applyCeilingCut(this.ceilings, camera.position.y, fromAbove);
     const figures = this.figureBatch.sync(this.options.figures());
     camera.updateMatrixWorld();
     const cameraMoved = !this.lastView.equals(camera.matrixWorld) || !this.lastProjection.equals(camera.projectionMatrix);
@@ -155,7 +160,11 @@ export class FrameLoop {
 
   /** The static draw-call count of the current scene (debug read). */
   drawCalls() {
-    return countDrawCalls(this.options.scene, this.options.camera);
+    return countDrawCalls(this.options.scene, this.camera());
+  }
+
+  private camera(): THREE.Camera {
+    return this.options.activeCamera?.() ?? this.options.camera;
   }
 
   /**

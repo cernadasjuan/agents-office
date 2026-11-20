@@ -1,4 +1,4 @@
-import type { ViewMode } from './Selection.js';
+import { viewModeFromName, type ViewMode } from './Selection.js';
 
 /** Browser storage key of the last view mode. Browser state, not a config file. */
 export const VIEW_STORAGE_KEY = 'agents-office.view';
@@ -6,13 +6,12 @@ export const VIEW_STORAGE_KEY = 'agents-office.view';
 export const VIEW_NAMES: Record<ViewMode, string> = {
   'first-person': 'First person',
   overview: 'Overview',
+  isometric: 'Isometric',
 };
 
-function asViewMode(value: string | null | undefined): ViewMode | null {
-  return value === 'overview' || value === 'first-person' ? value : null;
-}
+const asViewMode = viewModeFromName;
 
-/** `#view=overview` or `#view=first-person` in the URL hash, else null. */
+/** `#view=overview`, `#view=first-person` or `#view=iso` in the URL hash, else null. */
 export function viewFromHash(hash: string): ViewMode | null {
   return asViewMode(new URLSearchParams(hash.replace(/^#/, '')).get('view'));
 }

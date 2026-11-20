@@ -1,6 +1,6 @@
 // Measure the static weight of the office scene at the real size (25 rooms, 40 agents, hats and cards), without a browser.
 // Run: pnpm measure   (prints the draw calls before and after the static merge and the figure batch;
-// `views` culls like the renderer from the first-person start pose and the overview)
+// `views` culls like the renderer from the first-person start pose, the overview and the isometric view)
 import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
 
@@ -42,7 +42,7 @@ const mergeMs = performance.now() - started;
 new FigureBatch(scene).sync(manager.getAgents().map((managed) => managed.figure.group));
 const after = weight(scene);
 const cameras = realSizeCameras(scene);
-const views = { firstPerson: countDrawCalls(scene, cameras.firstPerson), overview: countDrawCalls(scene, cameras.overview) };
+const views = { firstPerson: countDrawCalls(scene, cameras.firstPerson), overview: countDrawCalls(scene, cameras.overview), isometric: countDrawCalls(scene, cameras.isometric) };
 const size = { rooms: REAL_SIZE.buildingRooms + REAL_SIZE.missionRooms, agents: REAL_SIZE.agents, hatWearers: REAL_SIZE.hatWearers, cardHolders: REAL_SIZE.cardHolders };
 console.log(JSON.stringify({ size, before, after, views, mergeMs: Math.round(mergeMs) }, null, 1));
 dom.window.close();
