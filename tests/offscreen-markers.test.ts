@@ -93,3 +93,51 @@ test('without a canvas size (not yet laid out), refresh is a no-op', (t) => {
   markers.refresh([agentAt('a1', 80, 2, 0, { attention: 'waiting', waitMinutes: 3 })]);
   assert.equal(container.children.length, 0);
 });
+
+test('a marker stops short of the avoided rect (the side panel)', (t) => {
+  const { container, canvas } = installDocument(t);
+  // Up and to the right from this camera: without the avoided rect this lands inside it.
+  const panel = { left: 1280, top: 16, right: 1584, bottom: 500 };
+  const markers = new OffscreenMarkers({ container, canvas, camera, onSelect: () => undefined, avoid: () => panel });
+
+  markers.refresh([agentAt('a1', 30, 30, -20, { attention: 'waiting', waitMinutes: 3 })]);
+  const el = container.firstElementChild as HTMLElement;
+  assert.ok(el);
+  const match = /translate\(([\d.-]+)px,\s*([\d.-]+)px\)/.exec(el.style.transform);
+  assert.ok(match, `expected a translate in the transform, got ${el.style.transform}`);
+  const x = Number(match![1]) + 14;
+  const y = Number(match![2]) + 14;
+  const insidePanel = x >= panel.left && x <= panel.right && y >= panel.top && y <= panel.bottom;
+  assert.equal(insidePanel, false, `expected the marker outside the panel rect, got (${x}, ${y})`);
+});
+
+test('markers close enough to collide merge into one, with a count, and fly to the oldest fresh wait on click', (t) => {
+  const { container, canvas } = installDocument(t);
+  const selected: string[] = [];
+  const markers = new OffscreenMarkers({ container, canvas, camera, onSelect: (id) => selected.push(id) });
+
+  // All three sit far to the right, at nearly the same angle from the camera: they collide on one edge point.
+  markers.refresh([
+    agentAt('short', 80, 2, 0.02, { attention: 'waiting', waitMinutes: 2 }),
+    agentAt('longest', 80, 2, 0.01, { attention: 'waiting', waitMinutes: 12 }),
+    agentAt('mid', 80, 2, 0, { attention: 'waiting', waitMinutes: 5 }),
+  ]);
+
+  assert.equal(container.children.length, 1, 'expected the three colliding markers to merge into one');
+  const el = container.firstElementChild as HTMLElement;
+  assert.equal(el.classList.contains('offscreen-marker-cluster'), true);
+  assert.equal(el.textContent, '3');
+
+  el.click();
+  assert.deepEqual(selected, ['longest'], 'expected the click to fly to the longest-waiting (oldest fresh) agent in the cluster');
+});
+
+test('agents far enough apart on the edge each keep their own marker', (t) => {
+  const { container, canvas } = installDocument(t);
+  const markers = new OffscreenMarkers({ container, canvas, camera, onSelect: () => undefined });
+
+  markers.refresh([agentAt('right', 80, 2, 0, { attention: 'waiting', waitMinutes: 3 }), agentAt('up', 0, 80, 0, { attention: 'waiting', waitMinutes: 3 })]);
+
+  assert.equal(container.children.length, 2);
+  for (const el of [...container.children] as HTMLElement[]) assert.equal(el.classList.contains('offscreen-marker-cluster'), false);
+});

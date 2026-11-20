@@ -302,6 +302,19 @@
       border-left: 14px solid var(--agent-color, #ff7a59);
       filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.6));
     }
+    /* Markers that would collide merge into one, with a count, instead of stacking unclickable arrows. */
+    .offscreen-marker-cluster::before { display: none; }
+    .offscreen-marker-cluster {
+      border-radius: 50%;
+      background: var(--agent-color, #ff7a59);
+      color: #1a1a2e;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 28px;
+      text-align: center;
+      filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.6));
+    }
 
     .agent-card select {
       width: 100%;

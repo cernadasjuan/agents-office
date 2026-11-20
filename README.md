@@ -132,7 +132,7 @@ The chips at the top count each group ("2 need you · 22 your turn · 9 working 
 
 ### Off-screen marker
 
-An arrow at the screen edge points at each agent with a fresh wait (under 15 min) that is outside the frame, in every camera mode (first person, overview, isometric). An aging or cold wait never gets a marker. Click the arrow to fly to the agent and select it, the same as clicking its row in the triage list.
+An arrow at the screen edge points at each agent with a fresh wait (under 15 min) that is outside the frame, in every camera mode (first person, overview, isometric). An aging or cold wait never gets a marker. Click the arrow to fly to the agent and select it, the same as clicking its row in the triage list; this works even when that agent is already selected. Markers never sit under the side panel. Two or more that would land on top of each other merge into one marker with a count; click it to fly to the oldest fresh wait among them.
 
 Without a status in the session file, every agent is in Working or Idle. `?demo=1` in the URL adds the prototype activity menu to each row. It previews an activity until the next update.
 

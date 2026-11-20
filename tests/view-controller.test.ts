@@ -122,6 +122,22 @@ test('selecting in first person flies there and keeps first person', () => {
   assert.ok(camera.position.distanceTo(new THREE.Vector3(4, 0, -3)) < 7);
 });
 
+test('reselect flies the camera to the already-selected agent again (a marker or the top-count click)', () => {
+  const { view, manager, selection, camera } = setup();
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  const figurePosition = manager.getAgents().find((agent) => agent.info.id === 'a')!.figure.group.position;
+  selection.select('a');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+
+  // The player wandered off in first person; the camera no longer sits near the agent.
+  camera.position.set(50, 0, 50);
+  assert.ok(camera.position.distanceTo(figurePosition) > 40, 'the camera should start far from the agent');
+
+  selection.reselect();
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.ok(camera.position.distanceTo(figurePosition) < 7, `expected the camera back near the agent, got ${camera.position.toArray()}`);
+});
+
 test('zoomDistance reports the overview camera distance and follows the wheel', () => {
   const { view } = setup('#view=overview');
   const before = view.zoomDistance;

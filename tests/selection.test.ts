@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
-import { SelectionState, isClick, parseViewHash } from '../src/scene/Selection.js';
+import { SelectionState, isClick, onSelectionChange, parseViewHash, selectOrFly, selectedAgentId } from '../src/scene/Selection.js';
 
 // Toon materials paint a gradient on a canvas at import time.
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
@@ -33,6 +33,40 @@ test('selection changes notify listeners once per change', () => {
 
   assert.deepEqual(seen, ['a', 'b', null]);
   assert.equal(selection.selected, 'c');
+});
+
+test('reselect notifies listeners for the current selection again, with no change', () => {
+  const selection = new SelectionState();
+  const seen: Array<string | null> = [];
+  selection.onChange((id) => seen.push(id));
+  selection.select('a');
+  selection.reselect();
+  selection.reselect();
+  assert.deepEqual(seen, ['a', 'a', 'a']);
+  assert.equal(selection.selected, 'a');
+});
+
+test('reselect on no selection notifies listeners with null, without picking one', () => {
+  const selection = new SelectionState();
+  const seen: Array<string | null> = [];
+  selection.onChange((id) => seen.push(id));
+  selection.reselect();
+  assert.deepEqual(seen, [null]);
+  assert.equal(selection.selected, null);
+});
+
+test('selectOrFly selects a new agent normally, but re-notifies for an agent already selected (so a marker click still flies there)', () => {
+  const seen: Array<string | null> = [];
+  const stop = onSelectionChange((id) => seen.push(id));
+  try {
+    selectOrFly('x');
+    selectOrFly('x');
+    selectOrFly('y');
+    assert.deepEqual(seen, ['x', 'x', 'y']);
+    assert.equal(selectedAgentId(), 'y');
+  } finally {
+    stop();
+  }
 });
 
 test('a failing listener does not stop the others', (t) => {

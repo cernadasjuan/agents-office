@@ -15,17 +15,26 @@ export class SelectionState {
   select(agentId: string | null): void {
     if (agentId === this.current) return;
     this.current = agentId;
-    for (const listener of [...this.listeners]) {
-      try {
-        listener(agentId);
-      } catch (error) {
-        console.debug('selection listener failed', error);
-      }
-    }
+    this.notify();
+  }
+
+  /** Tell listeners about the current selection again, even though it has not changed. A marker or the top-count chip wants this: the camera still flies there, where a plain `select` of the same id would do nothing. */
+  reselect(): void {
+    this.notify();
   }
 
   clear(): void {
     this.select(null);
+  }
+
+  private notify(): void {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(this.current);
+      } catch (error) {
+        console.debug('selection listener failed', error);
+      }
+    }
   }
 
   /** Drop the selection when the selected agent is no longer present. */
@@ -50,6 +59,18 @@ export function officeSelection(): SelectionState {
 
 export function selectAgent(agentId: string | null): void {
   shared.select(agentId);
+}
+
+/**
+ * Select the agent, or if it is already selected, tell listeners again (so
+ * the camera still flies there). Used by the off-screen marker and the
+ * top-count chip: both expect a click to recenter on the agent even when it
+ * is the one already selected. Other callers (a row in the triage list, a
+ * figure click) keep the plain `selectAgent` same-id no-op.
+ */
+export function selectOrFly(agentId: string): void {
+  if (shared.selected === agentId) shared.reselect();
+  else shared.select(agentId);
 }
 
 export function clearSelection(): void {
