@@ -70,7 +70,7 @@ test('an agent never wears more than 5 cards, and a removed agent drops its card
   assert.equal(cardCount(extension, a), 0);
 });
 
-const world = (boards: World['boards']): World => ({ plugins: ['github'], rooms: [], boards });
+const world = (boards: World['boards']): World => ({ plugins: ['github'], rooms: [], boards, jiraTickets: [] });
 const board = (title: string) => ({ id: `id-${title}`, title, columns: [
   { name: 'To do', cards: [{ number: 1, title: 'First' }] },
   { name: 'In progress', cards: [{ number: 38, title: 'Kanban' }] },
