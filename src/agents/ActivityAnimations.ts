@@ -191,12 +191,11 @@ function animateActivityPose(joints: Joints, activity: Activity, elapsed: number
   }
 }
 
-// --- IDLE: Holding coffee cup, subtle sway ---
-function animateIdle(j: Joints, t: number, dt: number): void {
+// --- IDLE: Holding coffee cup, holds still (#163: no continuous sway) ---
+function animateIdle(j: Joints, _t: number, dt: number): void {
   applyStandingBase(j, dt);
 
-  const sway = Math.sin(t * 0.8) * 0.03;
-  j.body.rotation.z = approach(j.body.rotation.z, sway, dt);
+  j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
 
   j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -1.2, dt);
   j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -1.8, dt);
@@ -204,7 +203,7 @@ function animateIdle(j: Joints, t: number, dt: number): void {
   j.leftUpperArm.rotation.x = approach(j.leftUpperArm.rotation.x, 0.1, dt);
   j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -0.1, dt);
 
-  j.neck.rotation.z = approach(j.neck.rotation.z, Math.sin(t * 0.5) * 0.05, dt);
+  j.neck.rotation.z = approach(j.neck.rotation.z, 0, dt);
 }
 
 // --- PLANNING: Writing on whiteboard ---
@@ -273,10 +272,10 @@ function animateTesting(j: Joints, t: number, dt: number): void {
   j.rightUpperArm.rotation.z = approach(j.rightUpperArm.rotation.z, -0.5, dt);
   j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -1.5, dt);
 
-  j.body.rotation.z = approach(j.body.rotation.z, Math.sin(t * 0.4) * 0.03, dt);
+  j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
 
   j.neck.rotation.x = approach(j.neck.rotation.x, -0.1, dt);
-  j.neck.rotation.z = approach(j.neck.rotation.z, Math.sin(t * 0.3) * 0.05, dt);
+  j.neck.rotation.z = approach(j.neck.rotation.z, 0, dt);
 }
 
 // --- DEBUGGING: Scratching head, looking at red screen ---
@@ -290,9 +289,9 @@ function animateDebugging(j: Joints, t: number, dt: number): void {
   j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -0.5, dt);
 
   j.neck.rotation.x = approach(j.neck.rotation.x, -0.2, dt);
-  j.neck.rotation.z = approach(j.neck.rotation.z, Math.sin(t * 0.7) * 0.15, dt);
+  j.neck.rotation.z = approach(j.neck.rotation.z, 0, dt);
 
-  j.body.rotation.z = approach(j.body.rotation.z, Math.sin(t * 0.5) * 0.04, dt);
+  j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
 }
 
 // --- REVIEWING: Seated, hand on chin, reading ---
@@ -349,9 +348,9 @@ function animateDeploying(j: Joints, t: number, dt: number): void {
   j.rightLowerLeg.rotation.x = approach(j.rightLowerLeg.rotation.x, jumpPhase * 0.3, dt);
 
   j.neck.rotation.x = approach(j.neck.rotation.x, -0.2, dt);
-  j.neck.rotation.z = approach(j.neck.rotation.z, Math.sin(t * 4) * 0.1, dt);
+  j.neck.rotation.z = approach(j.neck.rotation.z, 0, dt);
 
-  j.body.rotation.z = approach(j.body.rotation.z, Math.sin(t * 3) * 0.05, dt);
+  j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
 }
 
 // --- MEETING: Gesturing, conversing ---
@@ -367,8 +366,8 @@ function animateMeeting(j: Joints, t: number, dt: number): void {
   j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -0.4, dt);
 
   j.neck.rotation.y = approach(j.neck.rotation.y ?? 0, Math.sin(t * 1.2) * 0.2, dt);
-  j.neck.rotation.z = approach(j.neck.rotation.z, Math.sin(t * 1.5) * 0.05, dt);
+  j.neck.rotation.z = approach(j.neck.rotation.z, 0, dt);
   j.neck.rotation.x = approach(j.neck.rotation.x, 0, dt);
 
-  j.body.rotation.z = approach(j.body.rotation.z, Math.sin(t * 0.7) * 0.03, dt);
+  j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
 }
