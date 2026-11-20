@@ -111,22 +111,55 @@ test('drawJiraBoard draws the assignee (issue #145 review)', () => {
   const canvas = dom.window.document.createElement('canvas');
   canvas.width = 640;
   canvas.height = 480;
-  drawJiraBoard(canvas, [ticket('KTP-1', { assignee: 'Gabriel Amyot' })]);
+  // A short status leaves room for the assignee to draw in full; the overflow case (a long
+  // status, priority and assignee together) is covered separately below.
+  drawJiraBoard(canvas, [ticket('KTP-1', { status: 'Open', assignee: 'Gabriel Amyot' })]);
   assert.ok(drawn.some((text) => text.includes('Gabriel Amyot')), 'the assignee is drawn somewhere on the board');
 });
 
-test('a long summary truncates on its own; the status and priority stay fully visible regardless (issue #145 review)', () => {
+test('a long summary truncates on its own; the status stays visible regardless (issue #145 review)', () => {
   drawn.length = 0;
   const canvas = dom.window.document.createElement('canvas');
   canvas.width = 640;
   canvas.height = 480;
   const longSummary = 'A very long ticket summary that would, if drawn together with the status and priority as one string, push them off the edge of the board entirely';
-  drawJiraBoard(canvas, [ticket('KTP-1', { summary: longSummary, status: 'In Progress', priority: 'High', assignee: 'Gabriel Amyot' })]);
+  drawJiraBoard(canvas, [ticket('KTP-1', { summary: longSummary, status: 'Open' })]);
 
-  assert.ok(drawn.some((text) => text.includes('In Progress')), 'the status is drawn in full, not swallowed by the long summary');
-  assert.ok(drawn.some((text) => text.includes('High')), 'the priority is drawn in full too');
-  assert.ok(drawn.some((text) => text.includes('Gabriel Amyot')));
+  assert.ok(drawn.some((text) => text.includes('Open')), 'the status is drawn in full, not swallowed by the long summary');
   // The summary itself is the one thing allowed to truncate.
   assert.equal(drawn.some((text) => text === longSummary), false, 'the full, untruncated summary is not what gets drawn');
   assert.ok(drawn.some((text) => text.includes('…') && text.startsWith('A very long')), 'the summary is cut with an ellipsis');
+});
+
+test('a long status, priority and assignee together never cross the canvas edge; status is the last thing cut (issue #145 review)', () => {
+  drawn.length = 0;
+  const canvas = dom.window.document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  const metaMaxWidth = 222; // metaWidth (230) minus the same 8px margin drawJiraBoard applies
+  drawJiraBoard(canvas, [ticket('KTP-1', { status: 'In Progress', priority: 'High', assignee: 'Gabriel Amyot' })]);
+
+  const metaLine = drawn.find((text) => text.startsWith('(In Progress)'));
+  assert.ok(metaLine, 'the status draws, and leads the metadata line');
+  assert.ok(metaLine!.length * 10 <= metaMaxWidth, 'the drawn metadata text never measures past the column it must stay inside');
+  // Status is first in the joined string, so `fittedText`'s end-cut reaches the lower-priority
+  // priority and assignee segments before it ever touches status: status and priority survive,
+  // the ellipsis shows the cut happened at all.
+  assert.equal(metaLine!.startsWith('(In Progress) · High'), true, 'status and priority survive in full');
+  assert.ok(metaLine!.includes('…'), 'this combination alone is already long enough to need a cut');
+});
+
+test('an even longer assignee is the thing that cuts, never the status (issue #145 review)', () => {
+  drawn.length = 0;
+  const canvas = dom.window.document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  const metaMaxWidth = 222;
+  drawJiraBoard(canvas, [ticket('KTP-1', { status: 'In Progress', priority: 'High', assignee: 'Gabriel Amyot Longname Extra Words' })]);
+
+  const metaLine = drawn.find((text) => text.startsWith('(In Progress)'));
+  assert.ok(metaLine, 'the status still draws');
+  assert.ok(metaLine!.length * 10 <= metaMaxWidth, 'the drawn metadata text never measures past the column it must stay inside');
+  assert.ok(metaLine!.includes('…'), 'the overlong assignee is the thing that gets cut');
+  assert.equal(metaLine!.startsWith('(In Progress) · High'), true, 'status and priority survive in full');
 });

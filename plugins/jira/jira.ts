@@ -205,7 +205,14 @@ export async function fetchJiraTickets(
       debugNote(`the search request answered ${response.status}`);
       return undefined;
     }
-    const parsed = parseJiraSearchPage(await response.json(), credentials.baseUrl);
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      debugNote('the search response body could not be read');
+      return undefined;
+    }
+    const parsed = parseJiraSearchPage(body, credentials.baseUrl);
     if (!parsed) {
       debugNote('the search response had an unexpected shape');
       return undefined;
@@ -239,6 +246,10 @@ export class JiraCache {
     this.entry.fetchedAt = this.now();
     this.entry.inFlight = fetchJiraTickets(this.doFetch, this.credentials)
       .then((tickets) => { if (tickets) this.entry.tickets = tickets; })
+      // `fetchJiraTickets` itself never throws: every failure resolves to `undefined` with
+      // one debug note. This `.catch` is defense in depth, so a future or unforeseen rejection
+      // still falls back to the last good list instead of surfacing past this cache.
+      .catch(() => undefined)
       .finally(() => { this.entry.inFlight = undefined; });
     return this.entry.inFlight;
   }

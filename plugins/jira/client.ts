@@ -55,8 +55,10 @@ export function drawJiraBoard(target: HTMLCanvasElement, tickets: WorldJiraTicke
   const rowHeight = 38;
   const keyX = 16;
   const summaryX = 140;
-  // The status, priority and assignee draw in their own fixed zone, never truncated (issue
-  // #145 review): a long summary must not be able to push the status off the board.
+  // The status, priority and assignee draw in their own fixed zone (issue #145 review): a long
+  // summary must not be able to push the status off the board. Status comes first in the
+  // joined string, so if the zone itself is too narrow, `fittedText`'s own end-cut trims
+  // assignee and priority before it ever reaches status: status is the last thing cut.
   const metaWidth = 230;
   const shown = tickets.slice(0, MAX_ROWS);
   shown.forEach((ticket, row) => {
@@ -70,7 +72,7 @@ export function drawJiraBoard(target: HTMLCanvasElement, tickets: WorldJiraTicke
     const summaryMaxWidth = width - summaryX - metaWidth - 10;
     ctx.fillText(fittedText(ctx, ticket.summary, summaryMaxWidth), summaryX, y + 8);
     const meta = [`(${ticket.status})`, ticket.priority, ticket.assignee].filter((part) => !!part).join(' · ');
-    ctx.fillText(meta, width - metaWidth, y + 8);
+    ctx.fillText(fittedText(ctx, meta, metaWidth - 8), width - metaWidth, y + 8);
   });
   if (tickets.length > shown.length) {
     ctx.fillStyle = '#6b6b6b';

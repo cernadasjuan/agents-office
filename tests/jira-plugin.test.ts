@@ -54,17 +54,22 @@ function issue(key: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
-interface FakeResponse { status: number; body?: unknown }
+interface FakeResponse { status: number; body?: unknown; brokenBody?: boolean }
 
-/** `respond` returns the next response: a plain body (200), a `{status, body}` pair, or undefined (a network failure, no status). */
+/**
+ * `respond` returns the next response: a plain body (200), a `{status, body}` pair, a
+ * `{status, brokenBody: true}` pair (headers arrive fine, but `.json()` itself throws — a
+ * malformed body or a stream that fails mid-read), or undefined (a network failure, no status).
+ */
 function fakeFetch(calls: Array<{ url: string; init: RequestInit }>, respond: () => FakeResponse | unknown | undefined): typeof fetch {
   return (async (input: string | URL | Request, init: RequestInit = {}) => {
     calls.push({ url: String(input), init });
     const result = respond();
     if (result === undefined) throw new Error('network failure');
     if (typeof result === 'object' && result !== null && 'status' in result) {
-      const { status, body } = result as FakeResponse;
-      return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+      const { status, body, brokenBody } = result as FakeResponse;
+      const json = brokenBody ? async () => { throw new SyntaxError('Unexpected token in JSON'); } : async () => body;
+      return { ok: status >= 200 && status < 300, status, json } as Response;
     }
     return { ok: true, status: 200, json: async () => result } as Response;
   }) as typeof fetch;
@@ -242,6 +247,49 @@ test('a 410 (the removed /search endpoint) gives no board, with one debug note a
     assert.deepEqual(projectWorld(await worldParts(plugin), [plugin.name], (raw) => raw).jiraTickets, []);
     assert.equal(debugLines.length, 1, 'exactly one debug note');
     assert.ok(debugLines[0].includes('410'));
+    assert.equal(debugLines[0].includes('super-secret-token-value'), false);
+    assert.equal(debugLines[0].includes('gamyot@beklever.com'), false);
+  } finally {
+    console.debug = originalDebug;
+  }
+});
+
+test('a 200 with a body that cannot be parsed (bad JSON, or a stream failing mid-read) gives no board on a cold start, with one debug note and no secret in it (issue #145 review)', async () => {
+  const debugLines: string[] = [];
+  const debugSpy = (...args: unknown[]) => debugLines.push(args.join(' '));
+  const originalDebug = console.debug;
+  console.debug = debugSpy;
+  try {
+    const plugin = createJiraPlugin({ env: ENV, now: () => NOW, fetch: fakeFetch([], () => ({ status: 200, brokenBody: true })) });
+    assert.deepEqual(projectWorld(await worldParts(plugin), [plugin.name], (raw) => raw).jiraTickets, []);
+    assert.equal(debugLines.length, 1, 'exactly one debug note');
+    assert.equal(debugLines[0].includes('super-secret-token-value'), false);
+    assert.equal(debugLines[0].includes('gamyot@beklever.com'), false);
+  } finally {
+    console.debug = originalDebug;
+  }
+});
+
+test('a body that cannot be parsed keeps the last good list once one exists, with one debug note and no secret (issue #145 review)', async () => {
+  let now = NOW;
+  let broken = false;
+  const debugLines: string[] = [];
+  const debugSpy = (...args: unknown[]) => debugLines.push(args.join(' '));
+  const originalDebug = console.debug;
+  console.debug = debugSpy;
+  try {
+    const plugin = createJiraPlugin({ env: ENV, now: () => now,
+      fetch: fakeFetch([], () => (broken ? { status: 200, brokenBody: true } : searchResponse([issue('KTP-1')]))) });
+
+    assert.equal(projectWorld(await worldParts(plugin), [plugin.name], (raw) => raw).jiraTickets.length, 1, 'a good fetch seeds the cache');
+    assert.equal(debugLines.length, 0);
+
+    broken = true;
+    now += 121_000;
+    const projected = projectWorld(await worldParts(plugin), [plugin.name], (raw) => raw);
+    assert.equal(projected.jiraTickets.length, 1, 'the last good list survives an unparseable body');
+    assert.equal(projected.jiraTickets[0].key, 'KTP-1');
+    assert.equal(debugLines.length, 1, 'exactly one debug note');
     assert.equal(debugLines[0].includes('super-secret-token-value'), false);
     assert.equal(debugLines[0].includes('gamyot@beklever.com'), false);
   } finally {
