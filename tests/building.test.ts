@@ -68,14 +68,33 @@ test('an agent keeps its home desk, makes a trip after the dwell time, and comes
   const { layout, agent, tick } = setup();
   const home = layout.seatFor(agent('a', 'implementing'), null)!;
 
-  assert.equal(layout.seatFor(agent('a', 'planning'), 'implementing'), null, 'no move before the dwell time');
+  assert.equal(layout.seatFor(agent('a', 'researching'), 'implementing'), null, 'no move before the dwell time');
   assert.deepEqual(tick(3000).filter((m) => m.agentId === 'a'), []);
   const trip = tick(1500).find((m) => m.agentId === 'a')!;
-  assert.match(trip.seat.key, /whiteboard|planning/);
+  assert.match(trip.seat.key, /researching/);
 
-  layout.seatFor(agent('a', 'debugging'), 'planning');
+  layout.seatFor(agent('a', 'debugging'), 'researching');
   const back = tick(4500).find((m) => m.agentId === 'a')!;
   assert.equal(back.seat.key, home.key);
+});
+
+test('a planning agent with no war room stays at its desk, not the lounge (#131)', () => {
+  const { layout, agent, tick } = setup();
+  const home = layout.seatFor(agent('a', 'implementing'), null)!;
+  assert.equal(layout.seatFor(agent('a', 'planning'), 'implementing'), null, 'planning is desk work: no move pending');
+  assert.deepEqual(tick(5000).filter((m) => m.agentId === 'a'), [], 'no trip ever starts for planning');
+  assert.equal(layout.seatFor(agent('a', 'debugging'), 'planning'), null, 'still the same desk');
+});
+
+test('the planning RoomKind no longer exists: the building never opens one', () => {
+  const { layout } = setup();
+  assert.ok(!layout.roomKinds.includes('planning' as never), 'no planning room kind is ever recorded');
+});
+
+test('a saved building with an old planning room in storage drops it silently (#131)', () => {
+  const storage = new Map<string, string>([[BUILDING_STORAGE_KEY, '["office","planning","library"]']]);
+  const { layout } = setup(storage);
+  assert.deepEqual(layout.roomKinds, ['office', 'library'], 'the stale planning entry is filtered out, no error');
 });
 
 test('a short tool call does not make the agent walk', () => {
