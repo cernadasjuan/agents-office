@@ -118,13 +118,17 @@ The two thresholds are one constant, `ATTENTION_BANDS` in `src/ui/attention.ts`.
 
 Subagents never ask; their parent does. Without a status in the session file, nothing changes.
 
+### Stuck sessions
+
+A session can stay busy with no progress; today it looks the same as a session that is actually working. A busy session with no transcript write for 60 min shows "Stuck?" in its label and in its panel row, in place of the activity. A long tool call still counts as progress: only the transcript's write time matters, not how long the call runs. The mark clears on its own on the next poll once the session writes again. The threshold is one constant, `STUCK_AFTER_MINUTES` in `src/ui/attention.ts`, next to `ATTENTION_BANDS`. Subagents never get this mark; their parent does. A session without a status, a transcript, or a known write time keeps the old behavior. Like a fresh wait, a stuck mark always gets the full floating label, so it shows even on a figure far from the camera and not selected.
+
 ### Triage list
 
 The side panel lists the agents by what you must do:
 
 1. **Needs you:** blocked agents, fresh waits first, then aging waits, the longest wait first inside each band. Each row shows the name, the wait ("12 min") and the activity.
 2. **Your turn:** agents that wait for your next prompt, in the same order. The group starts collapsed when it has more than 5 agents.
-3. **Working:** busy agents. Subagents are indented under their parent.
+3. **Working:** busy agents. Subagents are indented under their parent. A stuck one (no transcript write for 60 min) reads "Stuck?" instead of its activity.
 4. **Idle:** the rest. The group starts collapsed.
 5. **Cold:** blocked or your-turn agents that waited 24 h or more, the longest wait first. The group starts collapsed and shows its count, so a cold wait never vanishes.
 
@@ -143,7 +147,7 @@ The panel tells you how fresh its data is:
 - After 2 failed polls in a row (no answer, an HTTP error or bad JSON), the footer turns amber and adds "retrying". After 5, it turns red and says "Server not reachable". The scene keeps the last known agents. The next good answer clears the warning.
 - A subagent at rest gave its final answer, so its label reads "Done", not "Taking a break". A main session at rest keeps "Taking a break".
 
-The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, the attention bands, the "Done" label, the rooms (building layout only) and the keys. Beds, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it.
+The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, the attention bands, the "Done" label, the "Stuck?" mark, the rooms (building layout only) and the keys. Beds, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it.
 
 ### Location: stations
 

@@ -57,6 +57,7 @@ export class AgentManager {
     this.goToSeat(managed, this.layout.seatFor(info, null), true);
     figure.setActivity(info.activity);
     figure.setAttention(info.extras?.attention, info.extras?.waitMinutes);
+    figure.setStuck(info.extras?.stuck === true);
     return figure;
   }
 
@@ -79,6 +80,7 @@ export class AgentManager {
     managed.figure.setSubagent(extras?.parentId !== undefined);
     managed.figure.setTag(extras?.provider);
     managed.figure.setAttention(extras?.attention, extras?.waitMinutes);
+    managed.figure.setStuck(extras?.stuck === true);
     const seat = this.layout.seatFor(managed.info, managed.info.activity);
     if (seat) this.goToSeat(managed, seat, false);
   }
