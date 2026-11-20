@@ -245,6 +245,31 @@ test('a waiting agent still goes to the user office before its war room', () => 
   assert.match(seat.key, /^room0_queue_/);
 });
 
+test('a war room\'s furniture grows with the agents actually seated in it (issue #125)', () => {
+  const { layout, agent, scene, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const warRoom = scene.getObjectByName('mission-room-0')!;
+  const pieceCount = (name: string) => {
+    let n = 0;
+    warRoom.traverse((o) => { if (o.userData.piece === name) n++; });
+    return n;
+  };
+  assert.equal(pieceCount('desk') + pieceCount('debugStation'), 0, 'no one works there yet');
+
+  layout.seatFor(agent('a', 'implementing', { room: 'room-1' }), null);
+  layout.seatFor(agent('b', 'implementing', { room: 'room-1' }), null);
+  layout.seatFor(agent('c', 'debugging', { room: 'room-1' }), null);
+  tick(0);
+  assert.equal(pieceCount('desk'), 2);
+  assert.equal(pieceCount('debugStation'), 1);
+
+  // The debugger leaves; the furniture stays at its peak
+  layout.seatFor(agent('c', 'idle', { room: 'room-1' }), 'debugging');
+  tick(0);
+  assert.equal(pieceCount('desk'), 2);
+  assert.equal(pieceCount('debugStation'), 1);
+});
+
 // --- Library and librarians ---
 
 test('research trips go to the Library room before the hall shelves', () => {

@@ -54,7 +54,7 @@ test('tierFor matches the rulebook thresholds', () => {
 
 test('AC1: a new war room has every must-have piece, even with no agents yet', () => {
   const plan = furnishWarRoom('mission-a', ZERO);
-  const names = plan.pieces.map((p) => p.piece.name);
+  const names: string[] = plan.pieces.map((p) => p.piece.name);
   for (const must of ['clock', 'whiteboard', 'bookshelf', 'sofa', 'lowTable']) {
     assert.ok(names.includes(must), `missing ${must}`);
   }

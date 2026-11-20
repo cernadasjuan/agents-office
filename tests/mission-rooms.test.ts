@@ -11,6 +11,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   set: () => true,
 })) as never;
 const { buildMissionRoom, MAX_TOMBSTONES } = await import('../src/addons/building/missionRooms.js');
+const { MAX_DESK_SLOTS } = await import('../src/addons/building/warRoomFurnishing.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -91,4 +92,90 @@ test('every tombstone keeps the same merged toon material: a room full of them s
   }
   // 2 materials (slab, stone) shared by every tombstone, not one fresh material per instance
   assert.equal(materials.size, 2);
+});
+
+// --- Issue #125: war-room furnishing package ---
+
+test('AC1: a new war room has its must-have furniture from the start, built from the library', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const names: string[] = [];
+  missionRoom.group.traverse((o) => { if (typeof o.userData.piece === 'string') names.push(o.userData.piece); });
+  for (const must of ['clock', 'whiteboard', 'bookshelf', 'sofa', 'lowTable']) assert.ok(names.includes(must), `missing ${must}`);
+});
+
+test('desk-like furniture grows with the peak live count and never shrinks back', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const countOf = (name: string) => {
+    let n = 0;
+    missionRoom.group.traverse((o) => { if (o.userData.piece === name) n++; });
+    return n;
+  };
+  assert.equal(countOf('desk') + countOf('debugStation'), 0, 'no agents yet, no desks');
+
+  missionRoom.updateCounts({ deskLike: 3, debugging: 1 });
+  assert.equal(countOf('desk'), 3);
+  assert.equal(countOf('debugStation'), 1);
+
+  // The room empties out: furniture stays at its peak, it does not shrink back
+  missionRoom.updateCounts({ deskLike: 0, debugging: 0 });
+  assert.equal(countOf('desk'), 3);
+  assert.equal(countOf('debugStation'), 1);
+
+  // A later, bigger peak grows it further
+  missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
+  assert.equal(countOf('desk'), 6);
+  assert.equal(countOf('debugStation'), 2);
+});
+
+test('the desk grid never exceeds the room\'s physical fit', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.updateCounts({ deskLike: 20, debugging: 5 });
+  let total = 0;
+  missionRoom.group.traverse((o) => { if (o.userData.piece === 'desk' || o.userData.piece === 'debugStation') total++; });
+  assert.equal(total, MAX_DESK_SLOTS);
+});
+
+test('a peak that does not grow rebuilds nothing: the same furniture objects stay in the scene', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.updateCounts({ deskLike: 3, debugging: 0 });
+  const before: THREE.Object3D[] = [];
+  missionRoom.group.traverse((o) => { if (o.userData.piece === 'desk') before.push(o); });
+  missionRoom.updateCounts({ deskLike: 2, debugging: 0 }); // smaller: no growth, no rebuild
+  const after: THREE.Object3D[] = [];
+  missionRoom.group.traverse((o) => { if (o.userData.piece === 'desk') after.push(o); });
+  assert.deepEqual(after, before);
+});
+
+test('AC5: every war-room rule-set piece is named after a factory in the furniture library, not inline geometry', async () => {
+  const { PIECES } = await import('../src/furniture/index.js');
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
+  const names: string[] = [];
+  missionRoom.group.traverse((o) => { if (typeof o.userData.piece === 'string') names.push(o.userData.piece); });
+  assert.ok(names.length > 0, 'the plan actually placed pieces');
+  for (const name of names) assert.ok(name in PIECES, `${name} is not a furniture library piece`);
+});
+
+// --- Issue #124: mission signs move off the door frame ---
+
+test('AC124: the title and lock signs sit on the far wall, not near the door', async () => {
+  const { missionSlot } = await import('../src/addons/building/missionRooms.js');
+  const { RoomFrame } = await import('../src/addons/building/rooms.js');
+  const { ROOM_SIZE: SIZE } = await import('../src/addons/building/RoomPlanner.js');
+  const missionRoom = buildMissionRoom(room('a', 'locked'), 0);
+  const slot = missionSlot(0);
+  const frame = new RoomFrame(slot.rect, slot.door);
+  const doorPoint = frame.point(0, 0);
+  const farWallPoint = frame.point(0, SIZE);
+
+  const signs: THREE.Object3D[] = [];
+  missionRoom.group.traverse((o) => { if ((o as { element?: HTMLElement }).element) signs.push(o); });
+  const title = signs.find((o) => /^a$/.test((o as { element?: HTMLElement }).element?.textContent ?? ''));
+  const lock = signs.find((o) => /Locked/.test((o as { element?: HTMLElement }).element?.textContent ?? ''));
+  assert.ok(title && lock, 'both signs exist');
+  for (const sign of [title!, lock!]) {
+    const toDoor = sign.position.distanceTo(doorPoint);
+    const toFarWall = sign.position.distanceTo(farWallPoint);
+    assert.ok(toFarWall < toDoor, `sign at ${sign.position.toArray()} is nearer the far wall than the door`);
+  }
 });
