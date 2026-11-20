@@ -116,6 +116,54 @@ test('no floor-standing piece blocks the door path or the far-wall gap, at the f
   }
 });
 
+// --- The real door is off-center for every room in the first ring (both wing columns in
+// missionRooms.ts); the grid must clear the real door lane, not an assumed centered one ---
+
+test('no floor-standing piece blocks an off-center door path, at the full desk cap', () => {
+  for (const doorAlong of [-1, -3, 1, 3]) {
+    const plan = furnishWarRoom(`mission-door-${doorAlong}`, { deskLike: 6, debugging: 2 }, doorAlong);
+    for (const placement of plan.pieces.filter(standsOnFloor)) {
+      const box = footprint(placement);
+      const name = `${placement.piece.name} at (${placement.a.toFixed(2)}, ${placement.d.toFixed(2)}), doorAlong=${doorAlong}`;
+      assert.ok(!hitsRect(box, doorAlong - DOOR_WIDTH / 2, doorAlong + DOOR_WIDTH / 2, 0, 2.5), `${name} blocks the door`);
+    }
+  }
+});
+
+// --- No two floor-standing pieces overlap, at the full desk cap, over many seeds (issue
+// #125 PR 153 review): row spacing vs chair backs, a divider inside a desk, the
+// bookshelf on the tombstone strip. The strip itself (#127) is not rebuilt here; its
+// footprint is the fixed band the real room uses, near the left wall. ---
+
+const TOMBSTONE_STRIP = { minA: -ROOM_SIZE / 2 + 0.2, maxA: -ROOM_SIZE / 2 + 1.75, minD: 1.4, maxD: 11.0 };
+
+interface Rect { minA: number; maxA: number; minD: number; maxD: number }
+
+function overlaps(x: Rect, y: Rect): boolean {
+  return x.minA < y.maxA && y.minA < x.maxA && x.minD < y.maxD && y.minD < x.maxD;
+}
+
+test('no two floor-standing pieces overlap, at the full desk cap, over many seeds and door positions', () => {
+  const failures: string[] = [];
+  for (const doorAlong of [0, -1, -3, 1, 3]) {
+    for (let seed = 0; seed < 40; seed++) {
+      const plan = furnishWarRoom(`mission-overlap-${doorAlong}-${seed}`, { deskLike: 6, debugging: 2 }, doorAlong);
+      const boxes = plan.pieces.filter(standsOnFloor).map((p) => ({ name: p.piece.name, box: footprint(p) }));
+      for (let i = 0; i < boxes.length; i++) {
+        if (overlaps(boxes[i].box, TOMBSTONE_STRIP)) {
+          failures.push(`${boxes[i].name} on the tombstone strip (door=${doorAlong}, seed=${seed})`);
+        }
+        for (let j = i + 1; j < boxes.length; j++) {
+          if (overlaps(boxes[i].box, boxes[j].box)) {
+            failures.push(`${boxes[i].name} overlaps ${boxes[j].name} (door=${doorAlong}, seed=${seed})`);
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
 test('every piece in a war room plan is a factory from the furniture library', () => {
   const plan = furnishWarRoom('mission-check', { deskLike: 6, debugging: 2 });
   for (const placement of plan.pieces) {

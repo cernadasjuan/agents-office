@@ -161,6 +161,34 @@ test('the queue puts fresh waits before aging ones, the oldest first inside each
     ['room0_queue_0', 'room0_queue_1', 'room0_queue_2', 'room0_queue_3']);
 });
 
+test('14 waiting agents fill three rows, longest wait at the front, a new one joins at the back and a leaver closes up the line (#132)', () => {
+  const { layout, agent, tick } = setup();
+  // Longest wait first: a14 waited 14 minutes, a1 waited 1.
+  for (let i = 14; i >= 1; i--) {
+    const id = `a${i}`;
+    layout.seatFor(agent(id, 'implementing'), null);
+    const seat = layout.seatFor(agent(id, 'meeting', { attention: 'waiting', waitMinutes: i }), 'implementing');
+    assert.match(seat!.key, /^room0_queue_/, `${id} goes to the office at once`);
+  }
+  tick(600);
+  const spotOf = (id: string) => (layout as unknown as { agents: Map<string, { seat: string }> }).agents.get(id)!.seat;
+  const seats = Array.from({ length: 14 }, (_, i) => spotOf(`a${14 - i}`));
+  assert.deepEqual(seats, Array.from({ length: 14 }, (_, i) => `room0_queue_${i}`), 'the longest wait (a14) holds queue_0, the front of the line');
+  assert.equal(layout.roomKinds.filter((k) => k === 'office').length, 1, '14 waits still fit in the first office: no second waiting room');
+
+  // A new wait joins at the back.
+  layout.seatFor(agent('new', 'implementing'), null);
+  layout.seatFor(agent('new', 'meeting', { attention: 'waiting', waitMinutes: 0 }), 'implementing');
+  tick(600);
+  assert.equal(spotOf('new'), 'room0_queue_14', 'the newest, shortest wait joins at the back');
+
+  // The front of the line leaves; everyone behind it closes up by one spot.
+  layout.release('a14');
+  tick(600);
+  assert.equal(spotOf('a13'), 'room0_queue_0', 'the next-longest wait now leads the line');
+  assert.equal(spotOf('new'), 'room0_queue_13', 'the line closed up behind the agent that left');
+});
+
 test('a cold wait leaves the queue for the lounge and never joins it', () => {
   const { layout, agent, tick } = setup();
   layout.seatFor(agent('b', 'implementing'), null);
@@ -375,9 +403,10 @@ test('sessions of one workspace get neighboring desks', () => {
 });
 
 test('"next to" is physical distance, not a key suffix: a desk one row over beats one across the aisle (#138 fix)', () => {
-  // The hall desks sit in two rows of four. desk_3 (end of row 1) and desk_4 (start of
-  // row 2) are adjacent keys but 16 m apart; desk_3 and desk_7 are far apart in key order
-  // but stand in the same column, 3 m apart. The real nearest desk must win, not the key.
+  // The hall desks sit in two rows of four, in the back corners since issue #121. desk_3
+  // (end of row 1) and desk_4 (start of row 2) are adjacent keys but about 24 m apart (the
+  // two far corners); desk_3 and desk_7 are far apart in key order but stand in the same
+  // column, 3 m apart. The real nearest desk must win, not the key.
   const { layout, agent } = setup();
   layout.seatFor(agent('n0', 'implementing'), null); // desk_0
   layout.seatFor(agent('n1', 'implementing'), null); // desk_1
@@ -386,7 +415,7 @@ test('"next to" is physical distance, not a key suffix: a desk one row over beat
   assert.equal(a1.key, 'desk_3');
 
   const a2 = layout.seatFor(agent('a2', 'implementing', inWorkspace('Alpha')), null)!;
-  assert.equal(a2.key, 'desk_7', 'the true nearest free desk, not desk_4 (index-adjacent, 16 m away)');
+  assert.equal(a2.key, 'desk_7', 'the true nearest free desk, not desk_4 (index-adjacent, 24 m away)');
 });
 
 test('a stored desks@<workspace> room does not come back after a reload', () => {
