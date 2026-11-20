@@ -181,7 +181,7 @@ Subagents (spawned via the Agent tool) are detected only from the parent's own `
 
 ### Office Layout
 
-30×26 unit room. Left wall: bookshelves (researching). Center: 8 desks in 2 rows (implementing). Right side: test stations, review desks. Back wall: whiteboards (planning). Front-right: meeting table. Front-left: coffee area (idle).
+30×26 unit room. Left wall: bookshelves (researching). The 8 coding desks (implementing) sit in the two back corners, 4 each, since issue #121: the center stays open. Right side: test stations, review desks. Back wall: whiteboards (planning). Front-right: meeting table. Front-left: coffee area (idle). The center the desks left holds the issue #122 break space: a kitchen zone (`src/furniture/Kitchen.ts`: counter, fridge, stools) toward the back, then a play zone (a foosball table, an air hockey table, an arcade cabinet) in front of it, all decoration only, no agent station. Each new piece reuses an existing color and shadow-flag pair already in the hall's static batch where the look allows it (the rule that keeps the draw-call budget from growing with every new piece): see the comments in each factory file for which existing piece it matches.
 
 ### Camera
 

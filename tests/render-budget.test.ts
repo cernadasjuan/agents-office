@@ -102,6 +102,10 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   console.log(`draw calls with 200 cards ${JSON.stringify(after)}`);
   assert.equal(cards.placements.length, 200);
   assert.ok(after.total < DRAW_CALL_BUDGET, `with cards ${JSON.stringify(after)}`);
+  // This is the worst case this suite measures. Before issue #121/#122 (main-room desks
+  // and furniture) it was 466. Each PR gets up to 5 more before it must recover headroom
+  // elsewhere, not just add to the margin left by the last one.
+  assert.ok(after.total <= 471, `worst case ${after.total} exceeds the main-branch baseline (466) + 5`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {
