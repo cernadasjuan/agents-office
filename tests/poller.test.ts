@@ -134,3 +134,17 @@ test('a stuck field in the answer reaches the new agent\'s extras', async () => 
   assert.equal(addAgent.mock.callCount(), 1);
   assert.deepEqual(addAgent.mock.calls[0].arguments[0].extras, { stuck: true });
 });
+
+test('a skills field in the answer reaches the new agent\'s extras (issue #166 review: EXTRA_KEYS must carry it)', async () => {
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
+    { id: 'a', name: 'agent', activity: 'implementing', skills: ['write-a-skill', 'klever-mr'] },
+  ])));
+  const addAgent = mock.fn();
+  const skillsManager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent: () => undefined } as unknown as AgentManager;
+  const poller = new AgentPoller(skillsManager) as unknown as { poll(): Promise<void> };
+
+  await poller.poll();
+
+  assert.equal(addAgent.mock.callCount(), 1);
+  assert.deepEqual(addAgent.mock.calls[0].arguments[0].extras, { skills: ['write-a-skill', 'klever-mr'] });
+});

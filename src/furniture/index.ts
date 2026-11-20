@@ -38,7 +38,7 @@ const piece = <N extends string>(name: N, category: PieceCategory, create: () =>
 export const PIECES = {
   desk: () => piece('desk', 'station', () => createDesk(true)),
   whiteboard: () => piece('whiteboard', 'station', createWhiteboard),
-  bookshelf: () => piece('bookshelf', 'station', createBookshelf),
+  bookshelf: (color?: number | THREE.Color) => piece('bookshelf', 'station', () => createBookshelf(color)),
   testStation: () => piece('testStation', 'station', createTestStation),
   sofa: (color = 0x6a5acd) => piece('sofa', 'station', () => createSofa(color)),
   coffeeMachine: () => piece('coffeeMachine', 'station', createCoffeeMachine),
