@@ -63,6 +63,37 @@ export function frameForBounds(bounds: THREE.Box3, fovDeg: number, aspect: numbe
   return { target, distance: distance * FRAME_MARGIN };
 }
 
+/**
+ * Where the overview camera's ray through a screen point (NDC, -1 to 1) meets the
+ * floor (y = 0). Pure: built from the pose alone, no camera object, no scene.
+ */
+export function floorPointUnderCursor(target: THREE.Vector3, distance: number, fovDeg: number, aspect: number, ndcX: number, ndcY: number): THREE.Vector3 {
+  const back = overviewDirection();
+  const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), back).normalize();
+  const up = new THREE.Vector3().crossVectors(back, right).normalize();
+  const position = target.clone().addScaledVector(back, distance);
+  const tanV = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
+  const tanH = tanV * aspect;
+  const direction = back.clone().negate().addScaledVector(right, ndcX * tanH).addScaledVector(up, ndcY * tanV);
+  if (Math.abs(direction.y) < 1e-9) return position;
+  const t = -position.y / direction.y;
+  return position.addScaledVector(direction, t);
+}
+
+/**
+ * Zooms the overview, then shifts the target so the floor point that was under
+ * the cursor (NDC, -1 to 1) stays there — the wheel zooms where you point
+ * (issue #87, AC1), not toward the room center. Exact: the camera's forward and
+ * up axes do not change with distance, so the floor intersection shifts by
+ * exactly the target's own shift (see the derivation in the PR description).
+ */
+export function zoomTowardCursor(view: OverviewController, ndcX: number, ndcY: number, wheelDelta: number, fovDeg: number, aspect: number): void {
+  const before = floorPointUnderCursor(view.target, view.distance, fovDeg, aspect, ndcX, ndcY);
+  view.zoom(wheelDelta);
+  const after = floorPointUnderCursor(view.target, view.distance, fovDeg, aspect, ndcX, ndcY);
+  view.shiftTarget(before.x - after.x, before.z - after.z);
+}
+
 let explicitBounds: THREE.Box3 | null = null;
 
 /** Let a layout say what the overview must show. Null goes back to the floor objects. */
@@ -146,6 +177,12 @@ export class OverviewController {
     this.target.addScaledVector(rightOnFloor, right).addScaledVector(forwardOnFloor, forward);
     this.target.x = THREE.MathUtils.clamp(this.target.x, this.bounds.min.x, this.bounds.max.x);
     this.target.z = THREE.MathUtils.clamp(this.target.z, this.bounds.min.z, this.bounds.max.z);
+  }
+
+  /** Move the target by a world-space offset on the floor (x, z), clamped like `pan`. */
+  shiftTarget(dx: number, dz: number): void {
+    this.target.x = THREE.MathUtils.clamp(this.target.x + dx, this.bounds.min.x, this.bounds.max.x);
+    this.target.z = THREE.MathUtils.clamp(this.target.z + dz, this.bounds.min.z, this.bounds.max.z);
   }
 
   focusOn(point: THREE.Vector3): void {

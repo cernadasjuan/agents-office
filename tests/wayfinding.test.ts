@@ -16,7 +16,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout } = await import('../src/addons/building/BuildingLayout.js');
 const {
-  buildRoom, roomFloorColor, roomTitle, roomLabelLines, compactLabelLines, roomLabelPose, roomLabelBatchFor, WALL_HEIGHT, FIRST_PERSON_LABEL_Y, FIRST_PERSON_LABEL_HEIGHT,
+  buildRoom, roomFloorColor, roomTitle, roomLabelLines, compactLabelLines, middleEllipsis, roomLabelPose, roomLabelBatchFor, WALL_HEIGHT, FIRST_PERSON_LABEL_Y, FIRST_PERSON_LABEL_HEIGHT,
   OVERVIEW_DOOR_HEIGHT, OVERVIEW_LABEL_BOTTOM,
 } = await import('../src/addons/building/rooms.js');
 const { buildRealSizeOffice } = await import('./real-size-office.js');
@@ -89,9 +89,31 @@ test('label lines: short lines for the default overview, a " · " starts a new l
   assert.deepEqual(roomLabelLines('LIBRARY', 7), ['LIBRARY']);
   assert.deepEqual(roomLabelLines('MISSION ROADMAP FOR THE FORK', 7), ['MISSION', 'ROADMAP…']);
   assert.deepEqual(compactLabelLines('MISSION ROADMAP 3'), ['MISSION', '…3']);
-  assert.deepEqual(compactLabelLines('MEDIA PLAN SALESFORCE PERSISTENCE'), ['MEDIA', '…PERSI…']);
+  assert.deepEqual(compactLabelLines('MEDIA PLAN SALESFORCE PERSISTENCE'), ['MEDIA', '…PER…CE']);
   assert.deepEqual(compactLabelLines('LOUNGE 2'), ['LOUNGE', '2']);
   assert.deepEqual(roomLabelLines('MISSION ROADMAP 3', 16), ['MISSION ROADMAP', '3']);
+});
+
+test('middleEllipsis cuts a too-long word in the middle, not the front', () => {
+  assert.equal(middleEllipsis('LIBRARY', 7), 'LIBRARY', 'fits, unchanged');
+  assert.equal(middleEllipsis('AGENT-83-REVIEW', 7), 'AGE…IEW');
+  assert.equal(middleEllipsis('', 7), '');
+  assert.equal(middleEllipsis('AB', 1), '…', 'no room for even one real character');
+  assert.equal(middleEllipsis('ABCDE', 2), 'A…', 'a one-character budget after the ellipsis keeps only the head');
+});
+
+test('issue #87 AC3: two compact chips that share their first 9 characters still differ', () => {
+  // Both single-token names share "AGENT-83-" would be a contrived example; what matters
+  // in practice is two missions whose compact face used to collide on the old front cut.
+  const reviewFace = compactLabelLines('AGENT 83 BUILD REVIEW');
+  const launcherFace = compactLabelLines('AGENT 83 BUILD LAUNCHER');
+  assert.notDeepEqual(reviewFace, launcherFace);
+
+  // The exact collision from before this fix: two last words sharing a 5-character
+  // prefix used to cut to the identical "…PERSI…" (front-truncated twice).
+  const persistence = compactLabelLines('MEDIA PLAN SALESFORCE PERSISTENCE');
+  const personas = compactLabelLines('MEDIA PLAN SALESFORCE PERSONAS');
+  assert.notDeepEqual(persistence, personas);
 });
 
 test('in the overview a plate grows with the zoom distance but never gets wider than a room', () => {

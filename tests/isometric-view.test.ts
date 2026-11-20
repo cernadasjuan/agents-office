@@ -14,7 +14,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { ViewController } = await import('../src/scene/ViewController.js');
 const { SelectionState, parseViewHash } = await import('../src/scene/Selection.js');
-const { IsometricController, isometricDirection, ISO_ELEVATION } = await import('../src/scene/IsometricCamera.js');
+const { IsometricController, isometricDirection, ISO_ELEVATION, floorPointUnderCursor, zoomTowardCursor } = await import('../src/scene/IsometricCamera.js');
 const { chooseViewMode, viewStatusText } = await import('../src/scene/ViewMemory.js');
 const { labelDetail, signVisible, roomLabelVisible, OVERVIEW_FULL_LABEL_ZOOM } = await import('../src/ui/LabelDetail.js');
 const { renderQuality } = await import('../src/scene/RenderScheduler.js');
@@ -81,6 +81,43 @@ test('the wheel zooms within limits and the zoom reads as an overview-like dista
   assert.ok(iso.halfHeight >= iso.minHalfHeight - 1e-9);
   for (let i = 0; i < 50; i++) iso.zoom(1000);
   assert.ok(iso.halfHeight <= iso.maxHalfHeight + 1e-9);
+});
+
+test('issue #87 AC1: the isometric wheel zooms toward the cursor — the same floor point stays under it after 5 zoom steps', () => {
+  const aspect = 16 / 9;
+  const { iso } = framedCamera(aspect);
+  const ndcX = 0.4;
+  const ndcY = 0.3;
+  const underCursor = floorPointUnderCursor(iso.target, iso.halfHeight, aspect, ndcX, ndcY);
+  const halfHeightBefore = iso.halfHeight;
+
+  // -100 per step: one mouse wheel notch in most browsers.
+  for (let step = 0; step < 5; step++) zoomTowardCursor(iso, ndcX, ndcY, -100, aspect);
+  assert.ok(iso.halfHeight < halfHeightBefore, 'zoomed in');
+
+  const camera = new THREE.OrthographicCamera();
+  iso.applyTo(camera, aspect, 60);
+  camera.updateMatrixWorld();
+  const projected = underCursor.clone().project(camera);
+
+  const viewportHeight = 900;
+  const pxDx = ((projected.x - ndcX) / 2) * (viewportHeight * aspect);
+  const pxDy = ((projected.y - ndcY) / 2) * viewportHeight;
+  assert.ok(Math.hypot(pxDx, pxDy) < 50, `point stayed under the cursor within 50 px (off by ${Math.hypot(pxDx, pxDy)})`);
+});
+
+test('issue #87: the isometric zoom still respects the pan/zoom limits (min/max half-height, floor bounds)', () => {
+  const aspect = 16 / 9;
+  const { iso } = framedCamera(aspect);
+  const framed = iso.halfHeight;
+
+  for (let step = 0; step < 50; step++) zoomTowardCursor(iso, 0.9, 0.9, -100000, aspect);
+  assert.ok(iso.halfHeight >= iso.minHalfHeight - 1e-9);
+
+  const { iso: iso2 } = framedCamera(aspect);
+  for (let step = 0; step < 50; step++) zoomTowardCursor(iso2, -0.9, -0.9, 100000, aspect);
+  assert.ok(iso2.halfHeight <= iso2.maxHalfHeight + 1e-9);
+  assert.ok(iso2.halfHeight <= framed * 1.5 + 1e-6);
 });
 
 test('the same zoom gives the same screen size as the overview at that distance', () => {

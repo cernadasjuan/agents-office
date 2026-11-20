@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
 import { focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
-import { IsometricController, IsometricTween, type IsometricState } from './IsometricCamera.js';
-import { OverviewController, PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
+import { IsometricController, IsometricTween, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
+import { OverviewController, PoseTween, floorUnder, overviewBounds, zoomTowardCursor as zoomOverviewTowardCursor, type CameraPose } from './OverviewCamera.js';
 import { SelectionMarker } from './SelectionMarker.js';
 import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, type ScreenPoint, type SelectionState, type ViewMode } from './Selection.js';
 
@@ -247,8 +247,20 @@ export class ViewController {
       event.preventDefault();
       this.flight = null;
       this.isometricFlight = null;
-      if (this.currentMode === 'isometric') this.isometric.zoom(event.deltaY);
-      else this.overview.zoom(event.deltaY);
+      // Zoom toward the cursor (issue #87, AC1), not toward the room center: the point
+      // under the pointer stays under it. Falls back to a plain zoom while the canvas has
+      // no on-screen size yet (e.g. a test or a hidden tab), when NDC is undefined.
+      const rect = canvas.getBoundingClientRect();
+      const aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
+      if (rect.width === 0 || rect.height === 0) {
+        if (this.currentMode === 'isometric') this.isometric.zoom(event.deltaY);
+        else this.overview.zoom(event.deltaY);
+        return;
+      }
+      const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      if (this.currentMode === 'isometric') zoomIsometricTowardCursor(this.isometric, ndcX, ndcY, event.deltaY, aspect);
+      else zoomOverviewTowardCursor(this.overview, ndcX, ndcY, event.deltaY, this.options.camera.fov, aspect);
     }, { passive: false });
   }
 
