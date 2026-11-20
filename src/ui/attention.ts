@@ -10,7 +10,7 @@ export const ATTENTION_BANDS = { freshUnderMinutes: 15, coldFromMinutes: 24 * 60
 
 export type AttentionBand = 'fresh' | 'aging' | 'cold';
 
-type Wait = Pick<AgentExtras, 'attention' | 'waitMinutes'> | undefined;
+export type Wait = Pick<AgentExtras, 'attention' | 'waitMinutes'> | undefined;
 
 /** The band of a wait, or undefined without attention or without a wait time. */
 export function attentionBand(wait: Wait): AttentionBand | undefined {
@@ -41,6 +41,24 @@ export function countsInTab(wait: Wait): boolean {
 export function compareWaits(a: Wait, b: Wait): number {
   const rank = (wait: Wait) => (attentionBand(wait) === 'aging' ? 1 : attentionBand(wait) === 'cold' ? 2 : 0);
   return rank(a) - rank(b) || (b?.waitMinutes ?? -1) - (a?.waitMinutes ?? -1);
+}
+
+/**
+ * The agent with the longest fresh wait, or undefined without one. Shared by
+ * the off-screen marker and the top-count click (#86).
+ */
+export function oldestFreshWait<T extends { extras?: Wait }>(agents: T[]): T | undefined {
+  let best: T | undefined;
+  let bestMinutes = -1;
+  for (const agent of agents) {
+    if (attentionBand(agent.extras) !== 'fresh') continue;
+    const minutes = agent.extras?.waitMinutes ?? 0;
+    if (minutes > bestMinutes) {
+      best = agent;
+      bestMinutes = minutes;
+    }
+  }
+  return best;
 }
 
 type Queued = { id: string; extras?: Wait };
