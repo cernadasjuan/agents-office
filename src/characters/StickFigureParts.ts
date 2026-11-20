@@ -42,8 +42,9 @@ export function createLimb(length: number, radius = 0.035): THREE.Mesh {
   return part(geometry, getToonMaterial(Colors.limb));
 }
 
-export function createHand(): THREE.Mesh {
-  return part(shared('hand', () => new THREE.BoxGeometry(0.06, 0.06, 0.06)), getToonMaterial(Colors.skin));
+/** `color`: a mission's second color (issue #125 part 3) instead of plain skin, on the same shared box. */
+export function createHand(color: THREE.Color = Colors.skin): THREE.Mesh {
+  return part(shared('hand', () => new THREE.BoxGeometry(0.06, 0.06, 0.06)), getToonMaterial(color));
 }
 
 export function createFoot(): THREE.Mesh {
@@ -72,7 +73,8 @@ export interface Joints {
   rightFoot: THREE.Mesh;
 }
 
-export function buildSkeleton(accentColor: THREE.Color): Joints {
+/** `secondColor`: a mission's second color (issue #125 part 3), worn on the hands; plain skin without one. */
+export function buildSkeleton(accentColor: THREE.Color, secondColor?: THREE.Color): Joints {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
@@ -138,7 +140,7 @@ export function buildSkeleton(accentColor: THREE.Color): Joints {
   const leftForearmMesh = createLimb(0.3);
   leftForearm.add(leftForearmMesh);
 
-  const leftHand = createHand();
+  const leftHand = createHand(secondColor);
   leftHand.position.set(0, -0.3, 0);
   leftForearm.add(leftHand);
 
@@ -154,7 +156,7 @@ export function buildSkeleton(accentColor: THREE.Color): Joints {
   const rightForearmMesh = createLimb(0.3);
   rightForearm.add(rightForearmMesh);
 
-  const rightHand = createHand();
+  const rightHand = createHand(secondColor);
   rightHand.position.set(0, -0.3, 0);
   rightForearm.add(rightHand);
 

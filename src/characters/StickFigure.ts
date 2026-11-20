@@ -35,10 +35,10 @@ export class StickFigure {
   private stuck = false;
   private beacon: THREE.Mesh | null = null;
 
-  constructor(name: string, accentColor: THREE.Color) {
+  constructor(name: string, accentColor: THREE.Color, secondColor?: THREE.Color) {
     this.name = name;
     this.accentColor = accentColor.clone();
-    this.joints = buildSkeleton(accentColor);
+    this.joints = buildSkeleton(accentColor, secondColor);
     this.label = createLabel(name, ACTIVITY_LABELS.idle);
     this.label.element.style.setProperty('--agent-color', `#${this.accentColor.getHexString()}`);
     this.joints.root.add(this.label);
