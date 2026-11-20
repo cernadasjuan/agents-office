@@ -14,6 +14,8 @@ export interface AgentExtras {
   /** Opt-in write actions the server offers for this agent (today only `focus`, from the herdr plugin). */
   actions?: Array<'focus'>;
   role?: string;
+  /** Busy with no transcript write for STUCK_AFTER_MINUTES (src/ui/attention.ts). */
+  stuck?: boolean;
 }
 
 export interface AgentInfo {
@@ -52,13 +54,17 @@ export const ACTIVITY_LABELS: Record<Activity, string> = {
 /** A subagent at rest gave its final answer: it has finished, it is not on a break. */
 export const DONE_LABEL = 'Done';
 
+/** A busy session that has not written its transcript for a long while (src/ui/attention.ts). */
+export const STUCK_LABEL = 'Stuck?';
+
 export function activityLabelFor(activity: Activity, isSubagent: boolean): string {
   if (isSubagent && activity === 'idle') return DONE_LABEL;
   return ACTIVITY_LABELS[activity] ?? activity;
 }
 
-/** The activity text of an agent: "Done" for a finished subagent, else the activity label. */
+/** The activity text of an agent: "Stuck?" when it has gone quiet, "Done" for a finished subagent, else the activity label. */
 export function activityLabel(agent: Pick<AgentInfo, 'activity' | 'extras'>): string {
+  if (agent.extras?.stuck) return STUCK_LABEL;
   return activityLabelFor(agent.activity, agent.extras?.parentId !== undefined);
 }
 

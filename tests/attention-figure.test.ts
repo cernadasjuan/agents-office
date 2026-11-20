@@ -121,3 +121,21 @@ test('a finished subagent figure reads "Done"; a main figure at rest keeps "Taki
   main.setActivity('idle');
   assert.equal(activityText(main), 'Taking a break');
 });
+
+test('a stuck figure reads "Stuck?" instead of its activity, and clears once it recovers', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setActivity('implementing');
+  figure.setStuck(true);
+  assert.equal(activityText(figure), 'Stuck?');
+
+  figure.setStuck(false);
+  assert.equal(activityText(figure), 'Implementing');
+});
+
+test('a wait takes priority over a stuck mark in the label', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setActivity('implementing');
+  figure.setStuck(true);
+  figure.setAttention('waiting', 2);
+  assert.equal(activityText(figure), 'Waiting for you · 2 min');
+});
