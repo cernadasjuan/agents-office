@@ -48,7 +48,7 @@ function setup(hash = '', figureShiftPx?: () => number) {
     ...(figureShiftPx ? { figureShiftPx } : {}),
   });
   const press = (code: string) => dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { code, key: code }));
-  return { view, camera, manager, selection, wall, hint, press };
+  return { view, camera, canvas, manager, selection, wall, hint, press };
 }
 
 test('first person stays the default and the camera does not move by itself', () => {
@@ -174,6 +174,65 @@ for (const hash of ['#view=overview', '']) {
     assert.ok(Math.abs(screenX(camera, target)) < 0.02, `figure at x=${screenX(camera, target)}`);
   });
 }
+
+test('a click that misses every agent closes the open agent card (issue #133)', () => {
+  const { view, manager, selection, canvas } = setup();
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10 }));
+  assert.equal(selection.selected, null);
+});
+
+test('a drag release is never misread as a closing click (issue #133)', () => {
+  const { view, manager, selection, canvas } = setup();
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 400, clientY: 10 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointerup', { clientX: 400, clientY: 10 }));
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 400, clientY: 10 }));
+  assert.equal(selection.selected, 'a', 'the drag release does not clear the card');
+});
+
+test('an out-and-back pan in the overview is never misread as a closing click (issue #133)', () => {
+  const { view, manager, selection, canvas, press } = setup();
+  press('KeyO'); // overview: the only mode that pans on drag
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  // Past the click tolerance, then back near the press point: `isClick` alone compares only
+  // endpoints, so without tracking the drag itself this reads as a miss on release.
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 400, clientY: 10 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 10, clientY: 10 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointerup', { clientX: 10, clientY: 10 }));
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10 }));
+  assert.equal(selection.selected, 'a', 'a pan that returns near the press point still does not clear the card');
+});
+
+test('a click while pointer-locked is for looking, not for closing the card (issue #133)', () => {
+  const { view, manager, selection, canvas } = setup();
+  const document = dom.window.document;
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  Object.defineProperty(document, 'pointerLockElement', { value: canvas, configurable: true });
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10 }));
+  assert.equal(selection.selected, 'a', 'a locked click looks around, it does not close the card');
+  Object.defineProperty(document, 'pointerLockElement', { value: null, configurable: true });
+});
+
+test('a click outside the canvas (the card, a panel, the legend) never reaches the click handler (issue #133)', () => {
+  const { view, manager, selection } = setup();
+  const document = dom.window.document;
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  const card = document.createElement('div');
+  document.body.appendChild(card);
+  card.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10, bubbles: true }));
+  assert.equal(selection.selected, 'a', 'a click on a sibling element never clears the card');
+  card.remove();
+});
 
 test('first person: the card shift turns only the aim; the camera stands where the unshifted flight puts it', () => {
   const fly = (shift?: () => number) => {
