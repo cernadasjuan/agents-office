@@ -14,17 +14,16 @@ import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js
 import { markStatic } from '../../scene/StaticMerge.js';
 
 /**
- * Work that happens at the agent's own desk. Everything else is a trip. Planning
- * stays here too: a war-room agent plans at that room's whiteboard (handled before
- * this check); an agent with no war room has nowhere dedicated to plan, so it stays
- * at its desk instead of a trip that would otherwise fall back to the lounge.
+ * Work that happens at the agent's own desk. Everything else is a trip. Planning,
+ * reviewing and writing docs stay here too: a war-room agent does them at that
+ * room's furniture (handled before this check); an agent with no war room has
+ * nowhere dedicated for them, so it stays at its desk instead of a trip that
+ * would otherwise fall back to the lounge.
  */
-const DESK_WORK = new Set<Activity>(['implementing', 'debugging', 'deploying', 'planning']);
+const DESK_WORK = new Set<Activity>(['implementing', 'debugging', 'deploying', 'planning', 'reviewing', 'writing_docs']);
 const TRIP_STATION: Partial<Record<Activity, string>> = {
   researching: 'researching',
   testing: 'testing',
-  reviewing: 'reviewing',
-  writing_docs: 'reviewing',
   idle: 'idle',
 };
 const ROOM_FOR_STATION: Record<string, RoomKind> = Object.fromEntries(
