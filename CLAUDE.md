@@ -16,6 +16,36 @@ pnpm test       # node:test suites in tests/ (tsx)
 
 Read `docs/design-principles.md` before any feature change: it lists the design rules (P1 to P15, S1 to S8) and the rules for every change. `docs/roadmap.md` holds the tiers, the planned slices and the conflict matrix.
 
+## macOS launcher (fork tooling, scripts/launcher/)
+
+`scripts/launcher/agents-office-launcher.mjs` is the entry point a generated `Agents
+Office.app` bundle execs (built by `scripts/build-launcher-app.sh`, installed by
+`scripts/install-launcher.sh`; see the README's "macOS launcher" section for the command and
+what it does). Plain `.mjs`, not `.ts`: the warm-start path has a 1 s budget and skips the tsx
+loader. `scripts/launcher/config.mjs` and `detect.mjs` hold the pure, unit-tested logic
+(`tests/launcher-config.test.ts`, `tests/launcher-detect.test.ts`); `allowJs` is on in
+`tsconfig.json` so `typecheck` still covers the tests that import them. This tooling is outside
+`package.json`'s `files`, so it never ships in the published npm package — the mitigation for
+bending P6 (no daemon) in this fork only.
+
+`detect.mjs`'s `probeOffice` GETs the office root `/`, not `/api/agents` (that endpoint can
+take over 400 ms under herdr enrichment, which could misread a live, slow office as down). It
+returns `{ reachable, isOffice }`: `isOffice` is true only when the answer carries this
+office's own `index.html` markers (`isOfficeHtml`, the `<title>` and the `#ui-panel` id), so a
+different app already holding the port never gets treated as a warm start. The launcher spawns
+`vite` only when `reachable` is false; a reachable-but-not-office answer logs it and shows a
+macOS notification (`osascript -e 'display notification ...'`) instead of opening a browser or
+a second server. `readConfigEnv` requires the config file to be a plain regular file
+(`lstatSync`, so a symlink is rejected too) under `CONFIG_MAX_BYTES` (64 KB); anything else
+reads as no overrides rather than stalling the launcher. `build-launcher-app.sh` never writes
+the repo path into the generated shell source: it `printf`s it to
+`Contents/Resources/repo-root.txt` and the generated script (now a fully quoted heredoc, the
+same bytes for any `repo_root`) reads it back with `cat` into a quoted variable at run time —
+`tests/launcher-build.test.ts` builds the app with a repo root holding a space, a quote and a
+`$` and asserts the path reaches disk unchanged and the payload never runs. `find_node` in the
+generated script also resolves an nvm default alias (one level of indirection, then the
+highest installed version by `sort -V`) before falling back to the first match.
+
 ## Architecture
 
 3D office visualization (Three.js + Vite) that shows running Claude Code agents as animated stick figures. Each agent's activity is detected from real session data and mapped to a physical station in the office.
@@ -83,7 +113,9 @@ The portrait (`createPortrait`): one sprite with a canvas texture over the offic
 
 ### Mission war rooms (plugins/missions, src/addons/building/missionRooms.ts)
 
-`plugins/missions/index.ts` reads `mission.yaml` records (via the `yaml` package, 1 MB cap, 30 s cache) from `AGENTS_OFFICE_MISSION_ROOTS` and provides world rooms (`mission:<slug>`, open unless done or abandoned) with walls (destination, artifact titles, GitHub members, thread kanban) and `sleepers` (journey sessions). Its enricher scans each session transcript incrementally for tool calls that touch `missions/<slug>/` or a `mission <cmd> <slug>` command and sets `roomKey` for the session and its subagents. The building add-on registers a `building-world-rooms` extension: `BuildingLayout.syncWorldRooms` builds any world room in the mission wing (`missionSlot`: two columns north of the hall back wall, rows further north), updates walls each poll, and seats agents whose `extras.room` matches (queue still wins). Locked rooms close their door and take no agents. Each war room has a door frame and a room label with the mission title (`setRoomLabelText` on update); its CSS2D signs carry `data-sign="mission"` and `userData.detailSign` (title and lock sign by zoom or hover, past sessions by hover only).
+`plugins/missions/index.ts` reads `mission.yaml` records (via the `yaml` package, 1 MB cap, 30 s cache) from `AGENTS_OFFICE_MISSION_ROOTS` and provides world rooms (`mission:<slug>`, open unless done or abandoned) with walls (destination, artifact titles, GitHub members, thread kanban) and `sleepers` (one entry per journey session/night_run, its own id and the day it ended, `MissionSummary.sleepers`). Its enricher scans each session transcript incrementally for tool calls that touch `missions/<slug>/` or a `mission <cmd> <slug>` command and sets `roomKey` for the session and its subagents. The building add-on registers a `building-world-rooms` extension: `BuildingLayout.syncWorldRooms` builds any world room in the mission wing (`missionSlot`: two columns north of the hall back wall, rows further north), updates walls each poll, and seats agents whose `extras.room` matches (queue still wins). Locked rooms close their door and take no agents. Each war room has a door frame and a room label with the mission title (`setRoomLabelText` on update); its CSS2D signs carry `data-sign="mission"` and `userData.detailSign` (title and lock sign by zoom or hover, past-sessions count and each tombstone's end-date sign by hover only).
+
+**Tombstones (issue #127):** one ended session, one tombstone (`PIECES.tombstone()`, `src/furniture/Tombstone.ts`: 2 boxes, 2 shared materials, so a room full of them still merges into about 2 draw calls through `StaticMerge`). `missionRooms.ts` keeps a `Map<string, {object, hoverSign, endedAt}>` per room, keyed by the server's own hashed sleeper id (never by position): a session that returns drops out of `next.sleepers`, so its tombstone (and only its tombstone) is removed by id on the next `update()`; a session that stays keeps its same object, not a rebuild. Shown up to `MAX_TOMBSTONES` (12); the rest add to the existing "N past sessions (+N not shown)" sign. A click or hover opens the tombstone card (`src/ui/TombstoneCard.ts`): same CSS classes and dock spot as the agent card (`#agent-inspector`/`#tombstone-inspector` share their rule in `index.html`), same shared selection (`officeSelection()`) — a tombstone id never matches an agent id, so only one of the two cards ever shows; its code is not reused (`AgentCard`'s fields are agent-shaped: activity, wait, actions, panels). A tombstone is pickable the same way a figure is: `OfficeExtension.pickTargets()` (building.ts's `activeBuilding.tombstonePickTargets()`) adds its targets to `ViewController.pickAt`'s raycast; `pickAgent` (`Selection.ts`) now also enables `STATIC_SOURCE_LAYER`, so a merged tombstone's original, still-positioned source mesh (not reparented by `StaticMerge`) is still hit-testable. No fade-in: the rulebook's draft suggested one, but a transparent material cannot merge, so a fading tombstone would cost its own draw call until the fade finished; skipped in favor of the draw-call budget, which every formal AC does require.
 
 ### Desk pool and workspace grouping
 

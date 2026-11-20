@@ -24,7 +24,8 @@ export interface MissionSummary {
   docs: string[];
   issues: Array<{ number: number; title: string; state: 'open' | 'closed' }>;
   kanban: Array<{ column: string; cards: Array<{ number: number; title: string }> }>;
-  sleepers: number;
+  /** One entry per ended session (a tombstone), its own journey id and the day it ended. */
+  sleepers: Array<{ id: string; endedAt?: string }>;
 }
 
 export function parseRoots(list: string | undefined): string[] {
@@ -77,7 +78,10 @@ export function summarizeMission(slug: string, record: unknown): MissionSummary 
       { column: 'Open', cards: column(['open', 'ready']) },
       { column: 'Done', cards: column(['resolved']) },
     ],
-    sleepers: list(mission.journey).filter((entry) => text(entry.kind) === 'session' || text(entry.kind) === 'night_run').length,
+    sleepers: list(mission.journey)
+      .filter((entry) => text(entry.kind) === 'session' || text(entry.kind) === 'night_run')
+      .map((entry) => ({ id: text(entry.id), ...(text(entry.end) ? { endedAt: text(entry.end) } : {}) }))
+      .filter((entry) => entry.id !== ''),
   };
 }
 

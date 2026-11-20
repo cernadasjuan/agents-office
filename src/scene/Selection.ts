@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FIGURE_PART_LAYER } from '../characters/FigureBatch.js';
+import { STATIC_SOURCE_LAYER } from './StaticMerge.js';
 
 export type SelectionListener = (agentId: string | null) => void;
 
@@ -90,12 +91,17 @@ export interface PickTarget {
   object: THREE.Object3D;
 }
 
-/** The agent whose figure the ray hits first, or null. */
+/**
+ * The target (an agent's figure, or another pickable such as a tombstone) whose
+ * object the ray hits first, or null.
+ */
 export function pickAgent(raycaster: THREE.Raycaster, targets: PickTarget[]): string | null {
   if (targets.length === 0) return null;
-  // Figure parts draw through the figure batch from their own layer; the ray still hits them
+  // Figure parts draw through the figure batch, and static furniture (like a tombstone) through
+  // StaticMerge, each from its own layer; the ray still hits the original, still-positioned source
   const mask = raycaster.layers.mask;
   raycaster.layers.enable(FIGURE_PART_LAYER);
+  raycaster.layers.enable(STATIC_SOURCE_LAYER);
   const owners = new Map<THREE.Object3D, string>(targets.map((target) => [target.object, target.id]));
   let hits: THREE.Intersection[];
   try {

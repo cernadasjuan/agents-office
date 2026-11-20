@@ -59,8 +59,9 @@ const framesIn = (root: THREE.Object3D) => {
   return found;
 };
 
-const missionRoom = (title = 'Office roadmap', sleepers = 3) => ({
-  id: `room-${title}`, kind: 'mission' as const, title, state: 'open' as const, sleepers,
+const missionRoom = (title = 'Office roadmap', sleeperCount = 3) => ({
+  id: `room-${title}`, kind: 'mission' as const, title, state: 'open' as const,
+  sleepers: Array.from({ length: sleeperCount }, (_, i) => ({ id: `tomb-${i}`, endedAt: '2026-11-18' })),
   walls: { statement: 'Ship it', docs: [], issues: [], kanban: [] },
 });
 

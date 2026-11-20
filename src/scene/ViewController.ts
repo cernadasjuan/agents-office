@@ -4,7 +4,7 @@ import { focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter,
 import { IsometricController, IsometricTween, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
 import { OverviewController, PoseTween, floorUnder, overviewBounds, zoomTowardCursor as zoomOverviewTowardCursor, type CameraPose } from './OverviewCamera.js';
 import { SelectionMarker } from './SelectionMarker.js';
-import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, type ScreenPoint, type SelectionState, type ViewMode } from './Selection.js';
+import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, type PickTarget, type ScreenPoint, type SelectionState, type ViewMode } from './Selection.js';
 
 const FLIGHT_SECONDS = 0.6;
 const FIRST_PERSON_FOCUS_DISTANCE = 4;
@@ -26,6 +26,8 @@ export interface ViewControllerOptions {
   canvas: HTMLCanvasElement;
   scene: THREE.Scene;
   agents: () => ManagedAgent[];
+  /** Other pickable things besides an agent's figure (for example a tombstone). */
+  tombstones?: () => PickTarget[];
   /** Where key presses arrive (the window). */
   keys: Pick<Window, 'addEventListener'>;
   hint?: HTMLElement | null;
@@ -145,10 +147,15 @@ export class ViewController {
     this.options.modeChanged?.(mode);
   }
 
-  /** Call after each poll: applies `#focus` once and drops a selection whose agent left. */
+  /**
+   * Call after each poll: applies `#focus` once and drops a selection whose agent left.
+   * A tombstone is not an agent and never appears in `agents`, so its id is kept too: an open
+   * tombstone card must survive the routine 3 s agent poll, not just the next `worldChanged`.
+   */
   agentsChanged(agents: ManagedAgent[]): void {
     const ids = agents.map((agent) => agent.info.id);
-    this.selection.keepOnly(ids);
+    const tombstoneIds = (this.options.tombstones?.() ?? []).map((target) => target.id);
+    this.selection.keepOnly([...ids, ...tombstoneIds]);
     if (this.pendingFocus && ids.includes(this.pendingFocus)) {
       const focus = this.pendingFocus;
       this.pendingFocus = null;
@@ -184,7 +191,7 @@ export class ViewController {
     if (selected) this.marker.follow(selected.figure.group.position, elapsed);
   }
 
-  /** The agent whose figure is under a screen point, or null. */
+  /** The agent figure, or other pickable (a tombstone), under a screen point, or null. */
   pickAt(clientX: number, clientY: number): string | null {
     const rect = this.options.canvas.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
@@ -195,7 +202,11 @@ export class ViewController {
     const camera = this.activeCamera;
     camera.updateMatrixWorld();
     this.raycaster.setFromCamera(ndc, camera);
-    return pickAgent(this.raycaster, this.options.agents().map((agent) => ({ id: agent.info.id, object: agent.figure.group })));
+    const targets = [
+      ...this.options.agents().map((agent) => ({ id: agent.info.id, object: agent.figure.group })),
+      ...(this.options.tombstones?.() ?? []),
+    ];
+    return pickAgent(this.raycaster, targets);
   }
 
   private listen(): void {

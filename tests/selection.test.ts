@@ -13,6 +13,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { StickFigure } = await import('../src/characters/StickFigure.js');
 const { pickAgent } = await import('../src/scene/Selection.js');
+const { STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -119,6 +120,23 @@ test('the URL hash picks the start view and the agent to focus', () => {
   assert.deepEqual(parseViewHash('#view=sideways&focus=a'), { view: 'first-person', focus: 'a' });
   assert.deepEqual(parseViewHash('#focus=<script>'), { view: 'first-person', focus: null });
   assert.deepEqual(parseViewHash(`#focus=${'a'.repeat(200)}`), { view: 'first-person', focus: null });
+});
+
+test('a tombstone (static-merged furniture, source moved to its own layer) is still pickable', () => {
+  // After StaticMerge.rebuild(), a tombstone's source mesh is still the same object at the same
+  // position, just set to STATIC_SOURCE_LAYER so the main camera skips it (the merged mesh draws instead).
+  const group = new THREE.Group();
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5));
+  mesh.layers.set(STATIC_SOURCE_LAYER);
+  group.add(mesh);
+  group.position.set(3, 0, 0);
+  const scene = new THREE.Scene();
+  scene.add(group);
+  scene.updateMatrixWorld(true);
+  const targets = [{ id: 'tomb-1', object: group }];
+
+  const hit = new THREE.Raycaster(new THREE.Vector3(3, 0, 5), new THREE.Vector3(0, 0, -1));
+  assert.equal(pickAgent(hit, targets), 'tomb-1');
 });
 
 test('a pick leaves the raycaster layers as it found them', () => {
