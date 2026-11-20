@@ -1,6 +1,6 @@
 import { ACTIVITIES, ACTIVITY_LABELS, AgentInfo, activityLabel } from '../agents/AgentData.js';
 import type { Activity } from '../agents/ActivityAnimations.js';
-import { attentionBand, compareWaits, formatWait } from './attention.js';
+import { attentionBand, compareWaits, formatWait, queueBucket } from './attention.js';
 
 export type TriageGroupId = 'needs-you' | 'your-turn' | 'working' | 'idle' | 'cold';
 
@@ -55,11 +55,11 @@ export function isDemoMode(search: string): boolean {
   return new URLSearchParams(search).get('demo') === '1';
 }
 
+/** Needs you and Your turn come from `queueBucket`, the same function key N's queue reads, so the two never diverge. */
 export function triageGroup(agent: AgentInfo): TriageGroupId {
-  const attention = agent.extras?.attention;
+  const bucket = queueBucket(agent.extras);
+  if (bucket) return bucket;
   if (attentionBand(agent.extras) === 'cold') return 'cold';
-  if (attention === 'waiting') return 'needs-you';
-  if (attention === 'your-turn') return 'your-turn';
   return agent.activity === 'idle' ? 'idle' : 'working';
 }
 
@@ -74,6 +74,8 @@ export class AgentPanel {
   private selectedId: string | null = null;
   private chipBar: HTMLElement;
   private loading: HTMLElement;
+  private filterInput: HTMLInputElement;
+  private filterText = '';
 
   constructor(
     private list: HTMLElement,
@@ -82,6 +84,15 @@ export class AgentPanel {
     this.loading = document.createElement('div');
     this.loading.className = 'triage-loading';
     this.loading.textContent = 'Loading agents…';
+    this.filterInput = document.createElement('input');
+    this.filterInput.type = 'search';
+    this.filterInput.className = 'triage-filter';
+    this.filterInput.placeholder = 'Filter (/)';
+    this.filterInput.setAttribute('aria-label', 'Filter agents');
+    this.filterInput.addEventListener('input', () => {
+      this.filterText = this.filterInput.value.trim().toLowerCase();
+      this.applyFilter();
+    });
     this.chipBar = document.createElement('div');
     this.chipBar.className = 'triage-chips';
     const body = document.createElement('div');
@@ -92,7 +103,21 @@ export class AgentPanel {
       this.chipBar.appendChild(group.chip);
       body.appendChild(group.section);
     }
-    this.list.replaceChildren(this.loading, this.chipBar, body);
+    this.list.replaceChildren(this.loading, this.filterInput, this.chipBar, body);
+  }
+
+  /** Key / (issue #85): give the filter field the focus, so typing filters the rows at once. */
+  focusFilter(): void {
+    this.filterInput.focus();
+    this.filterInput.select();
+  }
+
+  /** Hide rows whose name and activity do not contain the filter text. Case-insensitive, empty text shows everything. */
+  private applyFilter(): void {
+    for (const row of this.rows.values()) {
+      const haystack = `${row.name.textContent ?? ''} ${row.activity.textContent ?? ''}`.toLowerCase();
+      row.card.hidden = this.filterText.length > 0 && !haystack.includes(this.filterText);
+    }
   }
 
   /** Mark the row of the selected agent, or none. */
@@ -123,6 +148,7 @@ export class AgentPanel {
       group.count = ordered.length;
       this.refreshGroup(group);
     }
+    this.applyFilter();
   }
 
   private createGroup(spec: GroupSpec): Group {
@@ -310,28 +336,40 @@ function orderGroup(id: TriageGroupId, agents: AgentInfo[]): AgentInfo[] {
 
 const COLLAPSED_KEY = 'agents-office.panel-collapsed';
 
+function applyCollapsed(root: HTMLElement, button: HTMLElement, collapsed: boolean): void {
+  root.classList.toggle('collapsed', collapsed);
+  button.setAttribute('aria-expanded', String(!collapsed));
+  button.textContent = collapsed ? '▸' : '▾';
+  button.title = collapsed ? 'Show the agent list' : 'Hide the agent list';
+}
+
+function saveCollapsed(collapsed: boolean, storage: Pick<Storage, 'setItem'> | undefined): void {
+  try {
+    storage?.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
+  } catch (error) {
+    console.debug('panel state not saved', error);
+  }
+}
+
 /** The header button hides the panel body so the room stays visible. The choice survives a reload. */
 export function setupPanelCollapse(
   root: HTMLElement,
   button: HTMLElement,
   storage: Pick<Storage, 'getItem' | 'setItem'> | undefined,
 ): void {
-  const apply = (collapsed: boolean) => {
-    root.classList.toggle('collapsed', collapsed);
-    button.setAttribute('aria-expanded', String(!collapsed));
-    button.textContent = collapsed ? '▸' : '▾';
-    button.title = collapsed ? 'Show the agent list' : 'Hide the agent list';
-  };
-  apply(readCollapsed(storage));
+  applyCollapsed(root, button, readCollapsed(storage));
   button.addEventListener('click', () => {
     const collapsed = !root.classList.contains('collapsed');
-    apply(collapsed);
-    try {
-      storage?.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
-    } catch (error) {
-      console.debug('panel state not saved', error);
-    }
+    applyCollapsed(root, button, collapsed);
+    saveCollapsed(collapsed, storage);
   });
+}
+
+/** Key / (issue #85 fix): a collapsed panel opens before the filter gets the focus, so the shortcut is never silently inert. */
+export function expandPanel(root: HTMLElement, button: HTMLElement, storage: Pick<Storage, 'setItem'> | undefined): void {
+  if (!root.classList.contains('collapsed')) return;
+  applyCollapsed(root, button, false);
+  saveCollapsed(false, storage);
 }
 
 function readCollapsed(storage: Pick<Storage, 'getItem'> | undefined): boolean {
