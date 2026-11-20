@@ -1,6 +1,6 @@
 import os from 'node:os';
 import type { OfficePlugin } from '../../server/seam.js';
-import { JiraCache, defaultReadFile, resolveJiraCredentials, type ReadFile } from './jira.js';
+import { JiraCache, defaultReadFile, defaultStatFile, resolveJiraCredentials, type ReadFile, type StatFile } from './jira.js';
 
 /**
  * Personal Jira board plugin (issue #145). Opt-in with `AGENTS_OFFICE_PLUGINS=jira`.
@@ -15,11 +15,12 @@ export interface JiraPluginOptions {
   now?: () => number;
   homedir?: () => string;
   readFile?: ReadFile;
+  statFile?: StatFile;
 }
 
 export function createJiraPlugin(options: JiraPluginOptions = {}): OfficePlugin {
   const env = options.env ?? process.env;
-  const credentials = resolveJiraCredentials(env, options.homedir ?? os.homedir, options.readFile ?? defaultReadFile);
+  const credentials = resolveJiraCredentials(env, options.homedir ?? os.homedir, options.readFile ?? defaultReadFile, options.statFile ?? defaultStatFile);
   if (!credentials) return { name: 'jira' };
   const doFetch = options.fetch ?? globalThis.fetch;
   const cache = new JiraCache(doFetch, credentials, options.now ?? Date.now);

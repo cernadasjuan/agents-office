@@ -53,6 +53,11 @@ export function drawJiraBoard(target: HTMLCanvasElement, tickets: WorldJiraTicke
 
   const top = 56;
   const rowHeight = 38;
+  const keyX = 16;
+  const summaryX = 140;
+  // The status, priority and assignee draw in their own fixed zone, never truncated (issue
+  // #145 review): a long summary must not be able to push the status off the board.
+  const metaWidth = 230;
   const shown = tickets.slice(0, MAX_ROWS);
   shown.forEach((ticket, row) => {
     const y = top + row * rowHeight;
@@ -60,11 +65,12 @@ export function drawJiraBoard(target: HTMLCanvasElement, tickets: WorldJiraTicke
     ctx.fillRect(8, y, width - 16, rowHeight - 4);
     ctx.fillStyle = '#2b2b2b';
     ctx.font = 'bold 18px sans-serif';
-    ctx.fillText(ticket.key, 16, y + 8);
+    ctx.fillText(ticket.key, keyX, y + 8);
     ctx.font = '18px sans-serif';
-    const line = [ticket.summary, `(${ticket.status})`, ticket.priority ? `· ${ticket.priority}` : '']
-      .filter((part) => part.length > 0).join(' ');
-    ctx.fillText(fittedText(ctx, line, width - 140), 140, y + 8);
+    const summaryMaxWidth = width - summaryX - metaWidth - 10;
+    ctx.fillText(fittedText(ctx, ticket.summary, summaryMaxWidth), summaryX, y + 8);
+    const meta = [`(${ticket.status})`, ticket.priority, ticket.assignee].filter((part) => !!part).join(' · ');
+    ctx.fillText(meta, width - metaWidth, y + 8);
   });
   if (tickets.length > shown.length) {
     ctx.fillStyle = '#6b6b6b';

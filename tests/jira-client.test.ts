@@ -105,3 +105,28 @@ test('drawJiraBoard shows the key, summary and status of each ticket, truncated 
   assert.equal(drawn.includes('KTP-11'), false, 'only the first 10 rows draw');
   assert.ok(drawn.some((text) => text.includes('+4 more')));
 });
+
+test('drawJiraBoard draws the assignee (issue #145 review)', () => {
+  drawn.length = 0;
+  const canvas = dom.window.document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  drawJiraBoard(canvas, [ticket('KTP-1', { assignee: 'Gabriel Amyot' })]);
+  assert.ok(drawn.some((text) => text.includes('Gabriel Amyot')), 'the assignee is drawn somewhere on the board');
+});
+
+test('a long summary truncates on its own; the status and priority stay fully visible regardless (issue #145 review)', () => {
+  drawn.length = 0;
+  const canvas = dom.window.document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  const longSummary = 'A very long ticket summary that would, if drawn together with the status and priority as one string, push them off the edge of the board entirely';
+  drawJiraBoard(canvas, [ticket('KTP-1', { summary: longSummary, status: 'In Progress', priority: 'High', assignee: 'Gabriel Amyot' })]);
+
+  assert.ok(drawn.some((text) => text.includes('In Progress')), 'the status is drawn in full, not swallowed by the long summary');
+  assert.ok(drawn.some((text) => text.includes('High')), 'the priority is drawn in full too');
+  assert.ok(drawn.some((text) => text.includes('Gabriel Amyot')));
+  // The summary itself is the one thing allowed to truncate.
+  assert.equal(drawn.some((text) => text === longSummary), false, 'the full, untruncated summary is not what gets drawn');
+  assert.ok(drawn.some((text) => text.includes('…') && text.startsWith('A very long')), 'the summary is cut with an ellipsis');
+});
