@@ -45,9 +45,25 @@ export function compareWaits(a: Wait, b: Wait): number {
 
 type Queued = { id: string; extras?: Wait };
 
-/** Key N's queue: agents in the fresh or aging band, in the same order as the triage panel's needs-you/your-turn groups. */
+/**
+ * The triage panel's two queued groups, in the panel's own order: Needs you
+ * (a block) before Your turn, each sorted by `compareWaits`. A cold wait is
+ * never queued. This is the one bucket function the panel's `triageGroup`
+ * and key N's queue both read, so the two stay in the same order.
+ */
+export function queueBucket(wait: Wait): 'needs-you' | 'your-turn' | undefined {
+  if (attentionBand(wait) === 'cold') return undefined;
+  if (wait?.attention === 'waiting') return 'needs-you';
+  if (wait?.attention === 'your-turn') return 'your-turn';
+  return undefined;
+}
+
+/** Key N's queue: Needs you first, then Your turn, each sorted by `compareWaits` — the same order as the triage panel's groups. */
 export function triageQueue<T extends Queued>(agents: T[]): T[] {
-  return agents.filter((agent) => queuesForYou(agent.extras)).sort((a, b) => compareWaits(a.extras, b.extras));
+  const bucketOf = (agent: T) => queueBucket(agent.extras);
+  const needsYou = agents.filter((agent) => bucketOf(agent) === 'needs-you').sort((a, b) => compareWaits(a.extras, b.extras));
+  const yourTurn = agents.filter((agent) => bucketOf(agent) === 'your-turn').sort((a, b) => compareWaits(a.extras, b.extras));
+  return [...needsYou, ...yourTurn];
 }
 
 /**

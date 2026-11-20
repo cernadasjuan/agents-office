@@ -146,6 +146,33 @@ test('fly-to an agent next to a room wall ends inside its room, with the figure 
   assert.ok(forward.dot(toFigure) > 0.95, 'the figure is in frame');
 });
 
+test('key F fix: refocus flies to an already-selected agent, even though a reselect alone is a no-op', () => {
+  const seat = new THREE.Vector3(15.6, 0, 1);
+  const { view, manager, selection, camera } = viewSetup({ seat, floors: [hall, room] });
+  camera.position.set(0, 1.7, 1);
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  const afterFirstFly = camera.position.clone();
+
+  camera.position.set(-5, 1.7, -5); // pan away, as if the user moved the camera by hand
+  selection.select('a'); // a plain reselect: SelectionState ignores it, nothing flies
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.notDeepEqual(camera.position.toArray(), afterFirstFly.toArray(), 'confirms the reselect alone did not fly back');
+
+  view.refocus('a');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.ok(Math.abs(camera.position.x - afterFirstFly.x) < 0.05 && Math.abs(camera.position.z - afterFirstFly.z) < 0.05,
+    'refocus flew back to the same framing');
+});
+
+test('key F fix: refocus on an agent no longer in the scene does nothing', () => {
+  const { view, camera } = viewSetup();
+  const before = camera.position.clone();
+  view.refocus('gone');
+  assert.deepEqual(camera.position.toArray(), before.toArray());
+});
+
 // --- Start view and remembered view ---
 
 test('the start view: a #view hash, then the saved view, then the layout default', () => {

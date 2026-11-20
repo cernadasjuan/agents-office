@@ -1,14 +1,17 @@
 /**
- * Keyboard triage (issue #85): N selects the next agent in the queue, F readies
- * the selected agent's focus action (see `AgentCard.keyboardFocus`, no request
- * leaves the browser), and / gives the triage panel's filter field the focus.
- * Ignored while typing in a form field, or with a modifier held, so these keys
- * never clash with WASD, Space, Q, Shift, O, I, Shift+L, Esc or ?.
+ * Keyboard triage (issue #85): N selects the next agent in the queue, F
+ * recenters the camera and pulses the ready Focus button (see
+ * `AgentCard.pulseFocus`, no request leaves the browser), and / gives the
+ * triage panel's filter field the focus. Ignored while typing in a form
+ * field, or with a modifier held, so these keys never clash with WASD,
+ * Space, Q, Shift, O, I, Shift+L, Esc or ?. / and ? report the same `Slash`
+ * code on a US layout; `?` is Shift+Slash, so / only fires without Shift.
  */
 
 function isFormField(target: EventTarget | null): boolean {
-  const tag = (target as Element | null)?.tagName;
-  return tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA';
+  const element = target as HTMLElement | null;
+  const tag = element?.tagName;
+  return tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA' || element?.isContentEditable === true;
 }
 
 export interface TriageKeyEvent {
@@ -17,13 +20,14 @@ export interface TriageKeyEvent {
   ctrlKey: boolean;
   altKey: boolean;
   metaKey: boolean;
+  shiftKey: boolean;
   preventDefault(): void;
 }
 
 export interface TriageKeyHandlers {
   /** Key N: select the next agent in the fresh/aging queue. */
   next(): void;
-  /** Key F: ready, but do not run, the selected agent's focus action. */
+  /** Key F: recenter the camera and pulse the ready Focus button, without running it. */
   focus(): void;
   /** Key /: give the triage panel's filter field the focus. */
   filter(): void;
@@ -34,7 +38,7 @@ export function handleTriageKey(event: TriageKeyEvent, handlers: TriageKeyHandle
   if (isFormField(event.target) || event.ctrlKey || event.altKey || event.metaKey) return;
   if (event.code === 'KeyN') handlers.next();
   else if (event.code === 'KeyF') handlers.focus();
-  else if (event.code === 'Slash') {
+  else if (event.code === 'Slash' && !event.shiftKey) {
     event.preventDefault();
     handlers.filter();
   }

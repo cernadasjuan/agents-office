@@ -4,7 +4,7 @@ import { AgentManager } from './agents/AgentManager.js';
 import { ViewController } from './scene/ViewController.js';
 import { onSelectionChange, selectAgent, selectedAgentId } from './scene/Selection.js';
 import { AgentPoller } from './agents/AgentPoller.js';
-import { AgentPanel, isDemoMode, setupPanelCollapse } from './ui/AgentPanel.js';
+import { AgentPanel, expandPanel, isDemoMode, setupPanelCollapse } from './ui/AgentPanel.js';
 import { chooseLayoutId, confirmLayoutSwitch, createLayout, defaultViewFor, isLayoutSwitchKey, layoutName, rememberLayoutId, reloadForLayoutSwitch } from './layout/registry.js';
 import { chooseViewMode, rememberViewMode, viewStatusText } from './scene/ViewMemory.js';
 import { activeExtensions, currentWorld, setWorld, type World } from './extensions.js';
@@ -78,7 +78,7 @@ onSelectionChange((agentId) => panel.setSelected(agentId));
 const freshness = new FreshnessFooter(document.getElementById('panel-footer')!);
 new Legend({ parent: document.body, button: document.getElementById('legend-button')!, keys: window, layout: layoutId, plugins: () => currentWorld().plugins });
 
-// Keyboard triage (issue #85): N the next agent in queue, F readies its focus action, / the filter field.
+// Keyboard triage (issue #85): N the next agent in queue, F recenters and pulses Focus, / the filter field.
 window.addEventListener('keydown', (event) => {
   handleTriageKey(event, {
     next: () => {
@@ -86,8 +86,22 @@ window.addEventListener('keydown', (event) => {
       const next = nextInQueue(queue, selectedAgentId());
       if (next) selectAgent(next.id);
     },
-    focus: () => agentCard.keyboardFocus(),
-    filter: () => panel.focusFilter(),
+    focus: () => {
+      const current = selectedAgentId();
+      if (current) {
+        // Already selected: a reselect would be a no-op, so recenter directly.
+        view.refocus(current);
+      } else {
+        const next = nextInQueue(triageQueue(agentManager.getAgents().map((managed) => managed.info)), null);
+        if (!next) return;
+        selectAgent(next.id); // flies there and opens the card through the normal selection path
+      }
+      agentCard.pulseFocus();
+    },
+    filter: () => {
+      expandPanel(document.getElementById('ui-panel')!, document.getElementById('ui-panel-toggle')!, window.localStorage);
+      panel.focusFilter();
+    },
   });
 });
 

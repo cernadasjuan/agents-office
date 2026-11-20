@@ -41,8 +41,9 @@ export interface ViewControllerOptions {
 }
 
 function isFormField(target: EventTarget | null): boolean {
-  const tag = (target as Element | null)?.tagName;
-  return tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA';
+  const element = target as HTMLElement | null;
+  const tag = element?.tagName;
+  return tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA' || element?.isContentEditable === true;
 }
 
 /**
@@ -249,6 +250,18 @@ export class ViewController {
       this.marker.hide();
       return;
     }
+    this.marker.show(agent.figure.accentColor);
+    this.flyToAgent(agent.figure.group.position);
+  }
+
+  /**
+   * Key F (issue #85 fix): fly to, or recenter on, an agent even when it is
+   * already selected (a plain reselect is a no-op in `SelectionState`, so no
+   * selection-change listener fires). Does nothing for an agent not in the scene.
+   */
+  refocus(agentId: string): void {
+    const agent = this.options.agents().find((candidate) => candidate.info.id === agentId);
+    if (!agent) return;
     this.marker.show(agent.figure.accentColor);
     this.flyToAgent(agent.figure.group.position);
   }

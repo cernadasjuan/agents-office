@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { AgentPanel, isDemoMode, setupPanelCollapse, type AgentPanelOptions } from '../src/ui/AgentPanel.js';
+import { AgentPanel, expandPanel, isDemoMode, setupPanelCollapse, type AgentPanelOptions } from '../src/ui/AgentPanel.js';
 import type { AgentInfo } from '../src/agents/AgentData.js';
 
 function installDocument(t: TestContext): HTMLElement {
@@ -336,6 +336,42 @@ test('key / (issue #85): focusFilter gives the filter field the focus', (t) => {
   panel.render([idle('a')]);
   panel.focusFilter();
   assert.equal(list.ownerDocument.activeElement, list.querySelector('.triage-filter'));
+});
+
+test('issue #85 fix: expandPanel opens a collapsed panel and remembers the choice', (t) => {
+  installDocument(t);
+  const root = document.getElementById('ui-panel')!;
+  const button = document.getElementById('toggle')!;
+  const store = new Map<string, string>();
+  const storage = { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => void store.set(key, value) };
+  setupPanelCollapse(root, button, storage);
+  button.click();
+  assert.equal(root.classList.contains('collapsed'), true);
+
+  expandPanel(root, button, storage);
+  assert.equal(root.classList.contains('collapsed'), false);
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(store.get('agents-office.panel-collapsed'), '0');
+});
+
+test('issue #85 fix: expandPanel on an already-open panel changes nothing', (t) => {
+  installDocument(t);
+  const root = document.getElementById('ui-panel')!;
+  const button = document.getElementById('toggle')!;
+  setupPanelCollapse(root, button, undefined);
+  assert.equal(root.classList.contains('collapsed'), false);
+  expandPanel(root, button, undefined);
+  assert.equal(root.classList.contains('collapsed'), false);
+});
+
+test('issue #85 fix: expandPanel works without storage', (t) => {
+  installDocument(t);
+  const root = document.getElementById('ui-panel')!;
+  const button = document.getElementById('toggle')!;
+  setupPanelCollapse(root, button, undefined);
+  button.click();
+  expandPanel(root, button, undefined);
+  assert.equal(root.classList.contains('collapsed'), false);
 });
 
 test('typing in the filter field hides rows whose name and activity do not match, case-insensitively', (t) => {

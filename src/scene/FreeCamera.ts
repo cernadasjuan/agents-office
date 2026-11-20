@@ -16,6 +16,13 @@ let pitch = 0;
 let locked = false;
 let lockFilter: (event: MouseEvent) => boolean = () => true;
 
+/** Issue #85 fix: the triage filter is the app's first text field, so a key that reaches it must not also move the camera. */
+function isFormField(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  const tag = element?.tagName;
+  return tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA' || element?.isContentEditable === true;
+}
+
 /** Decide per click whether it engages the camera (for example: not when it selects a figure). */
 export function setPointerLockFilter(filter: (event: MouseEvent) => boolean): void {
   lockFilter = filter;
@@ -47,6 +54,7 @@ export function initFreeCamera(
   });
 
   window.addEventListener('keydown', (e) => {
+    if (isFormField(e.target)) return;
     keys.add(e.code);
   });
   window.addEventListener('keyup', (e) => {

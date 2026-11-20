@@ -16,6 +16,7 @@ export const CARD_MAX_ISSUES = 10;
 const CARD_GAP_PX = 8;
 const MIN_FREE_AREA_PX = 240;
 const STATUS_MS = 3000;
+const PULSE_MS = 1500;
 
 export type CardIssue = NonNullable<AgentExtras['issues']>[number];
 
@@ -129,6 +130,7 @@ export class AgentCard {
   private renderedKey = '';
   private shownId: string | null = null;
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
+  private pulseTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(parent: HTMLElement, private readonly options: AgentCardOptions) {
     this.selection = options.selection ?? officeSelection();
@@ -210,16 +212,19 @@ export class AgentCard {
   }
 
   /**
-   * Key F (issue #85). Reports whether the shown agent has a ready action
-   * (today only the herdr focus button), but never runs it: S7 keeps a write
-   * action behind a click, and #85 AC2/AC3 ask for a keyboard trigger without
-   * a decision on that trade-off yet. This is the one seam to change if
-   * Gabriel approves a keyboard write action later: swap the body for
-   * `await this.runAction(actionId)`, where `actionId` is the ready action's id.
+   * Key F (issue #85, fixed under the decision on #85): highlight the shown
+   * agent's ready action button (today only "Focus in herdr") for `PULSE_MS`,
+   * so the keystroke has a visible effect. Never moves DOM focus onto the
+   * button (Enter would then send the request) and never calls `runAction`:
+   * S7 keeps a write action behind a click. A silent no-op without a ready
+   * action (no selection, or no action available for the shown agent).
    */
-  keyboardFocus(): boolean {
-    const agent = this.current;
-    return agent !== null && actions.some((action) => action.available(agent));
+  pulseFocus(): void {
+    const button = this.actionRow.querySelector<HTMLButtonElement>('button');
+    if (!button) return;
+    button.classList.add('pulse');
+    clearTimeout(this.pulseTimer);
+    this.pulseTimer = setTimeout(() => button.classList.remove('pulse'), PULSE_MS);
   }
 
   /** Run a card action on the shown agent (the button click). */

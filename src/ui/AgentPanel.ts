@@ -1,6 +1,6 @@
 import { ACTIVITIES, ACTIVITY_LABELS, AgentInfo, activityLabel } from '../agents/AgentData.js';
 import type { Activity } from '../agents/ActivityAnimations.js';
-import { attentionBand, compareWaits, formatWait } from './attention.js';
+import { attentionBand, compareWaits, formatWait, queueBucket } from './attention.js';
 
 export type TriageGroupId = 'needs-you' | 'your-turn' | 'working' | 'idle' | 'cold';
 
@@ -55,11 +55,11 @@ export function isDemoMode(search: string): boolean {
   return new URLSearchParams(search).get('demo') === '1';
 }
 
+/** Needs you and Your turn come from `queueBucket`, the same function key N's queue reads, so the two never diverge. */
 export function triageGroup(agent: AgentInfo): TriageGroupId {
-  const attention = agent.extras?.attention;
+  const bucket = queueBucket(agent.extras);
+  if (bucket) return bucket;
   if (attentionBand(agent.extras) === 'cold') return 'cold';
-  if (attention === 'waiting') return 'needs-you';
-  if (attention === 'your-turn') return 'your-turn';
   return agent.activity === 'idle' ? 'idle' : 'working';
 }
 
@@ -336,28 +336,40 @@ function orderGroup(id: TriageGroupId, agents: AgentInfo[]): AgentInfo[] {
 
 const COLLAPSED_KEY = 'agents-office.panel-collapsed';
 
+function applyCollapsed(root: HTMLElement, button: HTMLElement, collapsed: boolean): void {
+  root.classList.toggle('collapsed', collapsed);
+  button.setAttribute('aria-expanded', String(!collapsed));
+  button.textContent = collapsed ? '▸' : '▾';
+  button.title = collapsed ? 'Show the agent list' : 'Hide the agent list';
+}
+
+function saveCollapsed(collapsed: boolean, storage: Pick<Storage, 'setItem'> | undefined): void {
+  try {
+    storage?.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
+  } catch (error) {
+    console.debug('panel state not saved', error);
+  }
+}
+
 /** The header button hides the panel body so the room stays visible. The choice survives a reload. */
 export function setupPanelCollapse(
   root: HTMLElement,
   button: HTMLElement,
   storage: Pick<Storage, 'getItem' | 'setItem'> | undefined,
 ): void {
-  const apply = (collapsed: boolean) => {
-    root.classList.toggle('collapsed', collapsed);
-    button.setAttribute('aria-expanded', String(!collapsed));
-    button.textContent = collapsed ? '▸' : '▾';
-    button.title = collapsed ? 'Show the agent list' : 'Hide the agent list';
-  };
-  apply(readCollapsed(storage));
+  applyCollapsed(root, button, readCollapsed(storage));
   button.addEventListener('click', () => {
     const collapsed = !root.classList.contains('collapsed');
-    apply(collapsed);
-    try {
-      storage?.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
-    } catch (error) {
-      console.debug('panel state not saved', error);
-    }
+    applyCollapsed(root, button, collapsed);
+    saveCollapsed(collapsed, storage);
   });
+}
+
+/** Key / (issue #85 fix): a collapsed panel opens before the filter gets the focus, so the shortcut is never silently inert. */
+export function expandPanel(root: HTMLElement, button: HTMLElement, storage: Pick<Storage, 'setItem'> | undefined): void {
+  if (!root.classList.contains('collapsed')) return;
+  applyCollapsed(root, button, false);
+  saveCollapsed(false, storage);
 }
 
 function readCollapsed(storage: Pick<Storage, 'getItem'> | undefined): boolean {

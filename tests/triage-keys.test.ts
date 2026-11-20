@@ -9,6 +9,7 @@ function keyEvent(code: string, overrides: Partial<TriageKeyEvent> = {}): Triage
     ctrlKey: false,
     altKey: false,
     metaKey: false,
+    shiftKey: false,
     preventDefault: () => undefined,
     ...overrides,
   };
@@ -51,6 +52,26 @@ test('typing in an input, select or textarea is ignored, even for N, F and /', (
     handleTriageKey(keyEvent('Slash', { target }), handlers);
   }
   assert.deepEqual(seen, []);
+});
+
+test('typing in a contenteditable element is ignored too', () => {
+  const { seen, handlers } = calls();
+  const target = { tagName: 'DIV', isContentEditable: true } as unknown as EventTarget;
+  handleTriageKey(keyEvent('KeyN', { target }), handlers);
+  handleTriageKey(keyEvent('KeyF', { target }), handlers);
+  handleTriageKey(keyEvent('Slash', { target }), handlers);
+  assert.deepEqual(seen, []);
+});
+
+test('issue #85 fix: Shift+Slash is "?" (the legend), not the filter — / only fires without Shift', () => {
+  const { seen, handlers } = calls();
+  let prevented = 0;
+  handleTriageKey(keyEvent('Slash', { shiftKey: true, preventDefault: () => { prevented++; } }), handlers);
+  assert.deepEqual(seen, [], 'Shift+Slash never opens the filter');
+  assert.equal(prevented, 0, 'Shift+Slash is left alone, so "?" still opens the legend');
+
+  handleTriageKey(keyEvent('Slash', { shiftKey: false }), handlers);
+  assert.deepEqual(seen, ['filter'], 'plain Slash still opens the filter');
 });
 
 test('a held modifier (Ctrl, Alt or Meta) is ignored, so a browser or OS shortcut on these keys still works', () => {
