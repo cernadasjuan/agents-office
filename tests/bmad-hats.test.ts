@@ -64,6 +64,18 @@ test('one hat per badge, stacked upward, and persona names on the label', () => 
   assert.equal(moreText(managed), undefined);
 });
 
+test('Prospero (the Librarian persona) gets his own hat and his name on the label, not a raw badge id (issue #149)', () => {
+  const { manager } = setup();
+  manager.addAgent({ id: 'a', name: 'A', activity: 'researching', extras: { badges: ['librarian'] } });
+  const [managed] = manager.getAgents();
+  bmadHats.agentsChanged!(manager.getAgents());
+
+  const hats = hatsOn(managed);
+  assert.equal(hats.length, 1);
+  assert.notEqual(hats[0].userData.hat, 'party-hat', 'a distinct shape, not the generic fallback');
+  assert.equal(activityText(managed), 'Researching · Prospero');
+});
+
 test('personas get different hats and unknown badges get a party hat', () => {
   const { manager } = setup();
   manager.addAgent({ id: 'a', name: 'A', activity: 'implementing', extras: { badges: ['pm', 'qa', 'brainstorming-coach', 'constructor'] } });
@@ -163,7 +175,7 @@ test('hats are figure parts that share shapes and colors, so the figure batch dr
 });
 
 test('a hat casts no shadow: a tiny topper does not earn its own shadow-pass bucket (render budget headroom)', () => {
-  const kinds = ['analyst', 'architect', 'dev', 'pm', 'qa', 'sm', 'debugger', 'spec-coach', 'data-engineer', 'ux-designer', 'tech-writer', 'party-colors-x'];
+  const kinds = ['analyst', 'architect', 'dev', 'pm', 'qa', 'sm', 'debugger', 'spec-coach', 'data-engineer', 'ux-designer', 'tech-writer', 'librarian', 'party-colors-x'];
   for (const kind of kinds) {
     const hat = buildHat(kind);
     let meshCount = 0;

@@ -38,11 +38,16 @@ const OPPOSITE: Record<Side, Side> = { north: 'south', south: 'north', east: 'we
  * The first ring around the hall, in the order rooms are rented. The east-center
  * slot comes first: it is the user's office. Doors avoid the furniture on the
  * hall walls (whiteboards and boards on the back wall, shelves on the left wall).
+ *
+ * The south-east slot (positive z, the front of the hall) comes second: the building
+ * rents the Library second, right after the office, so it always lands there (issue
+ * #120 moves it from the north-east). The north-east slot (negative z, the back wall)
+ * now comes third.
  */
 const FIRST_RING: Array<Omit<RoomSlot, 'ring'>> = [
   { rect: { minX: 15, maxX: 27, minZ: -6, maxZ: 6 }, door: { side: 'west', at: 0 }, outward: 'east' },
-  { rect: { minX: 15, maxX: 27, minZ: -18, maxZ: -6 }, door: { side: 'west', at: -9.5 }, outward: 'east' },
   { rect: { minX: 15, maxX: 27, minZ: 6, maxZ: 18 }, door: { side: 'west', at: 9.5 }, outward: 'east' },
+  { rect: { minX: 15, maxX: 27, minZ: -18, maxZ: -6 }, door: { side: 'west', at: -9.5 }, outward: 'east' },
   { rect: { minX: -15, maxX: -3, minZ: 13, maxZ: 25 }, door: { side: 'north', at: -9 }, outward: 'south' },
   { rect: { minX: -3, maxX: 9, minZ: 13, maxZ: 25 }, door: { side: 'north', at: 3 }, outward: 'south' },
   { rect: { minX: -27, maxX: -15, minZ: 1, maxZ: 13 }, door: { side: 'east', at: 4.5 }, outward: 'west' },

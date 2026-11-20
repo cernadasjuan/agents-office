@@ -95,6 +95,25 @@ test('a built room holds each planned piece, named after it, inside the static r
   assert.ok(room.group.userData.staticBatch, 'the room is marked static, so its furniture merges');
 });
 
+// --- Issue #128 AC4: the library-knowledge shelves render white, distinct from a plain bookshelf ---
+
+function shelfColor(piece: Placement['piece']): number {
+  const object = piece.create();
+  let found: number | undefined;
+  object.traverse((child) => {
+    if (found === undefined && child instanceof THREE.Mesh && child.material instanceof THREE.MeshToonMaterial) found = child.material.color.getHex();
+  });
+  return found!;
+}
+
+test('the library-knowledge shelves render white, a different finish than the plain bookshelf elsewhere', () => {
+  const plan = roomFurnishing('library', { doorAlong: 0 });
+  const shelves = plan.pieces.filter((p) => p.piece.name === 'bookshelf');
+  assert.ok(shelves.length >= 4, 'the library has several shelves');
+  const plainColor = shelfColor(PIECES.bookshelf());
+  for (const shelf of shelves) assert.notEqual(shelfColor(shelf.piece), plainColor, 'a library shelf is not the plain brown bookshelf');
+});
+
 // --- Your office ---
 
 test('your office reads as furnished: 6 or more pieces besides the desk, and 5 or more plants', () => {

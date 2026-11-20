@@ -68,14 +68,26 @@ test('an agent keeps its home desk, makes a trip after the dwell time, and comes
   const { layout, agent, tick } = setup();
   const home = layout.seatFor(agent('a', 'implementing'), null)!;
 
-  assert.equal(layout.seatFor(agent('a', 'researching'), 'implementing'), null, 'no move before the dwell time');
+  assert.equal(layout.seatFor(agent('a', 'testing'), 'implementing'), null, 'no move before the dwell time');
   assert.deepEqual(tick(3000).filter((m) => m.agentId === 'a'), []);
   const trip = tick(1500).find((m) => m.agentId === 'a')!;
-  assert.match(trip.seat.key, /researching/);
+  assert.match(trip.seat.key, /^test_/);
 
-  layout.seatFor(agent('a', 'debugging'), 'researching');
+  layout.seatFor(agent('a', 'debugging'), 'testing');
   const back = tick(4500).find((m) => m.agentId === 'a')!;
   assert.equal(back.seat.key, home.key);
+});
+
+test('a non-librarian keeps its home desk through a research activity: no trip, no move at all (issue #128 AC2)', () => {
+  const { layout, agent, tick } = setup();
+  const home = layout.seatFor(agent('a', 'implementing'), null)!;
+
+  assert.equal(layout.seatFor(agent('a', 'researching'), 'implementing'), null, 'the target does not change, so there is nothing to move to after the dwell time');
+  assert.deepEqual(tick(4500).filter((m) => m.agentId === 'a'), []);
+
+  layout.seatFor(agent('a', 'debugging'), 'researching');
+  assert.deepEqual(tick(4500).filter((m) => m.agentId === 'a'), [], 'still at the same desk the whole time');
+  assert.equal(layout.seatFor(agent('a', 'implementing'), 'debugging'), null);
 });
 
 test('a planning agent with no war room stays at its desk, not the lounge (#131)', () => {
@@ -247,28 +259,72 @@ test('a waiting agent still goes to the user office before its war room', () => 
 
 // --- Library and librarians ---
 
-test('research trips go to the Library room before the hall shelves', () => {
+test('the Librarian persona badge reaches the Library room before the hall shelves (issue #128)', () => {
   const { layout, agent } = setup();
-  const seat = layout.seatFor(agent('r', 'researching'), null)!;
+  const seat = layout.seatFor(agent('r', 'researching', { badges: ['librarian'] }), null)!;
   assert.match(seat.key, /^room1_researching_/);
 });
 
 test('a librarian walks to the Library to research and back to its agent with what it found', () => {
   const { layout, agent, tick } = setup();
   const desk = layout.seatFor(agent('parent', 'implementing'), null)!;
-  const fetching = layout.seatFor(agent('lib', 'researching', { parentId: 'parent', role: 'librarian' }), null)!;
+  const fetching = layout.seatFor(agent('lib', 'researching', { parentId: 'parent', badges: ['librarian'] }), null)!;
   assert.match(fetching.key, /^room1_researching_/);
 
-  layout.seatFor(agent('lib', 'writing_docs', { parentId: 'parent', role: 'librarian' }), 'researching');
+  layout.seatFor(agent('lib', 'writing_docs', { parentId: 'parent', badges: ['librarian'] }), 'researching');
   const back = tick(4500).find((m) => m.agentId === 'lib')!;
   assert.match(back.seat.key, /_pod\d$/);
   assert.ok(back.seat.position.distanceTo(desk.position) < 2);
+});
+
+test('an old-style role tag, with no Librarian persona badge, no longer reaches the Library (issue #128, Prospero\'s review)', () => {
+  const { layout, agent } = setup();
+  const seat = layout.seatFor(agent('r', 'researching', { role: 'librarian' }), null)!;
+  assert.doesNotMatch(seat.key, /^room1_researching_/, 'a name or role tag alone is not the persona signal');
+});
+
+test('a main session with no Librarian badge and no war room keeps its own desk for a research trip, not the Library (issue #128 AC2)', () => {
+  const { layout, agent } = setup();
+  const seat = layout.seatFor(agent('r', 'researching'), null)!;
+  assert.doesNotMatch(seat.key, /^room1_researching_/);
+  assert.doesNotMatch(seat.key, /researching/, 'it never visits any researching station, hall shelves included');
+  assert.match(seat.key, /^desk_/);
+});
+
+test('a main session with a war room keeps a non-librarian research trip inside that room, not the Library (issue #128 AC3)', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const seat = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
+  assert.match(seat.key, /^mission0_seat_/, 'inside its own war room');
+  assert.doesNotMatch(seat.key, /^room1_researching_/, 'never the Library');
 });
 
 test('an ordinary subagent that researches stays at its parent desk', () => {
   const { layout, agent } = setup();
   layout.seatFor(agent('parent', 'implementing'), null);
   assert.match(layout.seatFor(agent('helper', 'researching', { parentId: 'parent' }), null)!.key, /_pod\d$/);
+});
+
+test('a librarian subagent still reaches the Library even though its parent already has a desk (the badge wins over the pod rule)', () => {
+  const { layout, agent } = setup();
+  layout.seatFor(agent('parent', 'implementing'), null);
+  const seat = layout.seatFor(agent('lib', 'researching', { parentId: 'parent', badges: ['librarian'] }), null)!;
+  assert.match(seat.key, /^room1_researching_/);
+});
+
+// --- Issue #120: the library wing moves to the south-east ---
+
+test('the library (the second room the building ever rents) sits at the south-east slot, not the north-east', () => {
+  // slotFor(1) is where the second rented room goes; the building rents the Library second,
+  // right after the office. South of the hall is positive z (the front, where the meeting
+  // table and coffee area sit); north is negative z (the back wall, the whiteboards).
+  const slot = slotFor(1);
+  assert.ok(slot.rect.minZ > 0, `slot 1 is south (minZ=${slot.rect.minZ}), not north`);
+  // AC2: the corridor branch toward slot 1 (the hall's own door) leads straight to the
+  // Library's entrance, the same way every ring-0 room's door already matches its slot
+  // (rebuildHallWalls derives every door from slotFor(room.index)); this geometric
+  // identity is what guarantees it, not a separate corridor structure (none exists yet).
+  assert.deepEqual(slot.door, { side: 'west', at: 9.5 });
 });
 
 // --- Workspace grouping in the shared desk pool (#138: per-workspace desk rooms retired) ---
