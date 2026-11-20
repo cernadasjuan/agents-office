@@ -16,6 +16,36 @@ pnpm test       # node:test suites in tests/ (tsx)
 
 Read `docs/design-principles.md` before any feature change: it lists the design rules (P1 to P15, S1 to S8) and the rules for every change. `docs/roadmap.md` holds the tiers, the planned slices and the conflict matrix.
 
+## macOS launcher (fork tooling, scripts/launcher/)
+
+`scripts/launcher/agents-office-launcher.mjs` is the entry point a generated `Agents
+Office.app` bundle execs (built by `scripts/build-launcher-app.sh`, installed by
+`scripts/install-launcher.sh`; see the README's "macOS launcher" section for the command and
+what it does). Plain `.mjs`, not `.ts`: the warm-start path has a 1 s budget and skips the tsx
+loader. `scripts/launcher/config.mjs` and `detect.mjs` hold the pure, unit-tested logic
+(`tests/launcher-config.test.ts`, `tests/launcher-detect.test.ts`); `allowJs` is on in
+`tsconfig.json` so `typecheck` still covers the tests that import them. This tooling is outside
+`package.json`'s `files`, so it never ships in the published npm package — the mitigation for
+bending P6 (no daemon) in this fork only.
+
+`detect.mjs`'s `probeOffice` GETs the office root `/`, not `/api/agents` (that endpoint can
+take over 400 ms under herdr enrichment, which could misread a live, slow office as down). It
+returns `{ reachable, isOffice }`: `isOffice` is true only when the answer carries this
+office's own `index.html` markers (`isOfficeHtml`, the `<title>` and the `#ui-panel` id), so a
+different app already holding the port never gets treated as a warm start. The launcher spawns
+`vite` only when `reachable` is false; a reachable-but-not-office answer logs it and shows a
+macOS notification (`osascript -e 'display notification ...'`) instead of opening a browser or
+a second server. `readConfigEnv` requires the config file to be a plain regular file
+(`lstatSync`, so a symlink is rejected too) under `CONFIG_MAX_BYTES` (64 KB); anything else
+reads as no overrides rather than stalling the launcher. `build-launcher-app.sh` never writes
+the repo path into the generated shell source: it `printf`s it to
+`Contents/Resources/repo-root.txt` and the generated script (now a fully quoted heredoc, the
+same bytes for any `repo_root`) reads it back with `cat` into a quoted variable at run time —
+`tests/launcher-build.test.ts` builds the app with a repo root holding a space, a quote and a
+`$` and asserts the path reaches disk unchanged and the payload never runs. `find_node` in the
+generated script also resolves an nvm default alias (one level of indirection, then the
+highest installed version by `sort -V`) before falling back to the first match.
+
 ## Architecture
 
 3D office visualization (Three.js + Vite) that shows running Claude Code agents as animated stick figures. Each agent's activity is detected from real session data and mapped to a physical station in the office.
