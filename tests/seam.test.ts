@@ -42,6 +42,15 @@ test('the agent projection copies only whitelisted, cleaned fields', () => {
   assert.equal(JSON.stringify(agent).includes('4242'), false);
 });
 
+test('skills keeps only plain string tokens, dropping a non-string value even if it would pass the pattern once coerced to a string (issue #166 review)', () => {
+  const [agent] = projectAgents([observation({
+    display: { skills: ['write-a-skill', 'BAD SKILL', null, 42, true, ['nested']] as never },
+  })], publicId);
+
+  assert.deepEqual(agent.skills, ['write-a-skill']);
+  assert.ok(agent.skills!.every((skill) => typeof skill === 'string'));
+});
+
 test('an issue card keeps only a cleaned short repository token', () => {
   const [agent] = projectAgents([observation({ display: { issues: [
     { number: 1, title: 'a', repo: 'agents-office' },

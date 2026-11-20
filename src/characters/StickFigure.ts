@@ -27,6 +27,7 @@ export class StickFigure {
   private targetLookAt = new THREE.Vector3();
   private isMoving = false;
   private posture: Posture | undefined;
+  private shortId: string | undefined;
   private tag: string | undefined;
   private attention: string | undefined;
   private waitMinutes: number | undefined;
@@ -74,6 +75,13 @@ export class StickFigure {
   setTag(tag: string | undefined): void {
     if (tag === this.tag) return;
     this.tag = tag;
+    this.refreshLabel();
+  }
+
+  /** A short, stable id for this server run (issue #171). Never changes for one agent, so this is called once, right after construction. Hidden in compact labels by CSS. */
+  setId(id: string | undefined): void {
+    if (id === this.shortId) return;
+    this.shortId = id;
     this.refreshLabel();
   }
 
@@ -127,7 +135,7 @@ export class StickFigure {
     const activityText = activityLabelFor(this.targetActivity, this.subagent);
     const waiting = this.attention === 'waiting' || this.attention === 'your-turn';
     const wait = waiting && this.waitMinutes !== undefined ? formatWaitShort(this.waitMinutes) : undefined;
-    updateLabel(this.label, this.name, attentionLine(activityText, this.attention, this.waitMinutes, this.stuck), this.tag, wait);
+    updateLabel(this.label, this.name, attentionLine(activityText, this.attention, this.waitMinutes, this.stuck), this.tag, this.shortId, wait);
   }
 
   /** Force a posture for the current seat, or undefined to let the activity decide. */

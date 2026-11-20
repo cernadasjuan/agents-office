@@ -31,6 +31,13 @@
       font-size: 10px;
       margin-top: 1px;
     }
+    /* Short agent id (issue #171): full-detail labels only, same as the activity line. */
+    .agent-label .agent-id-tag {
+      color: #6a6a8a;
+      font-size: 9px;
+      font-family: ui-monospace, monospace;
+      margin-top: 1px;
+    }
     /* Compact label (label detail, key V): agent color dot and the name only, capped width. */
     .agent-label.compact {
       padding: 1px 6px;
@@ -58,6 +65,7 @@
       background: var(--agent-color, #8888ff);
     }
     .agent-label.compact .activity { display: none; }
+    .agent-label.compact .agent-id-tag { display: none; }
     /* The wait chip keeps the wait time readable on a compact label, where the activity line hides. */
     .agent-label .wait { display: none; }
     .agent-label.compact .wait {
@@ -239,7 +247,10 @@
     }
     #agent-inspector[hidden], #tombstone-inspector[hidden] { display: none; }
     .inspector-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .inspector-title { min-width: 0; }
     .inspector-name { font-size: 15px; color: #fff; overflow-wrap: anywhere; }
+    /* Agent id (issue #171): short and stable for this server run, not a security boundary. */
+    .inspector-id { display: block; font-size: 10px; color: #8888aa; font-family: ui-monospace, monospace; }
     .inspector-close {
       background: none; border: 1px solid rgba(120, 120, 255, 0.3); border-radius: 4px;
       color: #e0e0ff; width: 22px; height: 22px; cursor: pointer; flex: none;
@@ -253,6 +264,9 @@
     .inspector-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 8px 0; }
     .inspector-facts dt { color: #8888ff; }
     .inspector-facts dd { overflow-wrap: anywhere; }
+    /* Provider mark (issue #171): simple geometry next to the text, never instead of it. */
+    .inspector-provider { display: flex; align-items: center; gap: 5px; }
+    .provider-mark { flex: none; }
     .inspector-parent { margin-bottom: 6px; }
     .inspector-actions { display: flex; gap: 6px; margin: 6px 0; }
     .inspector-actions button {
@@ -267,6 +281,9 @@
     .inspector-section h4 { font-size: 11px; color: #fff; margin-bottom: 3px; }
     .inspector-section ul { list-style: none; }
     .inspector-section li { padding: 1px 0; overflow-wrap: anywhere; }
+    /* A skill in the Persona / Skills row (issue #166) reads apart from a persona badge. */
+    .inspector-section li.skill { color: #9fe0c0; }
+    .inspector-section li.skill::before { content: '⚙ '; opacity: 0.7; }
     .inspector-section p { color: #8888aa; }
     .inspector-section a { color: #a8b8ff; }
     .peek-question {
