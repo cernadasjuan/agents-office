@@ -226,15 +226,15 @@ export class BuildingLayout implements LayoutStrategy {
     const free = this.keysOfType('implementing').filter((key) => !this.stations.get(key)!.occupied);
     if (free.length === 0) return undefined;
     if (workspace === undefined) return free[0];
-    const neighborsOf = (key: string): string[] => {
-      const match = /^(.*_)(\d+)$/.exec(key);
-      if (!match) return [];
-      const [, base, n] = match;
-      return [`${base}${Number(n) - 1}`, `${base}${Number(n) + 1}`];
-    };
     const occupiedByWorkspace = [...this.agents.values()].filter((other) => other.home && this.workspaceOf(other) === workspace).map((other) => other.home!);
-    const beside = free.find((key) => occupiedByWorkspace.some((occupied) => neighborsOf(occupied).includes(key)));
-    return beside ?? free[0];
+    if (occupiedByWorkspace.length === 0) return free[0];
+    // "Next to" is physical, not a key suffix: desks stand in rows, so an adjacent
+    // suffix can be a row apart while the true nearest desk carries a far suffix.
+    const distanceToWorkspace = (key: string): number => {
+      const position = this.stations.get(key)!.position;
+      return Math.min(...occupiedByWorkspace.map((occupied) => position.distanceTo(this.stations.get(occupied)!.position)));
+    };
+    return free.reduce((closest, key) => (distanceToWorkspace(key) < distanceToWorkspace(closest) ? key : closest));
   }
 
   /** A seat in a war room, or a lounge seat when the room is full. */

@@ -274,11 +274,26 @@ test('sessions of one workspace get neighboring desks', () => {
   const a1 = layout.seatFor(agent('a1', 'implementing', inWorkspace('Alpha')), null)!;
   const a2 = layout.seatFor(agent('a2', 'implementing', inWorkspace('Alpha')), null)!;
   const b1 = layout.seatFor(agent('b1', 'implementing', inWorkspace('Beta')), null)!;
-  const indexOf = (key: string) => Number(key.split('_')[1]);
 
-  assert.equal(Math.abs(indexOf(a1.key) - indexOf(a2.key)), 1, 'Alpha sessions sit next to each other');
-  assert.notEqual(indexOf(b1.key), indexOf(a1.key));
-  assert.notEqual(indexOf(b1.key), indexOf(a2.key));
+  assert.notEqual(a1.key, a2.key);
+  assert.notEqual(b1.key, a1.key);
+  assert.notEqual(b1.key, a2.key);
+  assert.ok(a2.position.distanceTo(a1.position) < b1.position.distanceTo(a1.position), "Alpha's own next session sits closer to it than Beta's desk does");
+});
+
+test('"next to" is physical distance, not a key suffix: a desk one row over beats one across the aisle (#138 fix)', () => {
+  // The hall desks sit in two rows of four. desk_3 (end of row 1) and desk_4 (start of
+  // row 2) are adjacent keys but 16 m apart; desk_3 and desk_7 are far apart in key order
+  // but stand in the same column, 3 m apart. The real nearest desk must win, not the key.
+  const { layout, agent } = setup();
+  layout.seatFor(agent('n0', 'implementing'), null); // desk_0
+  layout.seatFor(agent('n1', 'implementing'), null); // desk_1
+  layout.seatFor(agent('n2', 'implementing'), null); // desk_2
+  const a1 = layout.seatFor(agent('a1', 'implementing', inWorkspace('Alpha')), null)!; // desk_3, the only one free so far
+  assert.equal(a1.key, 'desk_3');
+
+  const a2 = layout.seatFor(agent('a2', 'implementing', inWorkspace('Alpha')), null)!;
+  assert.equal(a2.key, 'desk_7', 'the true nearest free desk, not desk_4 (index-adjacent, 16 m away)');
 });
 
 test('a stored desks@<workspace> room does not come back after a reload', () => {
