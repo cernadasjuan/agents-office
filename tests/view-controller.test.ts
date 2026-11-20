@@ -179,6 +179,21 @@ test('a drag release is never misread as a closing click (issue #133)', () => {
   assert.equal(selection.selected, 'a', 'the drag release does not clear the card');
 });
 
+test('an out-and-back pan in the overview is never misread as a closing click (issue #133)', () => {
+  const { view, manager, selection, canvas, press } = setup();
+  press('KeyO'); // overview: the only mode that pans on drag
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  // Past the click tolerance, then back near the press point: `isClick` alone compares only
+  // endpoints, so without tracking the drag itself this reads as a miss on release.
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 400, clientY: 10 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 10, clientY: 10 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointerup', { clientX: 10, clientY: 10 }));
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10 }));
+  assert.equal(selection.selected, 'a', 'a pan that returns near the press point still does not clear the card');
+});
+
 test('a click while pointer-locked is for looking, not for closing the card (issue #133)', () => {
   const { view, manager, selection, canvas } = setup();
   const document = dom.window.document;
