@@ -45,6 +45,17 @@ test('walls leave a door-wide gap at each door', () => {
 
 // --- Layout ---
 
+/** The real built floor rect of `room-${index}-${kind}` (`src/addons/building/rooms.ts`'s own name), not `slotFor` in isolation. */
+function builtRoomRect(scene: THREE.Scene, index: number, kind: string): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  const group = scene.getObjectByName(`room-${index}-${kind}`);
+  if (!group) throw new Error(`no built room named room-${index}-${kind}`);
+  let floor: THREE.Object3D | undefined;
+  group.traverse((object) => { if (object.userData.floor) floor = object; });
+  if (!floor) throw new Error(`room-${index}-${kind} has no floor`);
+  const box = new THREE.Box3().setFromObject(floor);
+  return { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z };
+}
+
 function setup(storage = new Map<string, string>()) {
   let clock = 0;
   const scene = new THREE.Scene();
@@ -226,7 +237,7 @@ test('the building rents a desk room when the hall desks are taken, and rebuilds
   assert.deepEqual(reloaded.roomKinds, ['office', 'library', 'desks']);
 });
 
-test('a saved 3-room layout rents each kind at the slot its index gives it, the same way on every reload (issue #128 review)', () => {
+test('a saved 3-room layout rents each kind at the slot its index gives it, the same way on every reload (issue #128 review round 2)', () => {
   // Rooms are remembered by kind, in rental order, and rented back in that same order on
   // reload (`roomKinds` above): slotFor(index) decides where each one physically sits, by
   // index alone, not by kind. For office/library/desks that is slot 0 (east-center, unmoved),
@@ -234,16 +245,27 @@ test('a saved 3-room layout rents each kind at the slot its index gives it, the 
   // itself used to sit before that swap). This is the one-time move the swap causes for
   // anyone with an existing saved building of 3 or more rooms: whatever room was third stays
   // third, but the ground under it moved. Noted in README.md and CHANGELOG.md.
+  //
+  // This asserts the layout's own built rooms (by their `room-${index}-${kind}` name in the
+  // scene, `src/addons/building/rooms.ts`), not `slotFor` in isolation: a bug in `addRoom`
+  // that called `slotFor` with the wrong index would still leave `slotFor` itself correct,
+  // and a test that only re-checked `slotFor` would never see it (issue #128 review round 2).
   const storage = new Map([[BUILDING_STORAGE_KEY, JSON.stringify(['office', 'library', 'desks'])]]);
-  const { layout } = setup(storage);
+  const { layout, scene } = setup(storage);
   assert.deepEqual(layout.roomKinds, ['office', 'library', 'desks']);
-  assert.deepEqual(slotFor(0).rect, { minX: 15, maxX: 27, minZ: -6, maxZ: 6 }, 'office: east-center, unmoved');
-  assert.ok(slotFor(1).rect.minZ > 0, 'library: south-east (issue #120)');
-  assert.ok(slotFor(2).rect.minZ < 0, 'desks: north-east, where the library used to be');
+  const office = builtRoomRect(scene, 0, 'office');
+  const library = builtRoomRect(scene, 1, 'library');
+  const desks = builtRoomRect(scene, 2, 'desks');
+  assert.deepEqual(office, { minX: 15, maxX: 27, minZ: -6, maxZ: 6 }, 'office: east-center, unmoved');
+  assert.ok(library.minZ > 0, `library: south-east (issue #120), got ${JSON.stringify(library)}`);
+  assert.ok(desks.minZ < 0, `desks: north-east, where the library used to be, got ${JSON.stringify(desks)}`);
 
-  // Reloading the same saved kind order again lands every room on the same physical slot.
-  const again = setup(new Map(storage)).layout;
-  assert.deepEqual(again.roomKinds, layout.roomKinds);
+  // Reloading the same saved kind order again lands every room at the same physical rect.
+  const again = setup(new Map(storage));
+  assert.deepEqual(again.layout.roomKinds, layout.roomKinds);
+  assert.deepEqual(builtRoomRect(again.scene, 0, 'office'), office, 'office: same rect after reload');
+  assert.deepEqual(builtRoomRect(again.scene, 1, 'library'), library, 'library: same rect after reload');
+  assert.deepEqual(builtRoomRect(again.scene, 2, 'desks'), desks, 'desks: same rect after reload');
 });
 
 test('idle agents beyond the hall seats get a lounge room', () => {

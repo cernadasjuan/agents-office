@@ -104,13 +104,34 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   assert.ok(after.total < DRAW_CALL_BUDGET, `with cards ${JSON.stringify(after)}`);
   // This is the worst case this suite measures. It was 466 before issue #121/#122 (main-room
   // desks and furniture), then dropped to 367 once the perf-shadow-budget PR recovered
-  // headroom and moved DRAW_CALL_BUDGET to 430. It is 368 after the library wing move, the
-  // persona-badge routing fix and the Librarian hat (issues #120/#128/#149): +1 against that
-  // baseline. This fixture now actually wears the Librarian hat (`tests/real-size-office.ts`'s
-  // own PERSONAS list, issue #128 review: the first fixture claimed +1 without ever including
-  // it). Each PR gets up to 5 more before it must recover headroom elsewhere, not just add to
-  // the margin left by the last one.
-  assert.ok(after.total <= 372, `worst case ${after.total} exceeds the current baseline (367) + 5`);
+  // headroom and moved DRAW_CALL_BUDGET to 430. The library wing move, the persona-badge
+  // routing fix and the Librarian hat (issues #120/#128/#149) land it at 372, with the hat
+  // genuinely worn (`tests/real-size-office.ts`'s own PERSONAS list, issue #128 review) and
+  // its one source of randomness seeded (the library's bookshelves, same file, issue #128
+  // review round 2: an unseeded book count and color made this total drift between runs,
+  // 368 to 372, depending on how many book colors a shelf happened to draw). Pinned here at
+  // 374, 372 plus 2: real headroom above the number this fixture actually and repeatably
+  // measures, not a number nobody reproduces. Each PR gets up to 5 more against the 372
+  // baseline before it must recover headroom elsewhere, not just add to the margin left by
+  // the last one.
+  assert.ok(after.total <= 374, `worst case ${after.total} exceeds the pinned baseline (372) + 2`);
+});
+
+test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
+  const totals = new Set<number>();
+  for (let run = 0; run < 8; run++) {
+    const { scene, manager, github } = buildRealSizeOffice();
+    const agents = manager.getAgents();
+    agents.forEach((managed, a) => {
+      managed.info.extras = { ...managed.info.extras, issues: Array.from({ length: 5 }, (_, i) => ({ number: a * 10 + i + 1, title: '', repo: 'agents-office', color: '0e8a16' })) };
+    });
+    github.agentsChanged(agents);
+    scene.updateMatrixWorld();
+    new StaticBatch(scene).update();
+    new FigureBatch(scene).sync(agents.map((managed) => managed.figure.group));
+    totals.add(countDrawCalls(scene).total);
+  }
+  assert.deepEqual([...totals], [372], `expected every one of 8 runs to measure 372, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {
