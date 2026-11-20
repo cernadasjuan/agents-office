@@ -51,6 +51,20 @@ test('the legend button toggles the overlay, and Esc or the close button close i
   assert.equal(overlay().hidden, true);
 });
 
+test('opening the legend while pointer lock is active releases the lock', (t) => {
+  const { document, button, overlay } = setup(t);
+  const canvas = document.createElement('canvas');
+  document.body.appendChild(canvas);
+  let exited = 0;
+  Object.defineProperty(document, 'pointerLockElement', { value: canvas, configurable: true });
+  document.exitPointerLock = () => { exited++; };
+
+  button.click();
+
+  assert.equal(overlay().hidden, false);
+  assert.equal(exited, 1);
+});
+
 test('"?" typed in a form field does not open the legend', (t) => {
   const { overlay, press, document } = setup(t);
   press('?', document.getElementById('field')!);

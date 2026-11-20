@@ -83,6 +83,34 @@ test('failed polls count up, keep the last success time, and a good answer reset
   assert.deepEqual(poller.pollHealth, { loaded: true, lastSuccessAt: 10_000, failures: 0 });
 });
 
+test('a malformed 200 body counts as a failure and does not reset poll health', async () => {
+  const clock = { now: 1000 };
+  let answer: () => Promise<Response> = async () => new Response(JSON.stringify({ error: 'boom' }));
+  mock.method(globalThis, 'fetch', () => answer());
+  const poller = pollerAt(clock);
+
+  await poller.poll();
+  assert.deepEqual(poller.pollHealth, { loaded: false, lastSuccessAt: null, failures: 1 });
+
+  clock.now = 4000;
+  await poller.poll();
+  assert.deepEqual(poller.pollHealth, { loaded: false, lastSuccessAt: null, failures: 2 }, 'repeated bad bodies keep counting, not reset to 1 forever');
+});
+
+test('a good empty answer after bad bodies still counts as the first answer', async () => {
+  let answer: () => Promise<Response> = async () => new Response(JSON.stringify({ error: 'boom' }));
+  mock.method(globalThis, 'fetch', () => answer());
+  let updates = 0;
+  const poller = pollerAt({ now: 1000 }, () => updates++);
+
+  await poller.poll();
+  answer = async () => new Response('[]');
+  await poller.poll();
+
+  assert.equal(updates, 1, 'the first good answer is still treated as the first answer, even after bad bodies');
+  assert.deepEqual(poller.pollHealth, { loaded: true, lastSuccessAt: 1000, failures: 0 });
+});
+
 test('a poll skipped because one is still running does not report a failure', async () => {
   mock.method(globalThis, 'fetch', () => new Promise<Response>(() => undefined));
   let reports = 0;

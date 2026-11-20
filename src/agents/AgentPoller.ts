@@ -65,10 +65,16 @@ export class AgentPoller {
       const res = await fetch('/api/agents', { signal: AbortSignal.timeout(POLL_TIMEOUT_MS) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      const agents: DetectedAgent[] = await res.json();
+      const body: unknown = await res.json();
+      if (!Array.isArray(body)) throw new Error('malformed agents response: expected an array');
+      const agents = body as DetectedAgent[];
+
+      // Mark the poll a success only once reconcile has accepted the body, so a
+      // malformed 200 never resets the failure count, and a later good answer
+      // still counts as the first one.
       const firstAnswer = !this.health.loaded;
-      this.health = { loaded: true, lastSuccessAt: this.now(), failures: 0 };
       this.reconcile(agents, firstAnswer);
+      this.health = { loaded: true, lastSuccessAt: this.now(), failures: 0 };
     } catch (error) {
       // API not available, too slow or broken: keep the current state and count the failure
       console.debug('agent poll failed', error);

@@ -76,6 +76,7 @@ export class AgentManager {
     const managed = this.agents.get(agentId);
     if (!managed) return;
     managed.info.extras = extras;
+    managed.figure.setSubagent(extras?.parentId !== undefined);
     managed.figure.setTag(extras?.provider);
     managed.figure.setAttention(extras?.attention, extras?.waitMinutes);
     const seat = this.layout.seatFor(managed.info, managed.info.activity);

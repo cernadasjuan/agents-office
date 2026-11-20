@@ -150,6 +150,10 @@ export class Legend {
     this.fill();
     this.root.hidden = false;
     this.options.button.setAttribute('aria-expanded', 'true');
+    // Pointer lock traps the mouse on the canvas; release it so the close
+    // button (and the rest of the overlay) is reachable by mouse.
+    const document = this.root.ownerDocument;
+    if (document.pointerLockElement) document.exitPointerLock?.();
   }
 
   close(): void {

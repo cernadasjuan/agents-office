@@ -28,9 +28,12 @@ test('one failed poll stays calm; two in a row turn amber; five turn red', () =>
   assert.equal(freshnessText(health(5, 0), 15_000), 'Server not reachable · updated 15 s ago');
 });
 
-test('a server that never answered says so after five failures', () => {
-  assert.equal(freshnessLevel(health(4, null)), 'loading');
+test('a server that never answered turns amber at failure 2 before red at failure 5', () => {
+  assert.equal(freshnessLevel(health(1, null)), 'loading');
+  assert.equal(freshnessLevel(health(2, null)), 'warn');
+  assert.equal(freshnessLevel(health(4, null)), 'warn');
   assert.equal(freshnessLevel(health(5, null)), 'down');
+  assert.equal(freshnessText(health(2, null), 9000), 'Loading agents… · retrying');
   assert.equal(freshnessText(health(5, null), 15_000), 'Server not reachable');
 });
 
