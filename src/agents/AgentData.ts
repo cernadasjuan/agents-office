@@ -8,6 +8,8 @@ export interface AgentExtras {
   waitMinutes?: number;
   group?: { id: string; label: string };
   badges?: string[];
+  /** Skills used at least once this session, newest-loaded last (issue #166, the `skills` plugin). Without it the card falls back to personas only. */
+  skills?: string[];
   /** `color` is the card border color as `rrggbb` (the issue's label color). */
   issues?: Array<{ number: number; title: string; column?: string; repo?: string; color?: string }>;
   room?: string;
@@ -23,6 +25,12 @@ export interface AgentInfo {
   name: string;
   activity: Activity;
   extras?: AgentExtras;
+}
+
+/** The first 8 hex characters of the public id (issue #171): short, and stable for this
+ * server run. The card and the floating label both call this, so they always agree. */
+export function shortAgentId(id: string): string {
+  return id.slice(0, 8);
 }
 
 export const ACTIVITIES: Activity[] = [

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac, randomBytes } from 'node:crypto';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
@@ -15,6 +16,18 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout, BUILDING_STORAGE_KEY } = await import('../src/addons/building/BuildingLayout.js');
+const { missionSlot } = await import('../src/addons/building/missionRooms.js');
+const { projectWorld } = await import('../server/seam.js');
+
+/** The same hashing `server/vitePlugin.ts` uses for `publicId`, with its own random key held
+ * for the whole call (one key, so the same raw string always hashes the same, the way one
+ * server run does): a room's real client-facing `id` never carries the raw `mission:<slug>`
+ * key it came from (issue #89 review, fix 2 — `roomView` must match through this, not an
+ * injected raw id). */
+function createFakePublicId(): (raw: string) => string {
+  const key = randomBytes(32).toString('hex');
+  return (raw: string) => createHmac('sha256', key).update(raw).digest('hex');
+}
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -344,6 +357,92 @@ test('a war room\'s furniture grows with the agents actually seated in it (issue
   tick(0);
   assert.equal(pieceCount('desk'), 2);
   assert.equal(pieceCount('debugStation'), 1);
+});
+
+// --- roomView (issue #89, #room=) ---
+
+test('roomView("office") frames the user\'s office, the room at slot 0, never a later waiting room', () => {
+  const { layout } = setup();
+  const view = layout.roomView('office')!;
+  assert.ok(view, 'office exists from the start');
+  const officeRect = slotFor(0).rect;
+  assert.deepEqual([view.bounds.min.x, view.bounds.max.x, view.bounds.min.z, view.bounds.max.z], [officeRect.minX, officeRect.maxX, officeRect.minZ, officeRect.maxZ]);
+  assert.ok(view.bounds.max.y > view.bounds.min.y, 'has floor-to-wall height, not a flat box');
+});
+
+test('roomView is case-insensitive and trims whitespace', () => {
+  const { layout } = setup();
+  assert.deepEqual(layout.roomView('OFFICE'), layout.roomView('office'));
+  assert.deepEqual(layout.roomView('  library  '), layout.roomView('library'));
+});
+
+test('roomView returns null for a kind that is not yet open and for any unknown name', () => {
+  const { layout } = setup();
+  assert.equal(layout.roomView('lab'), null, 'no test lab has been rented yet');
+  assert.equal(layout.roomView('not-a-room'), null);
+  assert.equal(layout.roomView(''), null);
+});
+
+test('roomView matches a mission room by its slugified title or its public id — through the real projectWorld projection (review fix 2)', () => {
+  const { layout } = setup();
+  assert.equal(layout.roomView('media-plan-q1'), null, 'not open yet');
+
+  // The real server projection: the client only ever sees the hashed id and the display
+  // title, never the raw `mission:<slug>` key this started from.
+  const publicId = createFakePublicId();
+  const projected = projectWorld(
+    [{ rooms: [{ key: 'mission:media-plan-q1', kind: 'mission', title: 'Media Plan Q1', state: 'open', walls: {} }] }],
+    ['missions'],
+    publicId,
+  ).rooms[0]!;
+  assert.notEqual(projected.id, 'mission:media-plan-q1', 'the id a client sees is hashed, not the raw key');
+  assert.equal(projected.title, 'Media Plan Q1');
+
+  layout.syncWorldRooms([{ id: projected.id, kind: 'mission', title: projected.title, state: 'open', sleepers: [], walls: {} }]);
+
+  assert.equal(layout.roomView('mission:media-plan-q1'), null, 'the raw server-side key never works on the client');
+  const byTitle = layout.roomView('media-plan-q1')!;
+  assert.ok(byTitle, 'matches by the slugified title instead');
+  const byUppercaseTitle = layout.roomView('Media-Plan-Q1')!;
+  assert.deepEqual(byUppercaseTitle, byTitle, 'case-insensitive, like every other roomView name');
+  const byId = layout.roomView(projected.id)!;
+  assert.deepEqual(byId, byTitle, 'the exact public id also works, for a reviewer who copies it from /api/world');
+
+  const missionRect = missionSlot(0).rect;
+  assert.deepEqual([byTitle.bounds.min.x, byTitle.bounds.max.x, byTitle.bounds.min.z, byTitle.bounds.max.z],
+    [missionRect.minX, missionRect.maxX, missionRect.minZ, missionRect.maxZ]);
+});
+
+test('roomView picks none when two mission rooms slugify to the same title; the exact public id still works (review fix round 2)', () => {
+  const { layout } = setup();
+  const publicId = createFakePublicId();
+  const projected = projectWorld(
+    [{ rooms: [
+      { key: 'mission:media-plan', kind: 'mission', title: 'Media Plan', state: 'open', walls: {} },
+      { key: 'mission:media/plan', kind: 'mission', title: 'Media/Plan', state: 'open', walls: {} },
+    ] }],
+    ['missions'],
+    publicId,
+  ).rooms;
+  assert.notEqual(projected[0]!.id, projected[1]!.id, 'two distinct rooms, two distinct ids');
+
+  layout.syncWorldRooms(projected.map((room) => ({ id: room.id, kind: 'mission' as const, title: room.title, state: 'open' as const, sleepers: [], walls: {} })));
+
+  assert.equal(layout.roomView('media-plan'), null, 'ambiguous by title: picks none, not whichever came first');
+  assert.ok(layout.roomView(projected[0]!.id), 'the exact public id still resolves its own room');
+  assert.ok(layout.roomView(projected[1]!.id), 'and the other room by its own id');
+  assert.notDeepEqual(layout.roomView(projected[0]!.id), layout.roomView(projected[1]!.id));
+});
+
+test('roomView\'s first-person standing point sits inside the room, facing further into it', () => {
+  const { layout } = setup();
+  const view = layout.roomView('office')!;
+  const rect = slotFor(0).rect;
+  assert.ok(view.standing.position.x > rect.minX && view.standing.position.x < rect.maxX, 'inside the room on x');
+  assert.ok(view.standing.position.z > rect.minZ && view.standing.position.z < rect.maxZ, 'inside the room on z');
+  assert.ok(view.standing.position.y > 0, 'a standing eye height, not on the floor');
+  const facing = view.standing.lookAt.clone().sub(view.standing.position);
+  assert.ok(facing.lengthSq() > 0, 'looks somewhere other than straight down at its own feet');
 });
 
 // --- Library and librarians ---
