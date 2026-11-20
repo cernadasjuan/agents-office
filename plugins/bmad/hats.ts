@@ -19,7 +19,10 @@ function assemble(kind: string, height: number, parts: Part[], emissive?: Part):
     const mesh = new THREE.Mesh(geometry, getToonMaterial(color));
     mesh.position.set(...position);
     mesh.scale.set(...scale);
-    mesh.castShadow = true;
+    // No shadow: a hat is a tiny topper, its shadow is imperceptible next to the
+    // figure's own (#96, #98). Up to 4 hats per figure, in up to 11 persona shapes
+    // plus any colored party hat, each shape/color pair is its own FigureBatch
+    // bucket; skipping the shadow drops dozens of tiny casters from the budget.
     mesh.userData.figurePart = true;
     group.add(mesh);
   }
