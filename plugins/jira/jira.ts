@@ -19,12 +19,20 @@ export type ReadFile = (filePath: string) => string;
 
 const MAX_CREDENTIALS_FILE = 4096;
 
-/** An `https://` URL with no path, query or fragment (the Jira site root), or undefined. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * The Jira site root (no path, query or fragment). `https://` always; `http://`
+ * only to loopback, the same carve-out S1 already gives this office's own
+ * server (loopback only) — a local mock Jira for development and tests, never
+ * a real site over plain HTTP.
+ */
 function siteUrl(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.length === 0) return undefined;
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' ? url.origin : undefined;
+    if (url.protocol === 'https:') return url.origin;
+    return url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname) ? url.origin : undefined;
   } catch {
     return undefined;
   }

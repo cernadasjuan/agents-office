@@ -59,6 +59,15 @@ test('credentials come from the three environment variables when all three are s
   assert.deepEqual(credentials, { baseUrl: 'https://beklever.atlassian.net', email: 'gamyot@beklever.com', token: 'super-secret-token-value' });
 });
 
+test('a plain http base URL is accepted only for loopback, a local mock Jira for development (issue #145 review)', () => {
+  for (const host of ['localhost', '127.0.0.1', '[::1]']) {
+    const credentials = resolveJiraCredentials({ ...ENV, AGENTS_OFFICE_JIRA_BASE_URL: `http://${host}:4321` }, () => '/nonexistent', defaultReadFile);
+    assert.equal(credentials?.baseUrl, `http://${host}:4321`, `loopback host ${host}`);
+  }
+  assert.equal(resolveJiraCredentials({ ...ENV, AGENTS_OFFICE_JIRA_BASE_URL: 'http://jira.example.com' }, () => '/nonexistent', defaultReadFile), undefined,
+    'plain http to a real host is still rejected');
+});
+
 test('a non-https base URL, or any of the three missing, falls through to the file, which is also absent: no credentials', () => {
   assert.equal(resolveJiraCredentials({ ...ENV, AGENTS_OFFICE_JIRA_BASE_URL: 'http://not-https.example' }, () => '/nonexistent', defaultReadFile), undefined);
   assert.equal(resolveJiraCredentials({ ...ENV, AGENTS_OFFICE_JIRA_EMAIL: undefined }, () => '/nonexistent', defaultReadFile), undefined);
