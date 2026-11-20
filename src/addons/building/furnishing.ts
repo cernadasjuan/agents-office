@@ -171,9 +171,14 @@ function furnishDesks(): RoomPlan {
 function furnishPlanning(): RoomPlan {
   const pieces: Placement[] = [];
   const spots: SpotPlan[] = [];
-  for (const a of rows(3, 3.6)) {
-    pieces.push({ piece: PIECES.whiteboard(), a, d: ROOM_SIZE - 0.3 });
-    spots.push({ type: 'planning', a, d: ROOM_SIZE - 1.1, look: [a, ROOM_SIZE - 0.3, 1.5] });
+  // The middle board stands off the far wall, clear of the gap an outer room's door may need
+  for (const { a, d } of [
+    { a: -3.6, d: ROOM_SIZE - 0.3 },
+    { a: 0, d: ROOM_SIZE - 1.5 },
+    { a: 3.6, d: ROOM_SIZE - 0.3 },
+  ]) {
+    pieces.push({ piece: PIECES.whiteboard(), a, d });
+    spots.push({ type: 'planning', a, d: d - 0.8, look: [a, d, 1.5] });
   }
   return { pieces, spots, signs: [] };
 }
@@ -182,7 +187,8 @@ function furnishPlanning(): RoomPlan {
 function furnishLibrary(): RoomPlan {
   const pieces: Placement[] = [];
   const spots: SpotPlan[] = [];
-  for (const a of rows(4, 2.5)) {
+  // Pulled off center so the pair nearest the middle stays clear of the far-wall door gap
+  for (const a of [-3.9, -2.2, 2.2, 3.9]) {
     pieces.push({ piece: PIECES.bookshelf(), a, d: ROOM_SIZE - 0.5 });
     spots.push({ type: 'researching', a, d: ROOM_SIZE - 1.5, look: [a, ROOM_SIZE - 0.5, 1.0] });
   }
