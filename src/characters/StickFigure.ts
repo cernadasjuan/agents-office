@@ -32,6 +32,7 @@ export class StickFigure {
   private waitMinutes: number | undefined;
   private callsForYou = false;
   private subagent = false;
+  private stuck = false;
   private beacon: THREE.Mesh | null = null;
 
   constructor(name: string, accentColor: THREE.Color) {
@@ -90,6 +91,13 @@ export class StickFigure {
     if (this.beacon) this.beacon.visible = this.callsForYou;
   }
 
+  /** Busy with no transcript write for a long while: the label reads "Stuck?" instead of the activity. */
+  setStuck(stuck: boolean): void {
+    if (stuck === this.stuck) return;
+    this.stuck = stuck;
+    this.refreshLabel();
+  }
+
   /** True while the figure walks to its station; the walk ends with a snap and a turn to the station. */
   get walking(): boolean {
     return this.isMoving;
@@ -117,7 +125,7 @@ export class StickFigure {
 
   private refreshLabel(): void {
     const activityText = activityLabelFor(this.targetActivity, this.subagent);
-    updateLabel(this.label, this.name, attentionLine(activityText, this.attention, this.waitMinutes), this.tag);
+    updateLabel(this.label, this.name, attentionLine(activityText, this.attention, this.waitMinutes, this.stuck), this.tag);
   }
 
   /** Force a posture for the current seat, or undefined to let the activity decide. */

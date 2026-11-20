@@ -8,7 +8,7 @@ interface DetectedAgent extends AgentExtras {
   activity: string;
 }
 
-const EXTRA_KEYS: Array<keyof AgentExtras> = ['parentId', 'provider', 'attention', 'waitMinutes', 'group', 'badges', 'issues', 'room', 'role', 'actions'];
+const EXTRA_KEYS: Array<keyof AgentExtras> = ['parentId', 'provider', 'attention', 'waitMinutes', 'group', 'badges', 'issues', 'room', 'role', 'actions', 'stuck'];
 
 /** The optional fields the server sent, or undefined when there are none. */
 function extrasOf(agent: DetectedAgent): AgentExtras | undefined {

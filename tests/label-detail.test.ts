@@ -98,6 +98,16 @@ test('an unknown distance (NaN) counts as far, never as near', () => {
   assert.equal(labelDetail(facts({ distance: Number.NaN }), view()), 'compact');
 });
 
+test('smart mode: a stuck agent always gets a full label, in both views and at any zoom, even unselected and unhovered', () => {
+  const stuck = facts({ stuck: true, distance: 500 });
+  assert.equal(labelDetail(stuck, view()), 'full');
+  assert.equal(labelDetail(stuck, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'full');
+});
+
+test('a recovered (no longer stuck) far agent goes back to a compact label', () => {
+  assert.equal(labelDetail(facts({ stuck: false, distance: far }), view()), 'compact');
+});
+
 // --- URL hash and key cycle ---
 
 test('#labels=all selects all labels, everything else gives the smart default', () => {
@@ -150,11 +160,11 @@ test('applyLabelDetail toggles only the compact class and keeps the label conten
 
 // --- Controller ---
 
-function agent(id: string, x: number, attention?: 'waiting' | 'your-turn'): LabelAgent {
+function agent(id: string, x: number, attention?: 'waiting' | 'your-turn', stuck?: boolean): LabelAgent {
   const group = new THREE.Group();
   group.position.set(x, 0, 0);
   return {
-    info: { id, extras: attention ? { attention } : undefined },
+    info: { id, extras: attention || stuck ? { ...(attention ? { attention } : {}), ...(stuck ? { stuck } : {}) } : undefined },
     figure: { group, label: { element: labelElement() } },
   };
 }
@@ -263,4 +273,11 @@ test('controller: an agent without extras (no attention data) follows the distan
   agents.push(agent('plain-near', 2), agent('plain-far', 99));
   controller.update(0);
   assert.deepEqual(compact(), ['far', 'mine', 'plain-far']);
+});
+
+test('controller: a stuck agent far from the camera, unselected and unhovered, still gets a full label', () => {
+  const { controller, agents, compact } = controllerSetup();
+  agents.push(agent('stuck-far', 99, undefined, true));
+  controller.update(0);
+  assert.deepEqual(compact(), ['far', 'mine'], 'stuck-far is absent from the compact list');
 });
