@@ -21,22 +21,34 @@ export function isOfficeHtml(html) {
 }
 
 /**
- * Probes the office port. `reachable` is false only on a connection error or a timeout (the
- * cold-start case: nothing is listening). `isOffice` is true only when a reachable answer is
- * this office's own HTML (the warm-start case); a reachable answer that is not the office's
- * HTML means another app already holds the port. `fetchImpl` is injectable so tests never
- * open a real socket.
+ * Probes the office port. `reachable` is false only on a connection error or a timeout before
+ * any answer arrives at all (the cold-start case: nothing is listening). `isOffice` is true
+ * only when a reachable answer is this office's own HTML (the warm-start case); a reachable
+ * answer that is not the office's HTML means another app already holds the port.
+ *
+ * A server that sends headers, then stalls or resets mid-body (a body-read failure, caught
+ * separately below) still counts as `reachable`, not down: something is listening on the
+ * port, the launcher just could not read enough of it to confirm the office. `fetchImpl` is
+ * injectable so tests never open a real socket, except the one test that deliberately does,
+ * against a raw TCP server that stalls its body on purpose.
  */
 export async function probeOffice(port = DEFAULT_PORT, { timeoutMs = 1000, fetchImpl = fetch } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(`http://127.0.0.1:${port}/`, { signal: controller.signal });
+    let response;
+    try {
+      response = await fetchImpl(`http://127.0.0.1:${port}/`, { signal: controller.signal });
+    } catch {
+      return { reachable: false, isOffice: false };
+    }
     if (typeof response.status !== 'number') return { reachable: false, isOffice: false };
-    const html = typeof response.text === 'function' ? await response.text() : '';
-    return { reachable: true, isOffice: isOfficeHtml(html) };
-  } catch {
-    return { reachable: false, isOffice: false };
+    try {
+      const html = typeof response.text === 'function' ? await response.text() : '';
+      return { reachable: true, isOffice: isOfficeHtml(html) };
+    } catch {
+      return { reachable: true, isOffice: false };
+    }
   } finally {
     clearTimeout(timer);
   }
