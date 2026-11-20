@@ -84,6 +84,15 @@ test('the card shows name, activity, attention band and wait, workspace, provide
   assert.equal(text('.inspector-personas'), 'No personas');
 });
 
+test('an idle agent with a your-turn wait shows "Your turn" in the header, not "Taking a break" (issue #168)', (t) => {
+  const { card, selection, text } = makeCard(t);
+  const idleYourTurn: AgentInfo = { id: 'idle-1', name: 'idle-1', activity: 'idle', extras: { attention: 'your-turn', waitMinutes: 5 } };
+  card.render([idleYourTurn]);
+  selection.select('idle-1');
+  assert.equal(text('.inspector-activity'), 'Your turn', 'the override wins over the raw idle activity, the same as the panel row and the label');
+  assert.equal(text('.inspector-wait'), 'Your turn · 5 min');
+});
+
 test('the subagents list selects a subagent, and a subagent card links back to its parent', (t) => {
   const { card, selection, root, text } = makeCard(t);
   card.render([main, sub]);

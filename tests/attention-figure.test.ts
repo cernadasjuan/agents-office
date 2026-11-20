@@ -102,6 +102,26 @@ test('a fresh your-turn wait raises the hand and shows the beacon', () => {
   assert.equal(activityText(figure), 'Your turn · 4 min');
 });
 
+test('an orchestrating fresh your-turn shows no beacon and no raised hand, and stands hands on hips (issue #168)', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setActivity('idle');
+  figure.setAttention('your-turn', 4, true);
+  run(figure, 3);
+  assert.notEqual(beaconOf(figure)?.visible, true, 'orchestrating never shows the beacon, however fresh the wait');
+  assert.ok(figure.joints.rightUpperArm.rotation.x > -2, 'not the raised-hand angle');
+  assert.ok(Math.abs(figure.joints.rightUpperArm.rotation.z) > 0.1, 'hands on hips instead');
+  assert.equal(activityText(figure), 'Your turn · 4 min', 'the label text is unchanged: only the pose and the signal differ');
+});
+
+test('the beacon carries a hover hint with its meaning, present only while it shows (issue #170)', () => {
+  const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));
+  figure.setAttention('waiting', 4);
+  assert.ok(figure.label.element.title.length > 0, 'a hover hint explains the beacon without opening the legend');
+
+  figure.setAttention('your-turn', 4, true);
+  assert.equal(figure.label.element.title, '', 'no hint without a beacon to explain: orchestrating never calls for you');
+});
+
 test('an aging or cold block keeps its label, with no beacon and no raised hand', () => {
   for (const minutes of [15, 24 * 60]) {
     const figure = new StickFigure('agent', new THREE.Color(0x4a90d9));

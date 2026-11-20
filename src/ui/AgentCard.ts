@@ -316,9 +316,13 @@ export class AgentCard {
 
   private fill(agent: AgentInfo): void {
     const extras = agent.extras ?? {};
+    // Issue #168: the header line reads the same words as the panel row and the floating
+    // label for the same agent at the same time — attention overrides the raw activity text
+    // here too, not just in the separate wait line below it (which keeps the minutes; the
+    // header line here never did, so it stays short next to the band).
     const activityText = activityLabel(agent);
     this.name.textContent = agent.name;
-    this.activity.textContent = activityText;
+    this.activity.textContent = attentionLine(activityText, extras.attention, undefined);
     const waits = extras.attention !== undefined;
     this.wait.textContent = waits ? attentionLine(activityText, extras.attention, extras.waitMinutes) : '';
     this.wait.hidden = !waits;

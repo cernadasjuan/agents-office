@@ -31,7 +31,7 @@ const MODE_TEXT: Record<LabelMode, string> = { smart: 'Labels: smart (V)', all: 
  */
 function projectToScreen(position: THREE.Vector3, camera: THREE.Camera, width: number, height: number): { x: number; y: number } | null {
   const projection = projectToClip(position, camera);
-  if (projection.behind || projection.pastFar) return null;
+  if (projection.behind || projection.pastFar || projection.tooClose) return null;
   const { x, y } = projection.ndc;
   if (x < -1 || x > 1 || y < -1 || y > 1) return null;
   return { x: (x + 1) / 2 * width, y: (1 - y) / 2 * height };
@@ -250,7 +250,14 @@ export class LabelDetailController {
     // near must never disappear there (review fix: PR #152).
     const canDeclutter = view.mode === 'smart' && isViewFromAbove(view.viewMode) && canvasRect.width > 0 && canvasRect.height > 0;
     const agents = this.options.agents();
-    const candidates: DeclutterCandidate[] = [];
+    // Pass 1, writes only: every label's class (full/compact) is set here, and nothing in this
+    // loop reads layout (getBoundingClientRect, offsetWidth and the like). Pass 2 below reads
+    // layout for the agents that need it. Interleaving a write and a read per agent (the old
+    // shape) forces the browser to flush layout once per agent; splitting them into two passes
+    // lets it batch every write first and run the layout pass once for the whole refresh
+    // (review fix: PR #152).
+    interface Candidate { agent: LabelAgent; level: LabelLevel; isSelected: boolean; isHovered: boolean }
+    const prepared: Candidate[] = [];
     for (const agent of agents) {
       agent.figure.group.getWorldPosition(this.figurePosition);
       const isSelected = agent.info.id === selected;
@@ -264,28 +271,34 @@ export class LabelDetailController {
         stuck: agent.info.extras?.stuck,
       }, view);
       applyLabelDetail(agent.figure.label.element, level);
-      if (!canDeclutter) continue;
-      agent.figure.label.getWorldPosition(this.labelPosition);
-      const point = projectToScreen(this.labelPosition, camera, canvasRect.width, canvasRect.height);
-      if (!point) continue; // behind the camera or outside the frustum: never a candidate
-      // The label's own rendered size (set by applyLabelDetail above, this same pass), measured
-      // once here and used only for this candidate: a long name does not silently escape the
-      // fixed-size estimate. Falls back to that estimate when no real layout exists (a test, or
-      // a label not yet in a laid-out document).
-      const box = agent.figure.label.element.getBoundingClientRect();
-      candidates.push({
-        id: agent.info.id,
-        rect: labelRect(point.x, point.y, level, box.width, box.height),
-        priority: labelPriority({
-          selected: isSelected,
-          hovered: isHovered,
-          stuck: agent.info.extras?.stuck === true,
-          attention: agent.info.extras?.attention,
-          waitMinutes: agent.info.extras?.waitMinutes,
-          idle: agent.info.activity === 'idle',
-        }),
-        waitMinutes: agent.info.extras?.waitMinutes ?? -1,
-      });
+      prepared.push({ agent, level, isSelected, isHovered });
+    }
+    // Pass 2, reads only (when declutter runs at all).
+    const candidates: DeclutterCandidate[] = [];
+    if (canDeclutter) {
+      for (const { agent, level, isSelected, isHovered } of prepared) {
+        agent.figure.label.getWorldPosition(this.labelPosition);
+        const point = projectToScreen(this.labelPosition, camera, canvasRect.width, canvasRect.height);
+        if (!point) continue; // behind the camera, outside the frustum, or closer than the near plane: never a candidate
+        // The label's own rendered size (set by applyLabelDetail above, pass 1), measured once
+        // here and used only for this candidate: a long name does not silently escape the
+        // fixed-size estimate. Falls back to that estimate when no real layout exists (a test, or
+        // a label not yet in a laid-out document).
+        const box = agent.figure.label.element.getBoundingClientRect();
+        candidates.push({
+          id: agent.info.id,
+          rect: labelRect(point.x, point.y, level, box.width, box.height),
+          priority: labelPriority({
+            selected: isSelected,
+            hovered: isHovered,
+            stuck: agent.info.extras?.stuck === true,
+            attention: agent.info.extras?.attention,
+            waitMinutes: agent.info.extras?.waitMinutes,
+            idle: agent.info.activity === 'idle',
+          }),
+          waitMinutes: agent.info.extras?.waitMinutes ?? -1,
+        });
+      }
     }
     if (canDeclutter) {
       const visible = declutterLabels(candidates);

@@ -428,3 +428,44 @@ test('declutter: an agent behind the camera is never a candidate, so it cannot w
   controller.refresh();
   assert.deepEqual(hiddenIds(agents), ['behind-camera'], 'never drawn on screen anyway, so its own label hides; "plain" is never hidden by it');
 });
+
+// --- Review fix round (issue #168, from the #152 review comment) ---
+
+test('declutter: a point closer than the near plane is never a candidate either, the same as one behind the camera (review fix)', () => {
+  const { controller, agents, camera } = declutterSetup();
+  const nearPlane = (camera as THREE.PerspectiveCamera).near;
+  // Ahead of the camera (it looks toward -z from z=30) but closer than the near plane: the
+  // renderer clips it there too, and the projection math right at that plane is unreliable.
+  const tooClose = agent('too-close', 0, 'waiting', false, 1);
+  tooClose.figure.group.position.set(0, 0, 30 - nearPlane / 2);
+  agents.push(agent('plain', 0), tooClose);
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['too-close'], 'never drawn on screen anyway, so its own label hides; "plain" is never hidden by it');
+});
+
+test('declutter: every label\'s class write happens before any getBoundingClientRect read, so one refresh forces one layout pass, not one per agent (review fix)', () => {
+  const { controller, agents } = declutterSetup({ zoom: zoomedOut });
+  agents.push(agent('a', 0), agent('b', 4));
+  const order: string[] = [];
+  for (const a of agents) {
+    const el = a.figure.label.element;
+    const originalToggle = el.classList.toggle.bind(el.classList);
+    el.classList.toggle = ((...args: Parameters<typeof originalToggle>) => {
+      order.push(`write:${a.info.id}`);
+      return originalToggle(...args);
+    }) as typeof el.classList.toggle;
+    const originalRect = el.getBoundingClientRect.bind(el);
+    el.getBoundingClientRect = () => {
+      order.push(`read:${a.info.id}`);
+      return originalRect();
+    };
+  }
+  controller.update(0);
+  controller.refresh();
+  const firstRead = order.findIndex((entry) => entry.startsWith('read:'));
+  const lastWrite = order.reduce((last, entry, index) => (entry.startsWith('write:') ? index : last), -1);
+  assert.ok(order.some((entry) => entry.startsWith('write:')), `at least one write happened: ${order.join(', ')}`);
+  assert.ok(order.some((entry) => entry.startsWith('read:')), `at least one read happened: ${order.join(', ')}`);
+  assert.ok(lastWrite < firstRead, `every write finishes before any read: ${order.join(', ')}`);
+});
