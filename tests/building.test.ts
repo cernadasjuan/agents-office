@@ -228,14 +228,57 @@ test('a mission becomes a war room north of the hall, with a door in the hall ba
 test('agents of a mission work in its war room, their helpers stand near them, and a locked room keeps them out', () => {
   const { layout, agent } = setup();
   layout.syncWorldRooms([missionRoom()]);
-  const seat = layout.seatFor(agent('s', 'planning', { room: 'room-1' }), null)!;
-  assert.match(seat.key, /^mission0_seat_/);
+  const seat = layout.seatFor(agent('s', 'implementing', { room: 'room-1' }), null)!;
+  assert.match(seat.key, /^mission0_/);
   const helper = layout.seatFor(agent('h', 'researching', { parentId: 's' }), null)!;
-  assert.match(helper.key, /^mission0_seat_\d+_pod\d$/);
+  assert.match(helper.key, /^mission0_.+_pod\d$/);
 
   layout.syncWorldRooms([missionRoom('locked')]);
   const late = layout.seatFor(agent('late', 'implementing', { room: 'room-1' }), null)!;
   assert.doesNotMatch(late.key, /^mission/);
+});
+
+// --- Issue #126: war-room furniture routes agent activity, in-room first ---
+
+test('AC1/AC2/AC3: researching, planning and idle agents go to their own room\'s bookshelf, whiteboard and sofa', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const researching = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
+  assert.match(researching.key, /^mission0_furniture_\d+$/);
+  const planning = layout.seatFor(agent('p', 'planning', { room: 'room-1' }), null)!;
+  assert.match(planning.key, /^mission0_furniture_\d+$/);
+  const idle = layout.seatFor(agent('i', 'idle', { room: 'room-1' }), null)!;
+  assert.match(idle.key, /^mission0_furniture_\d+$/);
+  // Three different pieces, not the same one shared by coincidence
+  assert.equal(new Set([researching.key, planning.key, idle.key]).size, 3);
+});
+
+test('AC5: a researching mission agent never goes to the library-knowledge shelves', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const seat = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
+  assert.doesNotMatch(seat.key, /^room1_researching_/, 'room1 is the building Library, not the war room');
+});
+
+test('AC4: once the room\'s one researching spot is taken, the next researcher still stays in the room, not a dedicated room', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  layout.seatFor(agent('r1', 'researching', { room: 'room-1' }), null);
+  const seat = layout.seatFor(agent('r2', 'researching', { room: 'room-1' }), null)!;
+  assert.match(seat.key, /^mission0_/, 'still in the war room: the generic ring, not the library or a dedicated room');
+});
+
+// --- Issue #129: a 9th desk-like agent overflows to the room's standing ring, not a 9th desk ---
+
+test('AC4 (#129): once a war room\'s 8 desk slots are full, the next desk-like agent uses the room\'s standing ring', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  for (let i = 0; i < 8; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
+  tick(0); // grows the desk grid to its 8-slot cap
+  for (let i = 0; i < 8; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
+  const overflow = layout.seatFor(agent('d8', 'implementing', { room: 'room-1' }), null)!;
+  assert.doesNotMatch(overflow.key, /_furniture_/, 'no 9th desk piece');
+  assert.match(overflow.key, /^mission0_seat_/, 'the room\'s own standing ring instead');
 });
 
 test('a waiting agent still goes to the user office before its war room', () => {

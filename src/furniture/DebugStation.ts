@@ -44,7 +44,8 @@ export function createDebugStation(): THREE.Group {
   logScreen.position.set(0.45, 1.02, -0.15);
   logScreen.castShadow = true;
   group.add(logScreen);
-  const logFace = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.16), getEmissiveMaterial(Colors.monitorScreenActive, Colors.monitorScreenActive, 0.5));
+  // Same intensity as the main screen, so the log monitor shares its merge bucket.
+  const logFace = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.16), getEmissiveMaterial(Colors.monitorScreenActive, Colors.monitorScreenActive, 0.7));
   logFace.position.set(0.45, 1.02, -0.133);
   group.add(logFace);
 

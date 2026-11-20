@@ -183,7 +183,9 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
     });
     plan.stations.forEach((spot, n) => {
       const key = furnitureKey(n);
-      stations.set(key, station(spot.type, frame.point(spot.a, spot.d), frame.point(...spot.look), spot.posture));
+      // Room-scoped, issue #126: `room:<id>:<activity>` so BuildingLayout can route an agent to
+      // this room's own piece without ever matching another war room's same-named station.
+      stations.set(key, station(`room:${room.id}:${spot.type}`, frame.point(spot.a, spot.d), frame.point(...spot.look), spot.posture));
       furnitureStationKeys.push(key);
     });
   };

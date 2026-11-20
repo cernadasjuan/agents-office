@@ -24,7 +24,18 @@ import type { PickTarget } from '../../scene/Selection.js';
  */
 const DESK_WORK = new Set<Activity>(['implementing', 'debugging', 'deploying', 'planning', 'reviewing', 'writing_docs']);
 /** War-room furniture growth (issue #125): activities that use the room's generic desk-like grid. */
-const WAR_ROOM_DESK_LIKE = new Set<Activity>(['implementing', 'reviewing', 'testing', 'writing_docs']);
+const WAR_ROOM_DESK_LIKE = new Set<Activity>(['implementing', 'reviewing', 'testing', 'writing_docs', 'deploying']);
+/**
+ * War-room routing (issue #126): an agent's activity maps to a piece in its own war room first.
+ * A desk-like activity (not debugging) shares the room's desk grid, same as the growth rule above.
+ */
+const WAR_ROOM_STATION_FOR: Partial<Record<Activity, string>> = {
+  debugging: 'debugging',
+  planning: 'planning',
+  researching: 'researching',
+  idle: 'idle',
+};
+for (const activity of WAR_ROOM_DESK_LIKE) WAR_ROOM_STATION_FOR[activity] = 'implementing';
 const TRIP_STATION: Partial<Record<Activity, string>> = {
   researching: 'researching',
   testing: 'testing',
@@ -220,7 +231,7 @@ export class BuildingLayout implements LayoutStrategy {
     let key: string;
     if (target === 'home') key = this.homeOf(state);
     else if (target === 'pod') key = this.claim(this.podKeys(this.agents.get(state.agent.extras!.parentId!)!), 'pod');
-    else if (target.startsWith('room:')) key = this.claimInRoom(target.slice('room:'.length));
+    else if (target.startsWith('room:')) key = this.claimInRoom(target.slice('room:'.length), state.agent.activity);
     else if (target === 'queue') key = this.claimOfType('queue');
     else key = this.claimOfType(target.slice('trip:'.length));
     state.seat = key;
@@ -265,8 +276,17 @@ export class BuildingLayout implements LayoutStrategy {
     return free.reduce((closest, key) => (distanceToWorkspace(key) < distanceToWorkspace(closest) ? key : closest));
   }
 
-  /** A seat in a war room, or a lounge seat when the room is full. */
-  private claimInRoom(roomId: string): string {
+  /**
+   * A seat in a war room: its own piece for the current activity first (issue #126), so a
+   * researching agent stands at that room's bookshelf and a planning agent at its whiteboard,
+   * never at the library or a dedicated room. Without a free piece for the activity, or without
+   * one at all, the agent takes any free seat in the room's generic ring. Only a room with no
+   * free seat of any kind falls back to the lounge.
+   */
+  private claimInRoom(roomId: string, activity: Activity): string {
+    const preferredType = WAR_ROOM_STATION_FOR[activity];
+    const preferred = preferredType && this.keysOfType(`room:${roomId}:${preferredType}`).find((key) => !this.stations.get(key)!.occupied);
+    if (preferred) return this.claim([preferred], 'room');
     const free = this.keysOfType(`room:${roomId}`).find((key) => !this.stations.get(key)!.occupied);
     return free ? this.claim([free], 'room') : this.claimOfType('idle');
   }

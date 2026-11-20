@@ -97,9 +97,26 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts): WarRoo
   // --- Must-haves: a clock, plants, a sofa, a bookshelf, a whiteboard ---
   const nearWall = ROOM_SIZE / 2 - 0.1; // just inside the side walls (a = ±6)
   pieces.push({ piece: PIECES.clock(), a: jitter(rand, -1.6, 0.1), d: jitter(rand, ROOM_SIZE - 0.15, 0.05), y: 2.3 });
-  pieces.push({ piece: PIECES.whiteboard(), a: jitter(rand, -nearWall + 0.3, 0.1), d: jitter(rand, 5.0, 0.3), turn: Math.PI / 2 });
-  pieces.push({ piece: PIECES.bookshelf(rand, BOOKSHELF_COLORS), a: jitter(rand, -nearWall + 0.3, 0.1), d: jitter(rand, 7.6, 0.3), turn: Math.PI / 2 });
-  pieces.push({ piece: PIECES.sofa(), a: jitter(rand, nearWall - 0.7, 0.1), d: jitter(rand, 5.0, 0.3), turn: -Math.PI / 2 });
+
+  const whiteboardA = jitter(rand, -nearWall + 0.3, 0.1);
+  const whiteboardD = jitter(rand, 5.0, 0.3);
+  pieces.push({ piece: PIECES.whiteboard(), a: whiteboardA, d: whiteboardD, turn: Math.PI / 2 });
+  // Issue #126: a planning agent stands at this board, facing it
+  stations.push({ type: 'planning', a: whiteboardA + 0.9, d: whiteboardD, look: [whiteboardA, whiteboardD, 1.5], posture: 'standing' });
+
+  const bookshelfA = jitter(rand, -nearWall + 0.3, 0.1);
+  const bookshelfD = jitter(rand, 7.6, 0.3);
+  pieces.push({ piece: PIECES.bookshelf(rand, BOOKSHELF_COLORS), a: bookshelfA, d: bookshelfD, turn: Math.PI / 2 });
+  // Issue #126: a researching agent stands at the mission's own shelf, not the library
+  stations.push({ type: 'researching', a: bookshelfA + 0.9, d: bookshelfD, look: [bookshelfA, bookshelfD, 1.2], posture: 'standing' });
+
+  const sofaA = jitter(rand, nearWall - 0.7, 0.1);
+  const sofaD = jitter(rand, 5.0, 0.3);
+  pieces.push({ piece: PIECES.sofa(), a: sofaA, d: sofaD, turn: -Math.PI / 2 });
+  // Issue #126: an idle agent sits here instead of a trip to the lounge; 2 seats, the sofa's own width
+  stations.push({ type: 'idle', a: sofaA - 0.6, d: sofaD - 0.6, look: [sofaA - 0.6, sofaD - 1.6, 1.0], posture: 'seated' });
+  stations.push({ type: 'idle', a: sofaA - 0.6, d: sofaD + 0.6, look: [sofaA - 0.6, sofaD + 1.6, 1.0], posture: 'seated' });
+
   pieces.push({ piece: PIECES.lowTable(), a: jitter(rand, nearWall - 1.6, 0.1), d: jitter(rand, 5.0, 0.3) });
   const plantCount = roomTier === 'small' ? 3 : roomTier === 'medium' ? 4 : 5;
   const plantSpots: Array<[number, number]> = [
