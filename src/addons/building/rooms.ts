@@ -10,7 +10,7 @@ import { roomFurnishing, type RoomPlan } from './furnishing.js';
 
 export * from './roomLabels.js';
 
-export type RoomKind = 'office' | 'desks' | 'library' | 'lab' | 'review' | 'lounge';
+export type RoomKind = 'office' | 'desks' | 'library' | 'lab' | 'lounge';
 
 /** The station type each room kind adds. 'queue' spots are where agents wait for the user. */
 export const ROOM_STATION_TYPE: Record<RoomKind, string> = {
@@ -18,7 +18,6 @@ export const ROOM_STATION_TYPE: Record<RoomKind, string> = {
   desks: 'implementing',
   library: 'researching',
   lab: 'testing',
-  review: 'reviewing',
   lounge: 'idle',
 };
 
@@ -27,7 +26,6 @@ export const ROOM_TITLE: Record<RoomKind, string> = {
   desks: 'Desks',
   library: 'Library',
   lab: 'Test lab',
-  review: 'Writing room',
   lounge: 'Lounge',
 };
 
@@ -36,7 +34,6 @@ const FLOOR_TINT: Record<RoomKind, number> = {
   desks: 0xcfc3a0,
   library: 0xa58a6a,
   lab: 0xb5cdb8,
-  review: 0xd4c4b0,
   lounge: 0x9a8ab0,
 };
 

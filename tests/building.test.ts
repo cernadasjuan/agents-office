@@ -97,6 +97,25 @@ test('a saved building with an old planning room in storage drops it silently (#
   assert.deepEqual(layout.roomKinds, ['office', 'library'], 'the stale planning entry is filtered out, no error');
 });
 
+test('an agent with no war room that writes docs stays at its desk, not the lounge (#141)', () => {
+  const { layout, agent, tick } = setup();
+  const home = layout.seatFor(agent('a', 'implementing'), null)!;
+  assert.equal(layout.seatFor(agent('a', 'writing_docs'), 'implementing'), null, 'writing docs is desk work: no move pending');
+  assert.deepEqual(tick(5000).filter((m) => m.agentId === 'a'), [], 'no trip ever starts for writing docs');
+  assert.equal(layout.seatFor(agent('a', 'reviewing'), 'writing_docs'), null, 'still the same desk');
+});
+
+test('the review RoomKind no longer exists: the building never opens a writing room', () => {
+  const { layout } = setup();
+  assert.ok(!layout.roomKinds.includes('review' as never), 'no review room kind is ever recorded');
+});
+
+test('a saved building with an old writing room in storage drops it silently (#141)', () => {
+  const storage = new Map<string, string>([[BUILDING_STORAGE_KEY, '["office","review","library"]']]);
+  const { layout } = setup(storage);
+  assert.deepEqual(layout.roomKinds, ['office', 'library'], 'the stale review entry is filtered out, no error');
+});
+
 test('a short tool call does not make the agent walk', () => {
   const { layout, agent, tick } = setup();
   layout.seatFor(agent('a', 'implementing'), null);
