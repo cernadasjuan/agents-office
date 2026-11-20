@@ -43,17 +43,39 @@ test('smart mode, first person: an agent within the near distance gets a full la
   assert.equal(labelDetail(facts({ distance: FIRST_PERSON_FULL_LABEL_DISTANCE }), view()), 'full');
 });
 
-test('smart mode: a waiting (blocked) agent always gets a full label, in both views and at any zoom', () => {
+test('smart mode: a waiting agent without a known wait time always gets a full label (the old behavior), in both views and at any zoom', () => {
   const waiting = facts({ attention: 'waiting', distance: 500 });
   assert.equal(labelDetail(waiting, view()), 'full');
   assert.equal(labelDetail(waiting, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'full');
+});
+
+test('smart mode: a fresh wait always gets a full label, in both views and at any zoom (#132)', () => {
+  const fresh = facts({ attention: 'waiting', waitMinutes: 5, distance: 500 });
+  assert.equal(labelDetail(fresh, view()), 'full');
+  assert.equal(labelDetail(fresh, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'full');
 });
 
 test('smart mode: a cold block (waiting 24 h or more) gets a compact label like any other agent', () => {
   const coldBlock = facts({ attention: 'waiting', waitMinutes: 2 * 24 * 60, distance: 500 });
   assert.equal(labelDetail(coldBlock, view()), 'compact');
   assert.equal(labelDetail(coldBlock, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact');
-  assert.equal(labelDetail(facts({ attention: 'waiting', waitMinutes: 60, distance: 500 }), view()), 'full', 'an aging block stays full');
+});
+
+test('smart mode, overview or isometric: an aging block follows the normal zoom rule, not forced full (#132)', () => {
+  const agingFar = facts({ attention: 'waiting', waitMinutes: 60, distance: 500 });
+  assert.equal(labelDetail(agingFar, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact', 'zoomed out: compact, same as a real queue at scale');
+  assert.equal(labelDetail(agingFar, view({ viewMode: 'isometric', zoomDistance: zoomedOut })), 'compact', 'isometric follows the same rule as overview');
+  assert.equal(labelDetail(facts({ attention: 'waiting', waitMinutes: 60, distance: 500 }), view({ viewMode: 'overview', zoomDistance: zoomedIn })), 'full', 'zoomed in: full, like any other agent');
+});
+
+test('smart mode, first person: an aging block still forces a full label, unchanged from before #132', () => {
+  // The issue #132 fixed described overview crowding only. First person's own
+  // queue spacing can already overlap on screen; an aging wait nearby must not
+  // lose its activity line (review fix: https://github.com/gabriel-amyot/agents-office/pull/152).
+  const agingFar = facts({ attention: 'waiting', waitMinutes: 60, distance: 500 });
+  assert.equal(labelDetail(agingFar, view()), 'full', 'far in first person: still full, the original rule');
+  const agingNear = facts({ attention: 'waiting', waitMinutes: 60, distance: near });
+  assert.equal(labelDetail(agingNear, view()), 'full', 'still full up close too');
 });
 
 test('smart mode: "your turn" alone does not make a label full (most idle sessions have it)', () => {
@@ -160,12 +182,19 @@ test('applyLabelDetail toggles only the compact class and keeps the label conten
 
 // --- Controller ---
 
-function agent(id: string, x: number, attention?: 'waiting' | 'your-turn', stuck?: boolean): LabelAgent {
+function agent(id: string, x: number, attention?: 'waiting' | 'your-turn', stuck?: boolean, waitMinutes?: number, activity = 'implementing'): LabelAgent {
   const group = new THREE.Group();
   group.position.set(x, 0, 0);
+  // A real child object, like the real label offset from the figure (Label.ts, createLabel): getWorldPosition works the same way.
+  const label = new THREE.Object3D();
+  label.position.set(0, 2.1, 0);
+  group.add(label);
+  const extras = attention || stuck || waitMinutes !== undefined
+    ? { ...(attention ? { attention } : {}), ...(stuck ? { stuck } : {}), ...(waitMinutes !== undefined ? { waitMinutes } : {}) }
+    : undefined;
   return {
-    info: { id, extras: attention || stuck ? { ...(attention ? { attention } : {}), ...(stuck ? { stuck } : {}) } : undefined },
-    figure: { group, label: { element: labelElement() } },
+    info: { id, activity, extras },
+    figure: { group, label: Object.assign(label, { element: labelElement() }) },
   };
 }
 
@@ -280,4 +309,122 @@ test('controller: a stuck agent far from the camera, unselected and unhovered, s
   agents.push(agent('stuck-far', 99, undefined, true));
   controller.update(0);
   assert.deepEqual(compact(), ['far', 'mine'], 'stuck-far is absent from the compact list');
+});
+
+// --- Declutter integration (#132): the real-scale queue overlap ---
+
+function hiddenIds(agents: LabelAgent[]): string[] {
+  return agents.filter((a) => a.figure.label.element.style.visibility === 'hidden').map((a) => a.info.id);
+}
+
+function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'overview' | 'isometric'; zoom?: number } = {}) {
+  const document = dom.window.document;
+  const canvas = document.createElement('canvas');
+  document.body.appendChild(canvas);
+  // jsdom never computes real layout; stub the canvas size so the controller can project a screen point.
+  canvas.getBoundingClientRect = () => ({ width: 1600, height: 1000, left: 0, top: 0, right: 1600, bottom: 1000, x: 0, y: 0, toJSON: () => ({}) });
+  const camera = new THREE.PerspectiveCamera(60, 1.6, 0.1, 200);
+  camera.position.set(0, 1, 30);
+  camera.lookAt(0, 1, 0);
+  camera.updateMatrixWorld();
+  const agents: LabelAgent[] = [];
+  const state = { viewMode: options.viewMode ?? 'overview', zoom: options.zoom ?? 0, selected: null as string | null, picked: null as string | null };
+  const controller = new LabelDetailController({
+    agents: () => agents,
+    camera,
+    canvas,
+    keys: dom.window,
+    viewMode: () => state.viewMode,
+    zoomDistance: () => state.zoom,
+    pick: () => state.picked,
+    selected: () => state.selected,
+    hash: options.hash,
+  });
+  return { controller, agents, state, canvas, camera };
+}
+
+test('declutter: a waiting agent overlapping a plain working one keeps the wait visible, hides the other', () => {
+  const { controller, agents } = declutterSetup();
+  agents.push(agent('working', 0, undefined, false, undefined, 'implementing'));
+  agents.push(agent('aging-wait', 0, 'waiting', false, 60));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['working'], 'the aging wait outranks a plain working agent and stays visible');
+});
+
+test('declutter: a selected agent overlapping a fresh wait still wins (selected outranks everything)', () => {
+  const { controller, agents, state } = declutterSetup();
+  agents.push(agent('fresh-wait', 0, 'waiting', false, 5));
+  agents.push(agent('picked', 0));
+  state.selected = 'picked';
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['fresh-wait']);
+});
+
+test('declutter: an agent with a clear screen spot of its own is never hidden, whatever its priority', () => {
+  const { controller, agents } = declutterSetup();
+  agents.push(agent('here', 0, undefined, false, undefined, 'idle'));
+  agents.push(agent('far-away', -8, undefined, false, undefined, 'implementing'));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), [], 'the two project to different screen points: no overlap, nothing hides');
+});
+
+test('declutter: #labels=all shows every label, even ones that would otherwise overlap', () => {
+  const { controller, agents, state } = declutterSetup({ hash: '#labels=all' });
+  agents.push(agent('a', 0), agent('b', 0));
+  state.viewMode = 'overview';
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), []);
+});
+
+// --- Review fix round (PR #152): view-mode guard, real label size, behind-camera skip ---
+
+test('declutter: never runs in first person, even for labels that would overlap in the overview (review fix)', () => {
+  const { controller, agents, state } = declutterSetup({ viewMode: 'first-person' });
+  agents.push(agent('working', 0), agent('aging-wait', 0, 'waiting', false, 60));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), [], 'same screen spot, but first person never hides a label');
+  state.viewMode = 'overview';
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['working'], 'the same two agents do decide an overlap once in the overview');
+});
+
+test('declutter: runs in the isometric view too (review fix)', () => {
+  const { controller, agents } = declutterSetup({ viewMode: 'isometric' });
+  agents.push(agent('working', 0), agent('aging-wait', 0, 'waiting', false, 60));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['working']);
+});
+
+test('declutter: a long name\'s real rendered width can overlap a neighbor the fixed estimate alone would miss (review fix)', () => {
+  // Zoomed out, so labels go compact (zoom <= OVERVIEW_FULL_LABEL_ZOOM would force full and
+  // use FULL_LABEL_SIZE instead): x=0 and x=4 project about 115 px apart here, just past the
+  // sum of two compact half-widths (55+55=110).
+  const { controller, agents } = declutterSetup({ zoom: zoomedOut });
+  agents.push(agent('working', 0), agent('long-name-idle', 4, undefined, false, undefined, 'idle'));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), [], 'with the fixed compact-size estimate alone, these two do not overlap');
+
+  agents[1].figure.label.element.getBoundingClientRect = () => (
+    { width: 300, height: 24, left: 0, top: 0, right: 300, bottom: 24, x: 0, y: 0, toJSON: () => ({}) }
+  );
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['long-name-idle'], 'the real, wider box now overlaps "working" and the lower-priority idle one hides');
+});
+
+test('declutter: an agent behind the camera is never a candidate, so it cannot wrongly outrank an on-screen label (review fix)', () => {
+  const { controller, agents } = declutterSetup();
+  // Behind the camera along its own view direction: it looks toward -z from z=30, so z=60 sits past it.
+  const behind = agent('behind-camera', 0, 'waiting', false, 1);
+  behind.figure.group.position.set(0, 0, 60);
+  agents.push(agent('plain', 0), behind);
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['behind-camera'], 'never drawn on screen anyway, so its own label hides; "plain" is never hidden by it');
 });
