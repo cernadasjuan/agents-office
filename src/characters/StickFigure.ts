@@ -3,7 +3,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { buildSkeleton, Joints } from './StickFigureParts.js';
 import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
-import { ACTIVITY_LABELS } from '../agents/AgentData.js';
+import { ACTIVITY_LABELS, activityLabelFor } from '../agents/AgentData.js';
 import { attentionLine, callsForYou } from '../ui/attention.js';
 import type { AgentExtras } from '../agents/AgentData.js';
 import { getToonMaterial } from '../utils/Materials.js';
@@ -31,6 +31,7 @@ export class StickFigure {
   private attention: string | undefined;
   private waitMinutes: number | undefined;
   private callsForYou = false;
+  private subagent = false;
   private beacon: THREE.Mesh | null = null;
 
   constructor(name: string, accentColor: THREE.Color) {
@@ -58,6 +59,13 @@ export class StickFigure {
 
     this.targetActivity = activity;
     this.transitionProgress = 0;
+    this.refreshLabel();
+  }
+
+  /** A subagent at rest reads "Done": it has finished its task. */
+  setSubagent(subagent: boolean): void {
+    if (subagent === this.subagent) return;
+    this.subagent = subagent;
     this.refreshLabel();
   }
 
@@ -108,7 +116,7 @@ export class StickFigure {
   }
 
   private refreshLabel(): void {
-    const activityText = ACTIVITY_LABELS[this.targetActivity] ?? this.targetActivity;
+    const activityText = activityLabelFor(this.targetActivity, this.subagent);
     updateLabel(this.label, this.name, attentionLine(activityText, this.attention, this.waitMinutes), this.tag);
   }
 

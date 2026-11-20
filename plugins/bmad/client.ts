@@ -3,7 +3,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { registerExtension, type OfficeExtension } from '../../src/extensions.js';
 import type { ManagedAgent } from '../../src/agents/AgentManager.js';
 import type { StickFigure } from '../../src/characters/StickFigure.js';
-import { ACTIVITY_LABELS } from '../../src/agents/AgentData.js';
+import { activityLabel } from '../../src/agents/AgentData.js';
 import { buildHat } from './hats.js';
 import { personaName } from './roster.js';
 
@@ -67,7 +67,7 @@ function removeStack(entry: Worn): void {
 function showNames(managed: ManagedAgent, badges: string[]): void {
   const line = managed.figure.label.element.querySelector('.activity');
   if (!line) return;
-  const base = ACTIVITY_LABELS[managed.info.activity] ?? managed.info.activity;
+  const base = activityLabel(managed.info);
   line.textContent = badges.length > 0 ? `${base} · ${badges.map(personaName).join(', ')}` : base;
 }
 
