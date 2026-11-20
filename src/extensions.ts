@@ -23,14 +23,25 @@ export interface WorldBoard {
   columns: Array<{ name: string; cards: Array<{ number: number; title: string }> }>;
 }
 
-/** What `/api/world` returns: active plugin names, rooms and boards. */
+/** One ticket of the personal Jira board (issue #145). `url` is the browse link built from the key. */
+export interface WorldJiraTicket {
+  key: string;
+  summary: string;
+  status: string;
+  assignee?: string;
+  priority?: string;
+  url?: string;
+}
+
+/** What `/api/world` returns: active plugin names, rooms, boards and Jira tickets. */
 export interface World {
   plugins: string[];
   rooms: WorldRoom[];
   boards: WorldBoard[];
+  jiraTickets: WorldJiraTicket[];
 }
 
-export const EMPTY_WORLD: World = { plugins: [], rooms: [], boards: [] };
+export const EMPTY_WORLD: World = { plugins: [], rooms: [], boards: [], jiraTickets: [] };
 
 /**
  * A client-side extension: a fork add-on or the browser part of a server plugin.

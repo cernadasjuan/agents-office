@@ -364,6 +364,26 @@ AGENTS_OFFICE_PLUGINS=peek pnpm dev
 - **Reads:** the plugin reads the end of the transcript (2 MB) the first time, then only the new bytes (at most 4 MB per request).
 - **Screen sharing:** Recent shows file base names and web hosts, and Assets show internal hosts and Jira keys. A private mode (#91) can hide all peek sections through `setPeekTextHidden` in `plugins/peek/client.ts`.
 
+
+### jira: personal sprint board in the CEO office
+
+The `jira` plugin hangs a board in your own office listing your open-sprint tickets, key, summary, status and (when Jira has them) priority and assignee. It is off by default and read-only: it makes one `GET` call to the Jira Cloud search API per poll, at most every 2 minutes.
+
+```bash
+AGENTS_OFFICE_JIRA_BASE_URL=https://your-site.atlassian.net \
+AGENTS_OFFICE_JIRA_EMAIL=you@example.com \
+AGENTS_OFFICE_JIRA_TOKEN=your-api-token \
+AGENTS_OFFICE_PLUGINS=jira pnpm dev
+```
+
+- **Opt in twice:** the plugin must be loaded, and it needs all three credentials. Without them, it adds nothing and calls nothing, the same as the GitHub plugin without a repository.
+- **Credentials:** `AGENTS_OFFICE_JIRA_BASE_URL`, `AGENTS_OFFICE_JIRA_EMAIL` and `AGENTS_OFFICE_JIRA_TOKEN` ([an Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens)), else a local JSON file `{"baseUrl", "email", "token"}` at `AGENTS_OFFICE_JIRA_CREDENTIALS_FILE`, else `~/.config/agents-office/jira.json`. The base URL must be `https://`, except a loopback host (`localhost`, `127.0.0.1`) for a local mock during development. The token never reaches the browser, a log, or this file.
+- **Scope:** the open sprint, tickets assigned to the authenticated user (`sprint in openSprints() AND assignee = currentUser()`). Not configurable yet; the project's decision record leaves this as the default until there is a reason to widen it.
+- **Board:** a plain canvas board, like the GitHub kanban boards, on a side wall of your office (the `building` layout's first room). Not a clickable list: making each row open its link would need a new DOM-over-3D interaction layer the office's other boards do not have, with real risk of swallowing clicks meant for a figure or the free-camera pointer lock. A future issue can revisit this once a plugin earns it.
+- **Links:** `<base URL>/browse/<KEY>`, built from the key only, computed on the server.
+- **What leaves the server:** the key, the summary (80 characters), the status (32), and optional priority (16) and assignee (40), plus the link. Never the token, the email, or any other Jira field.
+- **Ceremony boards:** a sprint board, a focus board and a retro board are a separate, lower-priority open question (issue #145's own tracker) until Gabriel gives content for at least one. Not built yet.
+
 ## Controls
 
 - **Click** to engage camera
