@@ -1,6 +1,6 @@
 import { PIECES } from '../../furniture/index.js';
 import { Colors } from '../../utils/Colors.js';
-import { ROOM_SIZE } from './RoomPlanner.js';
+import { DOOR_WIDTH, ROOM_SIZE } from './RoomPlanner.js';
 import type { Placement, SpotPlan } from './furnishing.js';
 
 /** Fewer book colors than the full palette, so a room full of bookshelves still merges cheap. */
@@ -66,15 +66,39 @@ export function tierFor(liveDeskAgents: number): RoomTier {
   return 'small';
 }
 
-/** Up to 8 desk slots, a 2x4 grid either side of the door lane (rulebook §3's physical-fit cap). */
-const DESK_ROW_D = [1.4, 2.9];
-const DESK_COL_A = [-4.6, -2.4, 2.4, 4.6];
+/**
+ * Up to 6 desk slots, 3 columns two rows deep (rulebook §3's physical-fit cap). Every
+ * desk and debug station carries its own chair (`Desk.ts`, `DebugStation.ts`), so a
+ * piece's real depth reaches past its own row; the row gap is wide enough that an
+ * occupied row's chair back never reaches the next row's desk front. The grid keeps off
+ * the wall that also carries the ended-session tombstone strip (`missionRooms.ts`): a
+ * column there would overlap it regardless of how the strip itself grows.
+ */
+const DESK_ROW_D = [1.4, 3.6];
+const DESK_COL_A = [-2.4, 2.4, 4.6];
 export const MAX_DESK_SLOTS = DESK_ROW_D.length * DESK_COL_A.length;
 
 const JITTER_POS = 0.12;
 const JITTER_ROT = (8 * Math.PI) / 180;
 
-export function furnishWarRoom(missionId: string, counts: WarRoomCounts): WarRoomPlan {
+/**
+ * Half the door's physical lane, plus a desk or debug station's own worst-case
+ * half-width (0.9 m) and the grid's own jitter (0.12 m), rounded up with a small margin.
+ */
+const DOOR_PATH_CLEARANCE = DOOR_WIDTH / 2 + 1.1;
+
+/**
+ * The real door is not always centered on the room's door wall (missionSlot's first ring
+ * has two wing columns, each with its own door offset). A column whose footprint would
+ * sit inside the door's real lane is dropped from the grid rather than assumed clear,
+ * the way the rest of the grid assumes a centered door. A room with an off-center door
+ * loses the slot, not the door path.
+ */
+function clearsDoor(a: number, doorAlong: number): boolean {
+  return Math.abs(a - doorAlong) >= DOOR_PATH_CLEARANCE;
+}
+
+export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlong = 0): WarRoomPlan {
   const rand = mulberry32(seedFromMission(missionId));
   const roomTier = tierFor(counts.deskLike + counts.debugging);
   const pieces: Placement[] = [];
@@ -82,7 +106,7 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts): WarRoo
 
   // --- Desk grid: debug stations fill first, so a room with a debugger shows it even at low headcount ---
   const slots: Array<{ a: number; d: number }> = [];
-  for (const d of DESK_ROW_D) for (const a of DESK_COL_A) slots.push({ a, d });
+  for (const d of DESK_ROW_D) for (const a of DESK_COL_A) if (clearsDoor(a, doorAlong)) slots.push({ a, d });
   const deskSlotCount = Math.min(counts.deskLike + counts.debugging, MAX_DESK_SLOTS, slots.length);
   for (let i = 0; i < deskSlotCount; i++) {
     const { a, d } = slots[i];
@@ -97,14 +121,27 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts): WarRoo
   // --- Must-haves: a clock, plants, a sofa, a bookshelf, a whiteboard ---
   const nearWall = ROOM_SIZE / 2 - 0.1; // just inside the side walls (a = ±6)
   pieces.push({ piece: PIECES.clock(), a: jitter(rand, -1.6, 0.1), d: jitter(rand, ROOM_SIZE - 0.15, 0.05), y: 2.3 });
-  pieces.push({ piece: PIECES.whiteboard(), a: jitter(rand, -nearWall + 0.3, 0.1), d: jitter(rand, 5.0, 0.3), turn: Math.PI / 2 });
-  pieces.push({ piece: PIECES.bookshelf(rand, BOOKSHELF_COLORS), a: jitter(rand, -nearWall + 0.3, 0.1), d: jitter(rand, 7.6, 0.3), turn: Math.PI / 2 });
-  pieces.push({ piece: PIECES.sofa(), a: jitter(rand, nearWall - 0.7, 0.1), d: jitter(rand, 5.0, 0.3), turn: -Math.PI / 2 });
-  pieces.push({ piece: PIECES.lowTable(), a: jitter(rand, nearWall - 1.6, 0.1), d: jitter(rand, 5.0, 0.3) });
+  // The whiteboard and bookshelf stand against the far wall, not a side wall: a side wall on
+  // this side also carries the ended-session tombstone strip (`missionRooms.ts`), which can
+  // grow the full depth of the room, so nothing else stands against that wall. Facing the
+  // door (no turn) like the far-wall shelves in `furnishLibrary`, clear of the door-wall gap
+  // rule and of the statement/docs/issues boards mounted at a = 0, -3.6 and 3.6.
+  pieces.push({ piece: PIECES.whiteboard(), a: jitter(rand, -2.4, 0.08), d: jitter(rand, ROOM_SIZE - 0.6, 0.08) });
+  pieces.push({ piece: PIECES.bookshelf(rand, BOOKSHELF_COLORS), a: jitter(rand, 2.6, 0.08), d: jitter(rand, ROOM_SIZE - 0.6, 0.08) });
+  // Pushed back from the desk grid's row depth, so a debug station's chair in the back row
+  // never reaches the sofa (rulebook §4, the same clearance every room's furniture keeps).
+  // The low table sits further from the sofa than a coffee table normally would: both carry
+  // their own jitter, and the room has no room to spare between two independently-jittered pieces.
+  pieces.push({ piece: PIECES.sofa(), a: jitter(rand, nearWall - 0.7, 0.1), d: jitter(rand, 6.2, 0.3), turn: -Math.PI / 2 });
+  pieces.push({ piece: PIECES.lowTable(), a: jitter(rand, nearWall - 2.0, 0.1), d: jitter(rand, 6.2, 0.3) });
   const plantCount = roomTier === 'small' ? 3 : roomTier === 'medium' ? 4 : 5;
+  // Every spot is at a >= 0 or dead center: the whole -a wall carries the ended-session
+  // tombstone strip (`missionRooms.ts`), which can grow the full depth of the room, and
+  // the near-door corners are where the desk grid's first row already stands (a debug
+  // station or desk, chair included). Five distinct spots, not a shorter list cycled: two
+  // plants jittered around the same base position land on top of each other.
   const plantSpots: Array<[number, number]> = [
-    [-nearWall + 0.4, ROOM_SIZE - 1.4], [nearWall - 0.4, ROOM_SIZE - 1.4],
-    [nearWall - 0.4, 2.0], [-nearWall + 0.4, 2.0], [0, 9.2],
+    [nearWall - 0.4, ROOM_SIZE - 1.4], [0, 9.2], [1.8, 9.2], [3.5, 9.6], [4.2, ROOM_SIZE - 1.1],
   ];
   for (let i = 0; i < plantCount; i++) {
     const [a, d] = plantSpots[i % plantSpots.length];
@@ -113,10 +150,13 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts): WarRoo
   pieces.push({ piece: PIECES.rug(2.6, 2.6, 0x2c3e50), a: 0, d: 6.2 });
 
   // --- Could-haves, gated by tier (rulebook §2) ---
-  if (roomTier !== 'small') pieces.push({ piece: PIECES.waterCooler(), a: jitter(rand, nearWall - 0.7, 0.1), d: jitter(rand, 7.8, 0.3) });
+  if (roomTier !== 'small') pieces.push({ piece: PIECES.waterCooler(), a: jitter(rand, nearWall - 0.7, 0.1), d: jitter(rand, 8.6, 0.3) });
   if (roomTier === 'large') {
     pieces.push({ piece: PIECES.tv(), a: jitter(rand, nearWall, 0.05), d: jitter(rand, 9.5, 0.3), y: 2.2, turn: -Math.PI / 2 });
-    if (rand() > 0.5) pieces.push({ piece: PIECES.lowDivider(2.2), a: jitter(rand, 3.3, 0.1), d: jitter(rand, 4.2, 0.2), turn: Math.PI / 2 });
+    // No turn: the divider's long side runs along the door wall (`a`), its thin side along
+    // `d`, so it sits between the desk grid and the sofa without reaching into either
+    // (turning it, as a first pass did, swapped those axes and drove it into both).
+    if (rand() > 0.5) pieces.push({ piece: PIECES.lowDivider(2.2), a: jitter(rand, 0, 0.1), d: jitter(rand, 4.4, 0.1) });
   }
 
   return { pieces, stations };

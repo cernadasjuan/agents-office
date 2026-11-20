@@ -175,7 +175,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
     for (const key of furnitureStationKeys) stations.delete(key);
     furnitureStationKeys = [];
     furniture.clear();
-    const plan = furnishWarRoom(room.id, peakCounts);
+    const plan = furnishWarRoom(room.id, peakCounts, frame.doorAlong);
     plan.pieces.forEach((placement) => {
       const object = placement.piece.create();
       object.userData.piece = placement.piece.name;

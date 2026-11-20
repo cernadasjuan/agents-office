@@ -104,6 +104,9 @@ test('AC1: a new war room has its must-have furniture from the start, built from
 });
 
 test('desk-like furniture grows with the peak live count and never shrinks back', () => {
+  // Index 0 sits in the first ring's first wing column, whose door is 1 m off the room's
+  // own center (`missionSlot`'s `WING_COLUMNS`); that shrinks this particular room's
+  // physical fit from MAX_DESK_SLOTS down to 4 (one column is in the door's path).
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   const countOf = (name: string) => {
     let n = 0;
@@ -112,23 +115,25 @@ test('desk-like furniture grows with the peak live count and never shrinks back'
   };
   assert.equal(countOf('desk') + countOf('debugStation'), 0, 'no agents yet, no desks');
 
-  missionRoom.updateCounts({ deskLike: 3, debugging: 1 });
-  assert.equal(countOf('desk'), 3);
+  missionRoom.updateCounts({ deskLike: 2, debugging: 1 });
+  assert.equal(countOf('desk'), 2);
   assert.equal(countOf('debugStation'), 1);
 
   // The room empties out: furniture stays at its peak, it does not shrink back
   missionRoom.updateCounts({ deskLike: 0, debugging: 0 });
-  assert.equal(countOf('desk'), 3);
+  assert.equal(countOf('desk'), 2);
   assert.equal(countOf('debugStation'), 1);
 
-  // A later, bigger peak grows it further
+  // A later, bigger peak grows it further, up to this room's own physical fit
   missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
-  assert.equal(countOf('desk'), 6);
+  assert.equal(countOf('desk'), 2);
   assert.equal(countOf('debugStation'), 2);
 });
 
 test('the desk grid never exceeds the room\'s physical fit', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  // Index 2 is in the second ring, where the door sits at the column's own center
+  // (`missionSlot`), so this room's fit is the grid's full, door-centered MAX_DESK_SLOTS.
+  const missionRoom = buildMissionRoom(room('a', 'open'), 2);
   missionRoom.updateCounts({ deskLike: 20, debugging: 5 });
   let total = 0;
   missionRoom.group.traverse((o) => { if (o.userData.piece === 'desk' || o.userData.piece === 'debugStation') total++; });
