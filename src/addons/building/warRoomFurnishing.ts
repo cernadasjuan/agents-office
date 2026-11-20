@@ -140,7 +140,7 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
 
   const bookshelfA = jitter(rand, 2.6, 0.08);
   const bookshelfD = jitter(rand, ROOM_SIZE - 0.6, 0.08);
-  pieces.push({ piece: PIECES.bookshelf(rand, BOOKSHELF_COLORS), a: bookshelfA, d: bookshelfD });
+  pieces.push({ piece: PIECES.bookshelf(undefined, rand, BOOKSHELF_COLORS), a: bookshelfA, d: bookshelfD });
   // Issue #126: a researching agent stands at the mission's own shelf, not the library
   stations.push({ type: 'researching', a: bookshelfA, d: bookshelfD - 0.9, look: [bookshelfA, bookshelfD, 1.2], posture: 'standing' });
 

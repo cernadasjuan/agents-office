@@ -11,13 +11,32 @@ import { frameForBounds, overviewBounds, overviewDirection } from '../src/scene/
 import { IsometricController } from '../src/scene/IsometricCamera.js';
 
 /**
+ * A seeded PRNG (mulberry32), so the fixture's one source of randomness
+ * (`src/furniture/Bookshelf.ts`'s book count and color, the only `Math.random`
+ * call in `src` or `plugins`) draws the same sequence every run. The draw-call
+ * budget test measures this fixture; an unseeded `Math.random` there made the
+ * worst-case total drift between runs (issue #128 review).
+ */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
  * Gabriel's real size: the hall, 16 building rooms, 9 mission rooms (one locked)
  * and 40 agents. Half of the agents wear BMAD hats (one to four) and a quarter
  * wear GitHub cards (one to five), as with the fork plugins on.
  */
 export const REAL_SIZE = { buildingRooms: 16, missionRooms: 9, agents: 40, hatWearers: 20, cardHolders: 10 } as const;
 
-const PERSONAS = ['dev', 'architect', 'qa', 'pm', 'analyst', 'sm', 'debugger', 'spec-coach', 'data-engineer', 'ux-designer', 'tech-writer'];
+// 'librarian' included (issue #128 review): the budget fixture must wear every hat it pins.
+const PERSONAS = ['dev', 'architect', 'qa', 'pm', 'analyst', 'sm', 'debugger', 'spec-coach', 'data-engineer', 'ux-designer', 'tech-writer', 'librarian'];
 
 function badgesFor(i: number): string[] | undefined {
   if (i >= REAL_SIZE.hatWearers) return undefined;
@@ -39,9 +58,18 @@ export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManag
   // Per-workspace desk rooms are retired (#138): the 11 workspaces share the desk pool, the room count stays the same with plain `desks` rooms.
   const rooms = ['office', 'library', 'lounge', 'lounge', 'lounge', ...Array.from({ length: 11 }, () => 'desks')];
   const store = new Map([['agents-office.building.rooms', JSON.stringify(rooms)]]);
-  const layout = new BuildingLayout(scene, createOffice(scene), {
-    storage: { getItem: (key: string) => store.get(key) ?? null, setItem: () => undefined },
-  });
+  // Seeded for the room build only (the library's bookshelves): deterministic book
+  // count and color, so the draw-call budget test measures the same scene every time.
+  const realRandom = Math.random;
+  Math.random = seededRandom(163);
+  let layout: BuildingLayout;
+  try {
+    layout = new BuildingLayout(scene, createOffice(scene), {
+      storage: { getItem: (key: string) => store.get(key) ?? null, setItem: () => undefined },
+    });
+  } finally {
+    Math.random = realRandom;
+  }
   // Worst case: every war room at the tombstone cap, not just a handful.
   layout.syncWorldRooms(Array.from({ length: REAL_SIZE.missionRooms }, (_, i) => ({
     id: `m${i}`, kind: 'mission', title: `Mission ${i}`, state: i === 8 ? 'locked' as const : 'open' as const,

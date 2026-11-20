@@ -41,7 +41,8 @@ const piece = <N extends string>(name: N, category: PieceCategory, create: () =>
 export const PIECES = {
   desk: () => piece('desk', 'station', () => createDesk(true)),
   whiteboard: () => piece('whiteboard', 'station', createWhiteboard),
-  bookshelf: (rand?: () => number, colors?: readonly (THREE.Color | number)[]) => piece('bookshelf', 'station', () => createBookshelf(rand, colors)),
+  bookshelf: (shelfColor?: number | THREE.Color, rand?: () => number, colors?: readonly (THREE.Color | number)[]) =>
+    piece('bookshelf', 'station', () => createBookshelf(shelfColor, rand, colors)),
   testStation: () => piece('testStation', 'station', createTestStation),
   debugStation: () => piece('debugStation', 'station', createDebugStation),
   sofa: (color = 0x6a5acd) => piece('sofa', 'station', () => createSofa(color)),

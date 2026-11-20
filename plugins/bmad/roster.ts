@@ -19,6 +19,9 @@ export const PERSONAS: Persona[] = [
   { id: 'quick-flow-solo-dev', name: 'Barry', aliases: ['barry'] },
   { id: 'sm', name: 'Bob', aliases: ['bob'] },
   { id: 'tech-writer', name: 'Paige', aliases: ['paige'] },
+  // Prospero, the Bibliothèque Librarian (issue #149): the detection signal issue #128's
+  // shelf routing depends on.
+  { id: 'librarian', name: 'Prospero', aliases: ['prospero'] },
   { id: 'ux-designer', name: 'Sally', aliases: ['sally'] },
   { id: 'brainstorming-coach', name: 'Carson', aliases: ['carson'] },
   { id: 'creative-problem-solver', name: 'Dr. Quinn', aliases: ['dr-quinn', 'dr.quinn'] },

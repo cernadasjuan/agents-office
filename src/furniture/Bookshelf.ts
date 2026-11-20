@@ -3,14 +3,21 @@ import { getToonMaterial } from '../utils/Materials.js';
 import { Colors } from '../utils/Colors.js';
 
 /**
- * `rand`: a seeded [0,1) generator. A caller that needs the same bookshelf on every
- * reload (a war room, issue #125 AC2) passes one; without it, `Math.random` keeps the
- * existing behavior. `colors`: which book colors to cycle through, default every one.
+ * `shelfColor` lets a room give its shelves a distinct finish (issue #128: the
+ * library-knowledge shelves render white, so an agent never confuses them with an
+ * ordinary bookshelf). `rand`: a seeded [0,1) generator. A caller that needs the same
+ * bookshelf on every reload (a war room, issue #125 AC2) passes one; without it,
+ * `Math.random` keeps the existing behavior. `colors`: which book colors to cycle
+ * through, default every one.
  */
-export function createBookshelf(rand: () => number = Math.random, colors: readonly (THREE.Color | number)[] = Colors.books) {
+export function createBookshelf(
+  shelfColor: number | THREE.Color = Colors.bookshelf,
+  rand: () => number = Math.random,
+  colors: readonly (THREE.Color | number)[] = Colors.books,
+) {
   const group = new THREE.Group();
 
-  const shelfMat = getToonMaterial(Colors.bookshelf);
+  const shelfMat = getToonMaterial(shelfColor);
 
   // Back panel
   const backGeo = new THREE.BoxGeometry(1.6, 2.0, 0.04);

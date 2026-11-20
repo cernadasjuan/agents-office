@@ -102,10 +102,41 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   console.log(`draw calls with 200 cards ${JSON.stringify(after)}`);
   assert.equal(cards.placements.length, 200);
   assert.ok(after.total < DRAW_CALL_BUDGET, `with cards ${JSON.stringify(after)}`);
-  // This is the worst case this suite measures. Before issue #121/#122 (main-room desks
-  // and furniture) it was 466. Each PR gets up to 5 more before it must recover headroom
+  // This is the worst case this suite measures. It was 466 before issue #121/#122 (main-room
+  // desks and furniture), then dropped to 367 once the perf-shadow-budget PR recovered
+  // headroom and moved DRAW_CALL_BUDGET to 430. The library wing move, the persona-badge
+  // routing fix and the Librarian hat (issues #120/#128/#149) land it at 372, with the hat
+  // genuinely worn (`tests/real-size-office.ts`'s own PERSONAS list, issue #128 review) and
+  // its one source of randomness seeded (the library's bookshelves, same file, issue #128
+  // review round 2: an unseeded book count and color made this total drift between runs,
+  // 368 to 372, depending on how many book colors a shelf happened to draw). The mission
+  // wing's own furniture package (issue #125: a clock, whiteboard, bookshelf, sofa, low
+  // table, water cooler, TV, low divider, debug station and desk per war room, up to 9 of
+  // them) lands it at 401: a new piece-type variety the fixture did not carry before, not a
+  // regression in either feature. Pinned here at 406, 401 plus 5: real headroom above the
+  // number this fixture actually and repeatably measures, not a number nobody reproduces.
+  // Each PR gets up to 5 more against the 401 baseline before it must recover headroom
   // elsewhere, not just add to the margin left by the last one.
-  assert.ok(after.total <= 471, `worst case ${after.total} exceeds the main-branch baseline (466) + 5`);
+  assert.ok(after.total <= 406, `worst case ${after.total} exceeds the pinned baseline (401) + 5`);
+});
+
+test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
+  const totals = new Set<number>();
+  for (let run = 0; run < 8; run++) {
+    const { scene, manager, github } = buildRealSizeOffice();
+    const agents = manager.getAgents();
+    agents.forEach((managed, a) => {
+      managed.info.extras = { ...managed.info.extras, issues: Array.from({ length: 5 }, (_, i) => ({ number: a * 10 + i + 1, title: '', repo: 'agents-office', color: '0e8a16' })) };
+    });
+    github.agentsChanged(agents);
+    scene.updateMatrixWorld();
+    new StaticBatch(scene).update();
+    new FigureBatch(scene).sync(agents.map((managed) => managed.figure.group));
+    totals.add(countDrawCalls(scene).total);
+  }
+  // 401, not 372: the mission wing's own furniture package (issue #125) added to this
+  // fixture; see the baseline comment above. Still exactly one value across all 8 runs.
+  assert.deepEqual([...totals], [401], `expected every one of 8 runs to measure 401, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

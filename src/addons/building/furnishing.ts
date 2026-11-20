@@ -170,19 +170,25 @@ function furnishDesks(): RoomPlan {
   return { pieces, spots, signs: [] };
 }
 
-/** Shelves on the far wall and on both side walls: the knowledge base of the office. */
+/**
+ * Shelves on the far wall and on both side walls: the knowledge base of the office. White,
+ * not the ordinary bookshelf brown (issue #128 AC4): an agent should never mistake library
+ * knowledge for a research scratch pad. Reuses the whiteboard's own color, so this new look
+ * costs no extra draw call in the room's own static batch.
+ */
 function furnishLibrary(): RoomPlan {
   const pieces: Placement[] = [];
   const spots: SpotPlan[] = [];
+  const shelf = () => PIECES.bookshelf(Colors.whiteboard);
   // Pulled off center so the pair nearest the middle stays clear of the far-wall door gap
   for (const a of [-3.9, -2.2, 2.2, 3.9]) {
-    pieces.push({ piece: PIECES.bookshelf(), a, d: ROOM_SIZE - 0.5 });
+    pieces.push({ piece: shelf(), a, d: ROOM_SIZE - 0.5 });
     spots.push({ type: 'researching', a, d: ROOM_SIZE - 1.5, look: [a, ROOM_SIZE - 0.5, 1.0] });
   }
   for (const side of [-1, 1]) {
     for (const d of [3.5, 6, 8.5]) {
       const wallA = side * (ROOM_SIZE / 2 - 0.5);
-      pieces.push({ piece: PIECES.bookshelf(), a: wallA, d, turn: side * Math.PI / 2 });
+      pieces.push({ piece: shelf(), a: wallA, d, turn: side * Math.PI / 2 });
       spots.push({ type: 'researching', a: wallA - side, d, look: [wallA, d, 1.0] });
     }
   }

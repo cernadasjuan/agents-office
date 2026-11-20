@@ -46,6 +46,16 @@ const ROOM_FOR_STATION: Record<string, RoomKind> = Object.fromEntries(
   Object.entries(ROOM_STATION_TYPE).map(([kind, type]) => [type, kind as RoomKind]),
 ) as Record<string, RoomKind>;
 
+/**
+ * The Librarian persona badge (issue #128, Prospero's own review on the issue): the real
+ * signal the `bmad` plugin's hat detection reports (`bmad.py agent librarian`, a Skill
+ * call, or a subagent type that resolves to it, `plugins/bmad/roster.ts`), never a name
+ * or role tag an agent's own session metadata could claim on its own.
+ */
+function isLibrarian(extras: LayoutAgent['extras']): boolean {
+  return Array.isArray(extras?.badges) && extras.badges.includes('librarian');
+}
+
 export const BUILDING_STORAGE_KEY = 'agents-office.building.rooms';
 const DEFAULT_DWELL_MS = 4000;
 const QUEUE_REFRESH_MS = 500;
@@ -304,10 +314,17 @@ export class BuildingLayout implements LayoutStrategy {
     const room = agent.extras?.room ? this.missionRooms.get(agent.extras.room) : undefined;
     if (!parentId && room && !room.locked) return `room:${room.id}`;
     const parent = parentId ? this.agents.get(parentId) : undefined;
-    // A librarian fetches from the Library while it researches, and brings it back to its agent otherwise
-    if (agent.extras?.role === 'librarian' && agent.activity === 'researching') return 'trip:researching';
+    // Only the Librarian persona fetches from the library-knowledge shelves (issue #128):
+    // a real persona-hat badge, not a name or role tag (Prospero's own review on the issue).
+    // It brings what it found back to its agent otherwise, through the pod branch below.
+    if (isLibrarian(agent.extras) && agent.activity === 'researching') return 'trip:researching';
     if (parent && (parent.home || parent.target?.startsWith('room:'))) return 'pod';
-    if (DESK_WORK.has(agent.activity)) return 'home';
+    // A non-librarian's research trip never reaches the library-knowledge room either: with
+    // a war room it already stayed there (the room check above). Without one it keeps its
+    // own desk, the same as desk work (issue #128 AC2) — this covers a subagent whose parent
+    // has no seat yet too (the pod check above falls through on that exact timing, issue #128
+    // review), not only a main session; the generic trip below is never reached for research.
+    if (DESK_WORK.has(agent.activity) || agent.activity === 'researching') return 'home';
     return `trip:${TRIP_STATION[agent.activity] ?? 'idle'}`;
   }
 
