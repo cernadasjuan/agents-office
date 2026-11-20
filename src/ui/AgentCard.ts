@@ -16,6 +16,7 @@ export const CARD_MAX_ISSUES = 10;
 const CARD_GAP_PX = 8;
 const MIN_FREE_AREA_PX = 240;
 const STATUS_MS = 3000;
+const PULSE_MS = 1500;
 
 export type CardIssue = NonNullable<AgentExtras['issues']>[number];
 
@@ -129,6 +130,7 @@ export class AgentCard {
   private renderedKey = '';
   private shownId: string | null = null;
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
+  private pulseTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(parent: HTMLElement, private readonly options: AgentCardOptions) {
     this.selection = options.selection ?? officeSelection();
@@ -207,6 +209,22 @@ export class AgentCard {
   cameraShiftPx(): number {
     const viewportWidth = this.root.ownerDocument.defaultView?.innerWidth ?? 0;
     return figureShiftPx(viewportWidth, this.cardLeftPx());
+  }
+
+  /**
+   * Key F (issue #85, fixed under the decision on #85): highlight the shown
+   * agent's ready action button (today only "Focus in herdr") for `PULSE_MS`,
+   * so the keystroke has a visible effect. Never moves DOM focus onto the
+   * button (Enter would then send the request) and never calls `runAction`:
+   * S7 keeps a write action behind a click. A silent no-op without a ready
+   * action (no selection, or no action available for the shown agent).
+   */
+  pulseFocus(): void {
+    const button = this.actionRow.querySelector<HTMLButtonElement>('button');
+    if (!button) return;
+    button.classList.add('pulse');
+    clearTimeout(this.pulseTimer);
+    this.pulseTimer = setTimeout(() => button.classList.remove('pulse'), PULSE_MS);
   }
 
   /** Run a card action on the shown agent (the button click). */

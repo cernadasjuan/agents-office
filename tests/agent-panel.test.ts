@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { AgentPanel, isDemoMode, setupPanelCollapse, type AgentPanelOptions } from '../src/ui/AgentPanel.js';
+import { AgentPanel, expandPanel, isDemoMode, setupPanelCollapse, type AgentPanelOptions } from '../src/ui/AgentPanel.js';
 import type { AgentInfo } from '../src/agents/AgentData.js';
 
 function installDocument(t: TestContext): HTMLElement {
@@ -143,6 +143,33 @@ test('a click on a chip opens its group', (t) => {
   const chip = list.querySelector<HTMLElement>('.triage-chip[data-group="idle"]')!;
   chip.click();
   assert.equal(groupOf(list, 'idle').classList.contains('collapsed'), false);
+});
+
+test('a click on the top ("Needs you") chip jumps to the oldest fresh wait', (t) => {
+  const seen: string[] = [];
+  const { list, panel } = makePanel(t, { onTopCount: (agentId) => seen.push(agentId) });
+  panel.render([waiting('n1', 2), waiting('n2', 12), waiting('n3', 5)]);
+  const chip = list.querySelector<HTMLElement>('.triage-chip[data-group="needs-you"]')!;
+  chip.click();
+  assert.deepEqual(seen, ['n2']);
+});
+
+test('a click on the top chip does nothing without a fresh wait (aging only)', (t) => {
+  const seen: string[] = [];
+  const { list, panel } = makePanel(t, { onTopCount: (agentId) => seen.push(agentId) });
+  panel.render([waiting('n1', 60)]);
+  const chip = list.querySelector<HTMLElement>('.triage-chip[data-group="needs-you"]')!;
+  chip.click();
+  assert.deepEqual(seen, []);
+});
+
+test('other chips never call onTopCount', (t) => {
+  const seen: string[] = [];
+  const { list, panel } = makePanel(t, { onTopCount: (agentId) => seen.push(agentId) });
+  panel.render([yourTurn('y1', 2), idle('i1')]);
+  list.querySelector<HTMLElement>('.triage-chip[data-group="your-turn"]')!.click();
+  list.querySelector<HTMLElement>('.triage-chip[data-group="idle"]')!.click();
+  assert.deepEqual(seen, []);
 });
 
 test('updates keep the row elements, the order changes in place and the scroll stays', (t) => {
@@ -329,6 +356,90 @@ test('before the first answer the panel shows a loading text, and the first rend
 
   panel.render([]);
   assert.equal(loading.hidden, true, 'an empty office after the first answer is a real empty office');
+});
+
+test('key / (issue #85): focusFilter gives the filter field the focus', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([idle('a')]);
+  panel.focusFilter();
+  assert.equal(list.ownerDocument.activeElement, list.querySelector('.triage-filter'));
+});
+
+test('issue #85 fix: expandPanel opens a collapsed panel and remembers the choice', (t) => {
+  installDocument(t);
+  const root = document.getElementById('ui-panel')!;
+  const button = document.getElementById('toggle')!;
+  const store = new Map<string, string>();
+  const storage = { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => void store.set(key, value) };
+  setupPanelCollapse(root, button, storage);
+  button.click();
+  assert.equal(root.classList.contains('collapsed'), true);
+
+  expandPanel(root, button, storage);
+  assert.equal(root.classList.contains('collapsed'), false);
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(store.get('agents-office.panel-collapsed'), '0');
+});
+
+test('issue #85 fix: expandPanel on an already-open panel changes nothing', (t) => {
+  installDocument(t);
+  const root = document.getElementById('ui-panel')!;
+  const button = document.getElementById('toggle')!;
+  setupPanelCollapse(root, button, undefined);
+  assert.equal(root.classList.contains('collapsed'), false);
+  expandPanel(root, button, undefined);
+  assert.equal(root.classList.contains('collapsed'), false);
+});
+
+test('issue #85 fix: expandPanel works without storage', (t) => {
+  installDocument(t);
+  const root = document.getElementById('ui-panel')!;
+  const button = document.getElementById('toggle')!;
+  setupPanelCollapse(root, button, undefined);
+  button.click();
+  expandPanel(root, button, undefined);
+  assert.equal(root.classList.contains('collapsed'), false);
+});
+
+test('typing in the filter field hides rows whose name and activity do not match, case-insensitively', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('fix-login'), working('add-filter'), idle('idle-one')]);
+  const filter = list.querySelector<HTMLInputElement>('.triage-filter')!;
+
+  filter.value = 'LOGIN';
+  filter.dispatchEvent(new filter.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+
+  assert.equal(card(list, 'fix-login').hidden, false);
+  assert.equal(card(list, 'add-filter').hidden, true);
+  assert.equal(card(list, 'idle-one').hidden, true);
+});
+
+test('the filter also matches the activity text, and an empty filter shows every row again', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('a'), idle('b')]);
+  const filter = list.querySelector<HTMLInputElement>('.triage-filter')!;
+
+  filter.value = 'implementing';
+  filter.dispatchEvent(new filter.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+  assert.equal(card(list, 'a').hidden, false);
+  assert.equal(card(list, 'b').hidden, true);
+
+  filter.value = '';
+  filter.dispatchEvent(new filter.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+  assert.equal(card(list, 'a').hidden, false);
+  assert.equal(card(list, 'b').hidden, false);
+});
+
+test('a filter survives a poll: a newly arrived row that does not match stays hidden', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('a')]);
+  const filter = list.querySelector<HTMLInputElement>('.triage-filter')!;
+  filter.value = 'a';
+  filter.dispatchEvent(new filter.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+
+  panel.render([working('a'), working('zzz')]);
+  assert.equal(card(list, 'a').hidden, false);
+  assert.equal(card(list, 'zzz').hidden, true);
 });
 
 test('a finished subagent reads "Done"; an idle main agent keeps "Taking a break"', (t) => {

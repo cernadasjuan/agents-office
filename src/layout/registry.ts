@@ -46,8 +46,9 @@ export function layoutName(id: string): string {
 type SwitchKey = Pick<KeyboardEvent, 'code' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'target'>;
 
 function isFormField(target: EventTarget | null): boolean {
-  const tag = (target as Element | null)?.tagName;
-  return tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA';
+  const element = target as HTMLElement | null;
+  const tag = element?.tagName;
+  return tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA' || element?.isContentEditable === true;
 }
 
 /** Shift+L switches the layout. One stray L does nothing. */

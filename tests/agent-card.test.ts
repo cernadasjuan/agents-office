@@ -197,6 +197,51 @@ test('a registered action shows only for agents it applies to, and a click shows
   assert.equal(status.querySelector('b'), null);
 });
 
+test('key F (issue #85 fix): without a ready action, pulseFocus does nothing and no error', (t) => {
+  const { card } = makeCard(t);
+  card.render([main]);
+  card.pulseFocus();
+});
+
+test('key F fix: pulseFocus highlights the ready action button for about 1.5s, and never runs it', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { card, selection, root } = makeCard(t);
+  const ran: string[] = [];
+  registerCardAction({ id: 'focus', label: 'Focus in herdr', available: (agent) => agent.extras?.actions?.includes('focus') === true, run: async (agent) => { ran.push(agent.id); return 'ok'; } });
+  card.render([{ ...main, extras: { ...main.extras, actions: ['focus'] } }]);
+  selection.select('main-1');
+
+  const button = root().querySelector<HTMLButtonElement>('.inspector-actions button')!;
+  assert.equal(button.classList.contains('pulse'), false, 'no pulse before F');
+
+  card.pulseFocus();
+  assert.equal(button.classList.contains('pulse'), true, 'F highlights the button');
+  assert.notEqual(root().ownerDocument.activeElement, button, 'F never moves DOM focus onto the button (Enter must not then send it)');
+  assert.deepEqual(ran, [], 'S7: a keystroke never runs the write action, only a click does');
+
+  t.mock.timers.tick(1500);
+  assert.equal(button.classList.contains('pulse'), false, 'the highlight clears after about 1.5s');
+  assert.deepEqual(ran, [], 'still never ran');
+});
+
+test('key F fix: a second F while the pulse is active restarts the 1.5s window instead of stacking timers', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { card, selection, root } = makeCard(t);
+  registerCardAction({ id: 'focus', label: 'Focus in herdr', available: () => true, run: async () => 'ok' });
+  card.render([main]);
+  selection.select('main-1');
+  const button = root().querySelector<HTMLButtonElement>('.inspector-actions button')!;
+
+  card.pulseFocus();
+  t.mock.timers.tick(1000);
+  card.pulseFocus();
+  t.mock.timers.tick(1000);
+  assert.equal(button.classList.contains('pulse'), true, 'the second F kept the highlight going past the first window');
+
+  t.mock.timers.tick(500);
+  assert.equal(button.classList.contains('pulse'), false);
+});
+
 test('the card docks left of the panel, 360 px wide', (t) => {
   const { card, selection, root, document } = makeCard(t);
   const anchor = document.getElementById('ui-panel')!;

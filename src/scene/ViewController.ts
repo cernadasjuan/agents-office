@@ -14,9 +14,9 @@ const PAN_SPEED_PER_DISTANCE = 0.9;
 const FAST_MULTIPLIER = 2.5;
 
 export const VIEW_HINTS: Record<ViewMode, string> = {
-  'first-person': 'Click to look around — WASD to move — Space/Q up/down — Shift = fast — ESC to release — Click a figure to select — O = overview — I = isometric — Shift+L = layout',
-  overview: 'Overview — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — O = first person — I = isometric — Shift+L = layout',
-  isometric: 'Isometric — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — I = back — O = overview — Shift+L = layout',
+  'first-person': 'Click to look around — WASD to move — Space/Q up/down — Shift = fast — ESC to release — Click a figure to select — O = overview — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
+  overview: 'Overview — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — O = first person — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
+  isometric: 'Isometric — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — I = back — O = overview — Shift+L = layout — N = next — F = focus — / = filter',
 };
 
 export interface ViewControllerOptions {
@@ -41,8 +41,9 @@ export interface ViewControllerOptions {
 }
 
 function isFormField(target: EventTarget | null): boolean {
-  const tag = (target as Element | null)?.tagName;
-  return tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA';
+  const element = target as HTMLElement | null;
+  const tag = element?.tagName;
+  return tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA' || element?.isContentEditable === true;
 }
 
 /**
@@ -63,6 +64,8 @@ export class ViewController {
   private panKeys = new Set<string>();
   private pressPoint: ScreenPoint | null = null;
   private dragPoint: ScreenPoint | null = null;
+  /** True once the current gesture has panned, even if it ends back near the press point (issue #133). */
+  private dragged = false;
   private pendingFocus: string | null;
   private marker: SelectionMarker;
   private selection: SelectionState;
@@ -211,11 +214,13 @@ export class ViewController {
     canvas.addEventListener('pointerdown', (event) => {
       this.pressPoint = { x: event.clientX, y: event.clientY };
       this.dragPoint = isViewFromAbove(this.currentMode) && event.button === 0 ? { ...this.pressPoint } : null;
+      this.dragged = false;
     });
     document.addEventListener('pointermove', (event) => {
       if (!this.dragPoint || !isViewFromAbove(this.currentMode)) return;
       const point = { x: event.clientX, y: event.clientY };
       if (isClick(this.pressPoint, point)) return;
+      this.dragged = true;
       this.flight = null;
       this.isometricFlight = null;
       const dx = point.x - this.dragPoint.x;
@@ -228,10 +233,14 @@ export class ViewController {
       this.dragPoint = null;
     });
     canvas.addEventListener('click', (event) => {
+      // Pointer lock turns a click into "look around" (issue #133); let it through unselected.
       if (document.pointerLockElement) return;
-      if (!isClick(this.pressPoint, { x: event.clientX, y: event.clientY })) return;
+      // A gesture that panned and returned near the press point is still a drag, not a click
+      // (issue #133): `isClick` alone only compares endpoints, so it would misread this as a miss.
+      if (this.dragged || !isClick(this.pressPoint, { x: event.clientX, y: event.clientY })) return;
       const agentId = this.pickAt(event.clientX, event.clientY);
       if (agentId) this.selection.select(agentId);
+      else this.selection.clear();
     });
     canvas.addEventListener('wheel', (event) => {
       if (!isViewFromAbove(this.currentMode)) return;
@@ -249,6 +258,18 @@ export class ViewController {
       this.marker.hide();
       return;
     }
+    this.marker.show(agent.figure.accentColor);
+    this.flyToAgent(agent.figure.group.position);
+  }
+
+  /**
+   * Key F (issue #85 fix): fly to, or recenter on, an agent even when it is
+   * already selected (a plain reselect is a no-op in `SelectionState`, so no
+   * selection-change listener fires). Does nothing for an agent not in the scene.
+   */
+  refocus(agentId: string): void {
+    const agent = this.options.agents().find((candidate) => candidate.info.id === agentId);
+    if (!agent) return;
     this.marker.show(agent.figure.accentColor);
     this.flyToAgent(agent.figure.group.position);
   }
