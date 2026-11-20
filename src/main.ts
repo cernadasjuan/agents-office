@@ -11,6 +11,7 @@ import { activeExtensions, setWorld, type World } from './extensions.js';
 import { tabTitleFor } from './ui/attention.js';
 import { LabelDetailController } from './ui/LabelDetail.js';
 import { AgentCard } from './ui/AgentCard.js';
+import { OffscreenMarkers } from './ui/OffscreenMarkers.js';
 import { FrameLoop } from './scene/FrameLoop.js';
 import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
 
@@ -67,10 +68,20 @@ const view = new ViewController({
 const panel = new AgentPanel(document.getElementById('agent-list')!, {
   onSelect: (agentId) => selectAgent(agentId),
   onPick: (agentId, activity) => agentManager.setActivity(agentId, activity),
+  onTopCount: (agentId) => selectAgent(agentId),
   demo: isDemoMode(window.location.search),
 });
 setupPanelCollapse(document.getElementById('ui-panel')!, document.getElementById('ui-panel-toggle')!, window.localStorage);
 onSelectionChange((agentId) => panel.setSelected(agentId));
+
+// Off-screen markers: an arrow at the screen edge for each fresh wait outside the frame.
+// A click flies to the agent and selects it, through the same selection the cards use.
+const offscreenMarkers = new OffscreenMarkers({
+  container: document.getElementById('offscreen-markers')!,
+  canvas: renderer.domElement,
+  camera: () => view.activeCamera,
+  onSelect: (agentId) => selectAgent(agentId),
+});
 
 // Label detail: full labels only for waiting, selected, hovered or near agents. Key V or `#labels=all` shows all.
 // War room signs show only when zoomed in, near or hovered.
@@ -142,6 +153,12 @@ const frameLoop = new FrameLoop({
     view.update(elapsed, delta);
     agentManager.update(elapsed, delta);
     labelDetail.update(performance.now());
+    offscreenMarkers.refresh(agentManager.getAgents().map((managed) => ({
+      id: managed.info.id,
+      object: managed.figure.group,
+      color: managed.figure.accentColor,
+      wait: managed.info.extras,
+    })));
     for (const extension of activeExtensions(scene)) extension.update?.(elapsed, delta);
   },
   figures: () => agentManager.getAgents().map((managed) => managed.figure.group),
