@@ -64,6 +64,8 @@ export class ViewController {
   private panKeys = new Set<string>();
   private pressPoint: ScreenPoint | null = null;
   private dragPoint: ScreenPoint | null = null;
+  /** True once the current gesture has panned, even if it ends back near the press point (issue #133). */
+  private dragged = false;
   private pendingFocus: string | null;
   private marker: SelectionMarker;
   private selection: SelectionState;
@@ -212,11 +214,13 @@ export class ViewController {
     canvas.addEventListener('pointerdown', (event) => {
       this.pressPoint = { x: event.clientX, y: event.clientY };
       this.dragPoint = isViewFromAbove(this.currentMode) && event.button === 0 ? { ...this.pressPoint } : null;
+      this.dragged = false;
     });
     document.addEventListener('pointermove', (event) => {
       if (!this.dragPoint || !isViewFromAbove(this.currentMode)) return;
       const point = { x: event.clientX, y: event.clientY };
       if (isClick(this.pressPoint, point)) return;
+      this.dragged = true;
       this.flight = null;
       this.isometricFlight = null;
       const dx = point.x - this.dragPoint.x;
@@ -229,10 +233,14 @@ export class ViewController {
       this.dragPoint = null;
     });
     canvas.addEventListener('click', (event) => {
+      // Pointer lock turns a click into "look around" (issue #133); let it through unselected.
       if (document.pointerLockElement) return;
-      if (!isClick(this.pressPoint, { x: event.clientX, y: event.clientY })) return;
+      // A gesture that panned and returned near the press point is still a drag, not a click
+      // (issue #133): `isClick` alone only compares endpoints, so it would misread this as a miss.
+      if (this.dragged || !isClick(this.pressPoint, { x: event.clientX, y: event.clientY })) return;
       const agentId = this.pickAt(event.clientX, event.clientY);
       if (agentId) this.selection.select(agentId);
+      else this.selection.clear();
     });
     canvas.addEventListener('wheel', (event) => {
       if (!isViewFromAbove(this.currentMode)) return;
