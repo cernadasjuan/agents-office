@@ -1,6 +1,6 @@
 import { ACTIVITIES, ACTIVITY_LABELS, AgentInfo, activityLabel } from '../agents/AgentData.js';
 import type { Activity } from '../agents/ActivityAnimations.js';
-import { attentionBand, compareWaits, formatWait, oldestFreshWait, queueBucket } from './attention.js';
+import { attentionBand, byWait, formatWait, oldestFreshWait, queueBucket } from './attention.js';
 
 export type TriageGroupId = 'needs-you' | 'your-turn' | 'working' | 'idle' | 'cold';
 
@@ -307,10 +307,6 @@ function textChip(className: string, text: string): HTMLElement {
 
 function byName(a: AgentInfo, b: AgentInfo): number {
   return a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-}
-
-function byWait(a: AgentInfo, b: AgentInfo): number {
-  return compareWaits(a.extras, b.extras) || byName(a, b);
 }
 
 /** Subagents whose parent is in the same list. */

@@ -98,10 +98,10 @@ test('the queue puts fresh before aging, and the oldest wait first inside each b
 
 test('key N (issue #85): the queue holds only the fresh and aging bands', () => {
   const agents = [
-    { id: 'cold-1', extras: { attention: 'waiting' as const, waitMinutes: 3 * 24 * 60 } },
-    { id: 'aging-young', extras: { attention: 'waiting' as const, waitMinutes: 20 } },
-    { id: 'fresh-young', extras: { attention: 'your-turn' as const, waitMinutes: 1 } },
-    { id: 'idle', extras: undefined },
+    { id: 'cold-1', name: 'cold-1', extras: { attention: 'waiting' as const, waitMinutes: 3 * 24 * 60 } },
+    { id: 'aging-young', name: 'aging-young', extras: { attention: 'waiting' as const, waitMinutes: 20 } },
+    { id: 'fresh-young', name: 'fresh-young', extras: { attention: 'your-turn' as const, waitMinutes: 1 } },
+    { id: 'idle', name: 'idle', extras: undefined },
   ];
   assert.deepEqual(triageQueue(agents).map((a) => a.id).sort(), ['aging-young', 'fresh-young']);
 });
@@ -109,13 +109,24 @@ test('key N (issue #85): the queue holds only the fresh and aging bands', () => 
 test('issue #85 fix: key N lists every Needs-you agent before any Your-turn agent, matching the panel’s group order', () => {
   // A fresh Needs-you wait (short) must still come before a far longer Your-turn wait.
   const agents = [
-    { id: 'your-turn-long-wait', extras: { attention: 'your-turn' as const, waitMinutes: 600 } },
-    { id: 'needs-you-fresh', extras: { attention: 'waiting' as const, waitMinutes: 2 } },
-    { id: 'your-turn-short-wait', extras: { attention: 'your-turn' as const, waitMinutes: 1 } },
-    { id: 'needs-you-aging', extras: { attention: 'waiting' as const, waitMinutes: 30 } },
+    { id: 'your-turn-long-wait', name: 'your-turn-long-wait', extras: { attention: 'your-turn' as const, waitMinutes: 600 } },
+    { id: 'needs-you-fresh', name: 'needs-you-fresh', extras: { attention: 'waiting' as const, waitMinutes: 2 } },
+    { id: 'your-turn-short-wait', name: 'your-turn-short-wait', extras: { attention: 'your-turn' as const, waitMinutes: 1 } },
+    { id: 'needs-you-aging', name: 'needs-you-aging', extras: { attention: 'waiting' as const, waitMinutes: 30 } },
   ];
   assert.deepEqual(triageQueue(agents).map((a) => a.id),
     ['needs-you-fresh', 'needs-you-aging', 'your-turn-short-wait', 'your-turn-long-wait']);
+});
+
+test('issue #86 follow-up: key N breaks an equal-wait tie the same way the panel does, by name', () => {
+  // Zulu, Mike and Alpha arrive in that order, all waiting the same 2 minutes.
+  // The panel lists them Alpha, Mike, Zulu (byName); N must cycle them the same way.
+  const agents = [
+    { id: 'zulu', name: 'Zulu', extras: { attention: 'waiting' as const, waitMinutes: 2 } },
+    { id: 'mike', name: 'Mike', extras: { attention: 'waiting' as const, waitMinutes: 2 } },
+    { id: 'alpha', name: 'Alpha', extras: { attention: 'waiting' as const, waitMinutes: 2 } },
+  ];
+  assert.deepEqual(triageQueue(agents).map((a) => a.id), ['alpha', 'mike', 'zulu']);
 });
 
 test('issue #85 fix: queueBucket is the one function behind both the panel’s groups and key N’s queue', () => {

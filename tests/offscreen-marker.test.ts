@@ -141,15 +141,22 @@ test('without the avoided rect in the way, the marker lands on the usual edge', 
 });
 
 test('on a narrow window, a panel spanning the canvas center still never traps the marker inside it', () => {
-  // Review's exact case: a 640-wide canvas, a panel covering the center (the canvas's own
-  // center, 320, sits inside this rect — the bug the old ray-from-center math assumed away).
+  // The review's exact case: a 640-wide canvas, a panel at {304,16,624,720} that covers the
+  // canvas's own center (320) — the bug the old ray-from-center math assumed away. Against the
+  // reverted (pre-fix) code this target lands the marker at (612, 450), inside the panel.
   const width = 640;
   const height = 900;
-  const panel = { left: 160, top: 0, right: 480, bottom: 900 };
+  const panel = { left: 304, top: 16, right: 624, bottom: 720 };
   assert.ok(width / 2 >= panel.left && width / 2 <= panel.right, 'the canvas center must sit inside the panel, to make this a real regression case');
 
-  const marker = offscreenMarker(projection(2, 0), width, height, 28, panel);
+  const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 100);
+  camera.position.set(0, 2, 10);
+  camera.lookAt(0, 2, 0);
+  camera.updateMatrixWorld();
+  const clip = projectToClip(new THREE.Vector3(60, 2, 0), camera);
+
+  const marker = offscreenMarker(clip, width, height, 28, panel);
   assert.ok(marker);
-  const insidePanel = marker!.x >= panel.left && marker!.x <= panel.right;
-  assert.equal(insidePanel, false, `expected the marker outside the panel's left/right span, got x=${marker!.x}`);
+  const insidePanel = marker!.x >= panel.left && marker!.x <= panel.right && marker!.y >= panel.top && marker!.y <= panel.bottom;
+  assert.equal(insidePanel, false, `expected the marker outside the panel rect, got (${marker!.x}, ${marker!.y})`);
 });
