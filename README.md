@@ -38,11 +38,14 @@ repos and office portrait (see the file's own comments). Rerun the command after
 or after moving the clone, so the launcher keeps pointing at the right path.
 
 Opening "Agents Office":
-- **Cold start** (no server running): starts the dev server with this fork's plugins
+- **Cold start** (nothing answers the port): starts the dev server with this fork's plugins
   (`herdr,github,bmad,missions,library,peek`, the same set as `pnpm dev:fork`) in the
   background, then opens the office in your default browser.
-- **Warm start** (server already running): opens the office in your browser only; it never
-  starts a second server.
+- **Warm start** (the office already answers the port): opens the office in your browser
+  only; it never starts a second server.
+- **Port busy with another app**: something else answers the port, but it is not this office.
+  The launcher never opens a browser or starts a server in this case. It logs it and shows a
+  macOS notification instead, so you know to close that other app first.
 - **Server lifetime**: the server keeps running after you close the browser. Quit it the same
   way you would any other local dev server (find its `vite` process, or restart your machine).
 

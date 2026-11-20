@@ -8,7 +8,12 @@
 // detached, with BROWSER=none (vite's own server.open would otherwise open a second browser
 // window), waits for it to answer, then opens the browser itself.
 //
-// Warm start (AC2): the port already answers. Opens the browser only; starts nothing.
+// Warm start (AC2): the port already answers with this office's own HTML. Opens the browser
+// only; starts nothing.
+//
+// Port busy with another app: the port answers, but not with this office's HTML (someone
+// else's dev server, for example). Never opens a browser or starts a second server; logs it
+// and tells the user through a macOS notification instead.
 //
 // Server lifetime (AC3, decision D8): the server is spawned `detached` and `unref()`d, so it
 // keeps running after this process exits and after the browser closes.
@@ -19,7 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureConfig, readConfigEnv } from './config.mjs';
-import { DEFAULT_PORT, isServerRunning } from './detect.mjs';
+import { DEFAULT_PORT, probeOffice } from './detect.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +38,7 @@ const officeUrl = `http://127.0.0.1:${port}`;
 const FORK_PLUGINS = 'herdr,github,bmad,missions,library,peek';
 const COLD_START_BUDGET_MS = 4500; // AC1 allows 5 s total; leaves headroom for the open command.
 const POLL_INTERVAL_MS = 150;
+const PROBE_TIMEOUT_MS = 1000;
 
 const logDir = path.join(os.homedir(), 'Library', 'Logs', 'agents-office');
 fs.mkdirSync(logDir, { recursive: true });
@@ -51,14 +57,25 @@ function openBrowser(url) {
   });
 }
 
+function notifyPortBusy() {
+  const message = `Port ${port} is used by another app, not the office. Quit that app, or close it, then try again.`;
+  return new Promise((resolve) => {
+    execFile('/usr/bin/osascript', ['-e', `display notification ${JSON.stringify(message)} with title "Agents Office"`], (error) => {
+      if (error) log(`notification failed: ${error.message}`);
+      resolve();
+    });
+  });
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForServer(maxWaitMs) {
+async function waitForOffice(maxWaitMs) {
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
-    if (await isServerRunning(port, { timeoutMs: 400 })) return true;
+    const probe = await probeOffice(port, { timeoutMs: 400 });
+    if (probe.reachable && probe.isOffice) return true;
     await sleep(POLL_INTERVAL_MS);
   }
   return false;
@@ -91,15 +108,21 @@ function startServer() {
 }
 
 async function main() {
-  if (await isServerRunning(port, { timeoutMs: 400 })) {
-    log('server already running; opening browser only');
+  const probe = await probeOffice(port, { timeoutMs: PROBE_TIMEOUT_MS });
+  if (probe.reachable && probe.isOffice) {
+    log('office already running; opening browser only');
     await openBrowser(officeUrl);
+    return;
+  }
+  if (probe.reachable && !probe.isOffice) {
+    log(`port ${port} answers but is not the office; leaving it alone`);
+    await notifyPortBusy();
     return;
   }
 
   log('server not running; starting it');
   startServer();
-  const ready = await waitForServer(COLD_START_BUDGET_MS);
+  const ready = await waitForOffice(COLD_START_BUDGET_MS);
   if (!ready) log('server did not confirm readiness within the cold-start budget; opening anyway');
   await openBrowser(officeUrl);
 }

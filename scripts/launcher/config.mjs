@@ -16,6 +16,9 @@ export const KNOWN_KEYS = [
   'AGENTS_OFFICE_PORTRAIT',
 ];
 
+/** A config file past this size, or that is not a regular file, is never read (it cannot hold more than a few KB of real config anyway). */
+export const CONFIG_MAX_BYTES = 64 * 1024;
+
 /** Where the launcher config file lives, one per machine, independent of where the repo is cloned. */
 export function configPath() {
   return path.join(os.homedir(), 'Library', 'Application Support', 'AgentsOffice', 'launcher.env');
@@ -77,9 +80,19 @@ export function ensureConfig(fsImpl = fs) {
   return true;
 }
 
-/** Reads the launcher config file as an env var map. Missing file reads as no overrides. */
+/**
+ * Reads the launcher config file as an env var map. Missing file, or anything that is not a
+ * plain regular file of a sane size (a symlink, a pipe, a directory, something oversized),
+ * reads as no overrides rather than stalling the launcher or reading unbounded data.
+ */
 export function readConfigEnv(fsImpl = fs) {
   const file = configPath();
-  if (!fsImpl.existsSync(file)) return {};
+  let stat;
+  try {
+    stat = fsImpl.lstatSync(file);
+  } catch {
+    return {};
+  }
+  if (!stat.isFile() || stat.size > CONFIG_MAX_BYTES) return {};
   return parseConfig(fsImpl.readFileSync(file, 'utf8'));
 }
