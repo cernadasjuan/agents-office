@@ -112,13 +112,13 @@ export interface BuiltRoom {
   stations: Map<string, Station>;
 }
 
-function place(group: THREE.Group, object: THREE.Object3D, position: THREE.Vector3, rotationY: number): void {
+export function place(group: THREE.Group, object: THREE.Object3D, position: THREE.Vector3, rotationY: number): void {
   object.position.copy(position);
   object.rotation.y = rotationY;
   group.add(object);
 }
 
-function station(type: string, position: THREE.Vector3, lookAt: THREE.Vector3, posture?: Station['posture']): Station {
+export function station(type: string, position: THREE.Vector3, lookAt: THREE.Vector3, posture?: Station['posture']): Station {
   return { type, position, lookAt, occupied: false, ...(posture ? { posture } : {}) };
 }
 

@@ -51,6 +51,19 @@ export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManag
       extras: { group: { id: `g${i % 11}`, label: `ws${i % 11}` }, badges: badgesFor(i), issues: issuesFor(i) },
     });
   }
+  // Worst case for war-room furniture: push every open mission room to its 8-slot desk
+  // cap (half debugging, half other desk-like work) at least once. Growth persists at
+  // its peak even after these agents leave, so the budget test sees the heaviest room.
+  for (let room = 0; room < REAL_SIZE.missionRooms - 1; room++) {
+    const stressIds: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      const id = `stress-${room}-${i}`;
+      stressIds.push(id);
+      manager.addAgent({ id, name: id, activity: i < 4 ? 'debugging' : 'implementing', extras: { room: `m${room}` } });
+    }
+    layout.update();
+    for (const id of stressIds) manager.removeAgent(id);
+  }
   const github = new GithubOfficeExtension();
   github.start(scene);
   bmadHats.agentsChanged?.(manager.getAgents());

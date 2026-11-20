@@ -9,6 +9,7 @@ import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, roomTitle, 
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
+import type { WarRoomCounts } from './warRoomFurnishing.js';
 import type { WorldRoom } from '../../extensions.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
 import { markStatic } from '../../scene/StaticMerge.js';
@@ -20,6 +21,8 @@ import { markStatic } from '../../scene/StaticMerge.js';
  * at its desk instead of a trip that would otherwise fall back to the lounge.
  */
 const DESK_WORK = new Set<Activity>(['implementing', 'debugging', 'deploying', 'planning']);
+/** War-room furniture growth (issue #125): activities that use the room's generic desk-like grid. */
+const WAR_ROOM_DESK_LIKE = new Set<Activity>(['implementing', 'reviewing', 'testing', 'writing_docs']);
 const TRIP_STATION: Partial<Record<Activity, string>> = {
   researching: 'researching',
   testing: 'testing',
@@ -171,7 +174,27 @@ export class BuildingLayout implements LayoutStrategy {
       this.lastQueueRefresh = now;
       moves.push(...this.orderQueue());
     }
+    this.growMissionFurniture();
     return moves;
+  }
+
+  /**
+   * War-room furniture grows with the peak concurrent count of desk-like and
+   * debugging agents (issue #125, rulebook §3), and never shrinks back; each
+   * room tracks its own peak and only rebuilds when a count actually grows.
+   */
+  private growMissionFurniture(): void {
+    if (this.missionRooms.size === 0) return;
+    const counts = new Map<string, WarRoomCounts>();
+    for (const state of this.agents.values()) {
+      const roomId = state.target?.startsWith('room:') ? state.target.slice('room:'.length) : null;
+      if (!roomId || !this.missionRooms.has(roomId)) continue;
+      const entry = counts.get(roomId) ?? { deskLike: 0, debugging: 0 };
+      if (state.agent.activity === 'debugging') entry.debugging++;
+      else if (WAR_ROOM_DESK_LIKE.has(state.agent.activity)) entry.deskLike++;
+      counts.set(roomId, entry);
+    }
+    for (const [id, room] of this.missionRooms) room.updateCounts(counts.get(id) ?? { deskLike: 0, debugging: 0 });
   }
 
   // --- Targets ---
