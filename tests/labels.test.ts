@@ -70,3 +70,36 @@ test('a provider tag is appended to the activity line as text', (t) => {
   updateLabel(label, 'claude-agent', 'Idle');
   assertPlainLabel(label.element, 'claude-agent', 'Idle');
 });
+
+// --- The wait chip (#132): readable in a compact queue label, without the activity line ---
+
+test('without a wait, a label has no wait chip at all', (t) => {
+  installDocument(t);
+  const label = createLabel('agent', 'Waiting for you');
+  assert.equal(label.element.querySelector('.wait'), null);
+  assert.equal(label.element.children.length, 2);
+});
+
+test('a wait chip is its own text-only element, so it survives in a compact label (the activity line hides there)', (t) => {
+  installDocument(t);
+  const label = createLabel('agent', 'Waiting for you · 12 min', undefined, '12m');
+  assert.equal(label.element.querySelector('.wait')?.textContent, '12m');
+  assert.equal(label.element.children.length, 3);
+  assert.equal(label.element.querySelector('img, svg, script, iframe'), null);
+});
+
+test('updateLabel drops the wait chip once the agent stops waiting', (t) => {
+  installDocument(t);
+  const label = createLabel('agent', 'Waiting for you · 12 min', undefined, '12m');
+  updateLabel(label, 'agent', 'Implementing');
+  assert.equal(label.element.querySelector('.wait'), null);
+  assert.equal(label.element.children.length, 2);
+});
+
+test('the wait chip treats markup as text', (t) => {
+  installDocument(t);
+  const payload = '<img src=x onerror="window.compromised=true">';
+  const label = createLabel('agent', 'Waiting for you', undefined, payload);
+  assert.equal(label.element.querySelector('.wait')?.textContent, payload);
+  assert.equal(label.element.querySelector('img, svg, script, iframe'), null);
+});
