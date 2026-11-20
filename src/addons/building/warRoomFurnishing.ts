@@ -67,16 +67,22 @@ export function tierFor(liveDeskAgents: number): RoomTier {
 }
 
 /**
- * Up to 6 desk slots, 3 columns two rows deep (rulebook §3's physical-fit cap). Every
- * desk and debug station carries its own chair (`Desk.ts`, `DebugStation.ts`), so a
- * piece's real depth reaches past its own row; the row gap is wide enough that an
- * occupied row's chair back never reaches the next row's desk front. The grid keeps off
- * the wall that also carries the ended-session tombstone strip (`missionRooms.ts`): a
- * column there would overlap it regardless of how the strip itself grows.
+ * Up to 4 desk slots (rulebook §3's physical-fit cap). Every desk and debug station
+ * carries its own chair (`Desk.ts`, `DebugStation.ts`), so a piece's real depth reaches
+ * past its own row. That rules out a second row at two of the three columns:
+ * - `a = -2.4` and `a = 2.4` sit under the room's own meeting table and standing ring
+ *   (`missionRooms.ts`'s `TABLE_SEATS`/`STANDING_SPOTS`, centered on the room at
+ *   `d = 6.2`); a row deep enough to clear the row in front of it would land inside
+ *   a seat or a standing spot there.
+ * - `a = -4.6` would overlap the ended-session tombstone strip, the same reason the
+ *   grid has only 3 columns instead of 4.
+ * `a = 4.6` sits clear of both and is the only column with a second row.
  */
-const DESK_ROW_D = [1.4, 3.6];
-const DESK_COL_A = [-2.4, 2.4, 4.6];
-export const MAX_DESK_SLOTS = DESK_ROW_D.length * DESK_COL_A.length;
+const DESK_SLOTS: ReadonlyArray<{ a: number; d: number }> = [
+  { a: -2.4, d: 1.4 }, { a: 2.4, d: 1.4 }, { a: 4.6, d: 1.4 },
+  { a: 4.6, d: 3.6 },
+];
+export const MAX_DESK_SLOTS = DESK_SLOTS.length;
 
 const JITTER_POS = 0.12;
 const JITTER_ROT = (8 * Math.PI) / 180;
@@ -85,7 +91,7 @@ const JITTER_ROT = (8 * Math.PI) / 180;
  * Half the door's physical lane, plus a desk or debug station's own worst-case
  * half-width (0.9 m) and the grid's own jitter (0.12 m), rounded up with a small margin.
  */
-const DOOR_PATH_CLEARANCE = DOOR_WIDTH / 2 + 1.1;
+export const DOOR_PATH_CLEARANCE = DOOR_WIDTH / 2 + 1.1;
 
 /**
  * The real door is not always centered on the room's door wall (missionSlot's first ring
@@ -105,8 +111,7 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
   const stations: SpotPlan[] = [];
 
   // --- Desk grid: debug stations fill first, so a room with a debugger shows it even at low headcount ---
-  const slots: Array<{ a: number; d: number }> = [];
-  for (const d of DESK_ROW_D) for (const a of DESK_COL_A) if (clearsDoor(a, doorAlong)) slots.push({ a, d });
+  const slots = DESK_SLOTS.filter((slot) => clearsDoor(slot.a, doorAlong));
   const deskSlotCount = Math.min(counts.deskLike + counts.debugging, MAX_DESK_SLOTS, slots.length);
   for (let i = 0; i < deskSlotCount; i++) {
     const { a, d } = slots[i];
@@ -170,10 +175,14 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
   if (roomTier !== 'small') pieces.push({ piece: PIECES.waterCooler(), a: jitter(rand, nearWall - 0.7, 0.1), d: jitter(rand, 8.6, 0.3) });
   if (roomTier === 'large') {
     pieces.push({ piece: PIECES.tv(), a: jitter(rand, nearWall, 0.05), d: jitter(rand, 9.5, 0.3), y: 2.2, turn: -Math.PI / 2 });
-    // No turn: the divider's long side runs along the door wall (`a`), its thin side along
-    // `d`, so it sits between the desk grid and the sofa without reaching into either
-    // (turning it, as a first pass did, swapped those axes and drove it into both).
-    if (rand() > 0.5) pieces.push({ piece: PIECES.lowDivider(2.2), a: jitter(rand, 0, 0.1), d: jitter(rand, 4.4, 0.1) });
+    // Turned, so its long side runs along `d` (depth) and its thin side along `a`: it fits
+    // the one lane clear of everything else in the room, between the ended-session
+    // tombstone strip (its right edge near a = -4.25) and the meeting table's own ring of
+    // seats and standing spots (its left-most point near a = -2.9), for the room's full
+    // depth. A centered, untouched lane (a first pass tried d = 4.4, a = 0) lands on the
+    // door-facing meeting seat at (0, 4.3) and, with the desk grid's row depth below, on
+    // the standing ring too; this lane has neither.
+    if (rand() > 0.5) pieces.push({ piece: PIECES.lowDivider(2.2), a: jitter(rand, -3.8, 0.05), d: jitter(rand, 5.5, 0.3), turn: Math.PI / 2 });
   }
 
   return { pieces, stations };

@@ -105,8 +105,8 @@ test('AC1: a new war room has its must-have furniture from the start, built from
 
 test('desk-like furniture grows with the peak live count and never shrinks back', () => {
   // Index 0 sits in the first ring's first wing column, whose door is 1 m off the room's
-  // own center (`missionSlot`'s `WING_COLUMNS`); that shrinks this particular room's
-  // physical fit from MAX_DESK_SLOTS down to 4 (one column is in the door's path).
+  // own center (`missionSlot`'s `WING_COLUMNS`); that drops this room's `a = -2.4` slot
+  // (in the door's path), shrinking its physical fit from MAX_DESK_SLOTS (4) to 3.
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   const countOf = (name: string) => {
     let n = 0;
@@ -124,9 +124,9 @@ test('desk-like furniture grows with the peak live count and never shrinks back'
   assert.equal(countOf('desk'), 2);
   assert.equal(countOf('debugStation'), 1);
 
-  // A later, bigger peak grows it further, up to this room's own physical fit
+  // A later, bigger peak grows it further, up to this room's own physical fit (3 slots)
   missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
-  assert.equal(countOf('desk'), 2);
+  assert.equal(countOf('desk'), 1);
   assert.equal(countOf('debugStation'), 2);
 });
 
