@@ -43,6 +43,24 @@ export function compareWaits(a: Wait, b: Wait): number {
   return rank(a) - rank(b) || (b?.waitMinutes ?? -1) - (a?.waitMinutes ?? -1);
 }
 
+type Queued = { id: string; extras?: Wait };
+
+/** Key N's queue: agents in the fresh or aging band, in the same order as the triage panel's needs-you/your-turn groups. */
+export function triageQueue<T extends Queued>(agents: T[]): T[] {
+  return agents.filter((agent) => queuesForYou(agent.extras)).sort((a, b) => compareWaits(a.extras, b.extras));
+}
+
+/**
+ * Key N: the agent after `currentId` in the queue, cycling back to the first
+ * past the end. The first agent when `currentId` is null or not in the queue
+ * (a cold-start press, or the current selection has left the queue).
+ */
+export function nextInQueue<T extends Queued>(queue: T[], currentId: string | null): T | null {
+  if (queue.length === 0) return null;
+  const index = currentId === null ? -1 : queue.findIndex((agent) => agent.id === currentId);
+  return queue[(index + 1) % queue.length];
+}
+
 /** Browser tab title: blocked agents in parentheses, then agents whose turn is yours. */
 export function tabTitle(blocked: number, yourTurn: number): string {
   const parts = [blocked > 0 ? `(${blocked})` : '', yourTurn > 0 ? `+${yourTurn}` : ''].filter(Boolean);

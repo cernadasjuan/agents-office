@@ -331,6 +331,54 @@ test('before the first answer the panel shows a loading text, and the first rend
   assert.equal(loading.hidden, true, 'an empty office after the first answer is a real empty office');
 });
 
+test('key / (issue #85): focusFilter gives the filter field the focus', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([idle('a')]);
+  panel.focusFilter();
+  assert.equal(list.ownerDocument.activeElement, list.querySelector('.triage-filter'));
+});
+
+test('typing in the filter field hides rows whose name and activity do not match, case-insensitively', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('fix-login'), working('add-filter'), idle('idle-one')]);
+  const filter = list.querySelector<HTMLInputElement>('.triage-filter')!;
+
+  filter.value = 'LOGIN';
+  filter.dispatchEvent(new filter.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+
+  assert.equal(card(list, 'fix-login').hidden, false);
+  assert.equal(card(list, 'add-filter').hidden, true);
+  assert.equal(card(list, 'idle-one').hidden, true);
+});
+
+test('the filter also matches the activity text, and an empty filter shows every row again', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('a'), idle('b')]);
+  const filter = list.querySelector<HTMLInputElement>('.triage-filter')!;
+
+  filter.value = 'implementing';
+  filter.dispatchEvent(new filter.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+  assert.equal(card(list, 'a').hidden, false);
+  assert.equal(card(list, 'b').hidden, true);
+
+  filter.value = '';
+  filter.dispatchEvent(new filter.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+  assert.equal(card(list, 'a').hidden, false);
+  assert.equal(card(list, 'b').hidden, false);
+});
+
+test('a filter survives a poll: a newly arrived row that does not match stays hidden', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('a')]);
+  const filter = list.querySelector<HTMLInputElement>('.triage-filter')!;
+  filter.value = 'a';
+  filter.dispatchEvent(new filter.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+
+  panel.render([working('a'), working('zzz')]);
+  assert.equal(card(list, 'a').hidden, false);
+  assert.equal(card(list, 'zzz').hidden, true);
+});
+
 test('a finished subagent reads "Done"; an idle main agent keeps "Taking a break"', (t) => {
   const { list, panel } = makePanel(t);
   panel.render([idle('main'), { id: 'sub', name: 'sub', activity: 'idle', extras: { parentId: 'main' } }]);

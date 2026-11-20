@@ -197,6 +197,29 @@ test('a registered action shows only for agents it applies to, and a click shows
   assert.equal(status.querySelector('b'), null);
 });
 
+test('key F (issue #85): without a selection, nothing is ready and no error', (t) => {
+  const { card } = makeCard(t);
+  card.render([main]);
+  assert.equal(card.keyboardFocus(), false);
+});
+
+test('key F: ready is true only once the selected agent offers the action, and no action runs', async (t) => {
+  const { card, selection } = makeCard(t);
+  const ran: string[] = [];
+  registerCardAction({ id: 'focus', label: 'Focus in herdr', available: (agent) => agent.extras?.actions?.includes('focus') === true, run: async (agent) => { ran.push(agent.id); return 'ok'; } });
+  card.render([main, { ...main, id: 'no-action', extras: undefined }]);
+
+  selection.select('no-action');
+  assert.equal(card.keyboardFocus(), false, 'no action offered for this agent');
+
+  selection.select('main-1');
+  assert.equal(card.keyboardFocus(), false, 'main has no actions in its extras');
+
+  card.render([{ ...main, extras: { ...main.extras, actions: ['focus'] } }]);
+  assert.equal(card.keyboardFocus(), true, 'the focus action is ready');
+  assert.deepEqual(ran, [], 'S7: a keystroke never runs the write action, only a click does');
+});
+
 test('the card docks left of the panel, 360 px wide', (t) => {
   const { card, selection, root, document } = makeCard(t);
   const anchor = document.getElementById('ui-panel')!;

@@ -209,6 +209,19 @@ export class AgentCard {
     return figureShiftPx(viewportWidth, this.cardLeftPx());
   }
 
+  /**
+   * Key F (issue #85). Reports whether the shown agent has a ready action
+   * (today only the herdr focus button), but never runs it: S7 keeps a write
+   * action behind a click, and #85 AC2/AC3 ask for a keyboard trigger without
+   * a decision on that trade-off yet. This is the one seam to change if
+   * Gabriel approves a keyboard write action later: swap the body for
+   * `await this.runAction(actionId)`, where `actionId` is the ready action's id.
+   */
+  keyboardFocus(): boolean {
+    const agent = this.current;
+    return agent !== null && actions.some((action) => action.available(agent));
+  }
+
   /** Run a card action on the shown agent (the button click). */
   async runAction(actionId: string): Promise<void> {
     const agent = this.current;

@@ -74,6 +74,8 @@ export class AgentPanel {
   private selectedId: string | null = null;
   private chipBar: HTMLElement;
   private loading: HTMLElement;
+  private filterInput: HTMLInputElement;
+  private filterText = '';
 
   constructor(
     private list: HTMLElement,
@@ -82,6 +84,15 @@ export class AgentPanel {
     this.loading = document.createElement('div');
     this.loading.className = 'triage-loading';
     this.loading.textContent = 'Loading agents…';
+    this.filterInput = document.createElement('input');
+    this.filterInput.type = 'search';
+    this.filterInput.className = 'triage-filter';
+    this.filterInput.placeholder = 'Filter (/)';
+    this.filterInput.setAttribute('aria-label', 'Filter agents');
+    this.filterInput.addEventListener('input', () => {
+      this.filterText = this.filterInput.value.trim().toLowerCase();
+      this.applyFilter();
+    });
     this.chipBar = document.createElement('div');
     this.chipBar.className = 'triage-chips';
     const body = document.createElement('div');
@@ -92,7 +103,21 @@ export class AgentPanel {
       this.chipBar.appendChild(group.chip);
       body.appendChild(group.section);
     }
-    this.list.replaceChildren(this.loading, this.chipBar, body);
+    this.list.replaceChildren(this.loading, this.filterInput, this.chipBar, body);
+  }
+
+  /** Key / (issue #85): give the filter field the focus, so typing filters the rows at once. */
+  focusFilter(): void {
+    this.filterInput.focus();
+    this.filterInput.select();
+  }
+
+  /** Hide rows whose name and activity do not contain the filter text. Case-insensitive, empty text shows everything. */
+  private applyFilter(): void {
+    for (const row of this.rows.values()) {
+      const haystack = `${row.name.textContent ?? ''} ${row.activity.textContent ?? ''}`.toLowerCase();
+      row.card.hidden = this.filterText.length > 0 && !haystack.includes(this.filterText);
+    }
   }
 
   /** Mark the row of the selected agent, or none. */
@@ -123,6 +148,7 @@ export class AgentPanel {
       group.count = ordered.length;
       this.refreshGroup(group);
     }
+    this.applyFilter();
   }
 
   private createGroup(spec: GroupSpec): Group {

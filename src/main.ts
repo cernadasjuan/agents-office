@@ -8,13 +8,14 @@ import { AgentPanel, isDemoMode, setupPanelCollapse } from './ui/AgentPanel.js';
 import { chooseLayoutId, confirmLayoutSwitch, createLayout, defaultViewFor, isLayoutSwitchKey, layoutName, rememberLayoutId, reloadForLayoutSwitch } from './layout/registry.js';
 import { chooseViewMode, rememberViewMode, viewStatusText } from './scene/ViewMemory.js';
 import { activeExtensions, currentWorld, setWorld, type World } from './extensions.js';
-import { tabTitleFor } from './ui/attention.js';
+import { nextInQueue, tabTitleFor, triageQueue } from './ui/attention.js';
 import { LabelDetailController } from './ui/LabelDetail.js';
 import { AgentCard } from './ui/AgentCard.js';
 import { FrameLoop } from './scene/FrameLoop.js';
 import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
 import { FreshnessFooter } from './ui/freshness.js';
 import { Legend } from './ui/Legend.js';
+import { handleTriageKey } from './ui/TriageKeys.js';
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
@@ -76,6 +77,19 @@ onSelectionChange((agentId) => panel.setSelected(agentId));
 // Footer: "Updated N s ago", amber after 2 failed polls, red after 5. "?" opens the legend.
 const freshness = new FreshnessFooter(document.getElementById('panel-footer')!);
 new Legend({ parent: document.body, button: document.getElementById('legend-button')!, keys: window, layout: layoutId, plugins: () => currentWorld().plugins });
+
+// Keyboard triage (issue #85): N the next agent in queue, F readies its focus action, / the filter field.
+window.addEventListener('keydown', (event) => {
+  handleTriageKey(event, {
+    next: () => {
+      const queue = triageQueue(agentManager.getAgents().map((managed) => managed.info));
+      const next = nextInQueue(queue, selectedAgentId());
+      if (next) selectAgent(next.id);
+    },
+    focus: () => agentCard.keyboardFocus(),
+    filter: () => panel.focusFilter(),
+  });
+});
 
 // Label detail: full labels only for waiting, selected, hovered or near agents. Key V or `#labels=all` shows all.
 // War room signs show only when zoomed in, near or hovered.

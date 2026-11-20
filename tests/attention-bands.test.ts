@@ -8,8 +8,10 @@ import {
   callsForYou,
   compareWaits,
   countsInTab,
+  nextInQueue,
   queuesForYou,
   tabTitleFor,
+  triageQueue,
 } from '../src/ui/attention.js';
 import type { Observation } from '../server/seam.js';
 import type { AgentInfo } from '../src/agents/AgentData.js';
@@ -91,6 +93,38 @@ test('the queue puts fresh before aging, and the oldest wait first inside each b
   ].map(({ id, waitMinutes }) => ({ id, extras: { attention: 'waiting' as const, waitMinutes } }));
   const ordered = [...waits].sort((a, b) => compareWaits(a.extras, b.extras)).map((w) => w.id);
   assert.deepEqual(ordered, ['fresh-old', 'fresh-young', 'aging-old', 'aging-young']);
+});
+
+test('key N (issue #85): the queue holds only the fresh and aging bands, in the same order as the panel', () => {
+  const agents = [
+    { id: 'cold-1', extras: { attention: 'waiting' as const, waitMinutes: 3 * 24 * 60 } },
+    { id: 'aging-young', extras: { attention: 'waiting' as const, waitMinutes: 20 } },
+    { id: 'fresh-young', extras: { attention: 'your-turn' as const, waitMinutes: 1 } },
+    { id: 'idle', extras: undefined },
+  ];
+  assert.deepEqual(triageQueue(agents).map((a) => a.id), ['fresh-young', 'aging-young']);
+});
+
+test('key N: from no selection, the next agent is the first in queue', () => {
+  const queue = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  assert.equal(nextInQueue(queue, null)?.id, 'a');
+});
+
+test('key N: steps to the next agent, and cycles from the last back to the first', () => {
+  const queue = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  assert.equal(nextInQueue(queue, 'a')?.id, 'b');
+  assert.equal(nextInQueue(queue, 'b')?.id, 'c');
+  assert.equal(nextInQueue(queue, 'c')?.id, 'a', 'cycles back to the first');
+});
+
+test('key N: a selection that left the queue (clicked, or moved to cold) restarts at the first', () => {
+  const queue = [{ id: 'a' }, { id: 'b' }];
+  assert.equal(nextInQueue(queue, 'gone')?.id, 'a');
+});
+
+test('key N: an empty queue (cold start, nobody needs you) selects nothing', () => {
+  assert.equal(nextInQueue([], null), null);
+  assert.equal(nextInQueue([], 'a'), null);
 });
 
 test('the tab title counts fresh blocks, then fresh your-turn waits', () => {

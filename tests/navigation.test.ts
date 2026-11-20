@@ -12,7 +12,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   set: () => true,
 })) as never;
 const { AgentManager } = await import('../src/agents/AgentManager.js');
-const { ViewController } = await import('../src/scene/ViewController.js');
+const { ViewController, VIEW_HINTS } = await import('../src/scene/ViewController.js');
 const { SelectionState } = await import('../src/scene/Selection.js');
 const { updateFreeCamera, setFreeCameraLook, focusPosition, MIN_EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
 const { floorUnder } = await import('../src/scene/OverviewCamera.js');
@@ -34,6 +34,16 @@ function memoryStorage(initial: Record<string, string> = {}) {
     data,
   };
 }
+
+// --- Key hints list the keyboard triage keys (issue #85) ---
+
+test('every view hint lists N, F and the filter key', () => {
+  for (const hint of Object.values(VIEW_HINTS)) {
+    assert.match(hint, /N = next/);
+    assert.match(hint, /F = focus/);
+    assert.match(hint, /\/ = filter/);
+  }
+});
 
 // --- Free camera: no bounding box ---
 
