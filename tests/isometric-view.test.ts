@@ -1,0 +1,330 @@
+import assert from 'node:assert/strict';
+import { after, test } from 'node:test';
+import { JSDOM } from 'jsdom';
+import * as THREE from 'three';
+import type { Seat, LayoutStrategy } from '../src/layout/LayoutStrategy.js';
+
+// Toon materials paint a gradient on a canvas at import time.
+const dom = new JSDOM('<!doctype html><html><body><div id="pointer-hint"></div></body></html>');
+Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true, writable: true });
+dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
+  get: () => () => undefined,
+  set: () => true,
+})) as never;
+const { AgentManager } = await import('../src/agents/AgentManager.js');
+const { ViewController } = await import('../src/scene/ViewController.js');
+const { SelectionState, parseViewHash } = await import('../src/scene/Selection.js');
+const { IsometricController, isometricDirection, ISO_ELEVATION } = await import('../src/scene/IsometricCamera.js');
+const { chooseViewMode, viewStatusText } = await import('../src/scene/ViewMemory.js');
+const { labelDetail, signVisible, roomLabelVisible, OVERVIEW_FULL_LABEL_ZOOM } = await import('../src/ui/LabelDetail.js');
+const { renderQuality } = await import('../src/scene/RenderScheduler.js');
+const { roomLabelPose } = await import('../src/addons/building/roomLabels.js');
+const { findCeilings } = await import('../src/scene/Cutaway.js');
+const { createWalls } = await import('../src/furniture/Walls.js');
+const { FrameLoop } = await import('../src/scene/FrameLoop.js');
+const { markStatic } = await import('../src/scene/StaticMerge.js');
+after(() => {
+  dom.window.close();
+  Reflect.deleteProperty(globalThis, 'document');
+});
+
+const BUILDING = new THREE.Box3(new THREE.Vector3(-30, 0, -20), new THREE.Vector3(30, 3, 20));
+
+function corners(box: THREE.Box3): THREE.Vector3[] {
+  const points: THREE.Vector3[] = [];
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) points.push(new THREE.Vector3(x, y, z));
+  return points;
+}
+
+function framedCamera(aspect = 16 / 9) {
+  const iso = new IsometricController();
+  iso.frame(BUILDING, aspect);
+  const camera = new THREE.OrthographicCamera();
+  iso.applyTo(camera, aspect, 60);
+  camera.updateMatrixWorld();
+  return { iso, camera };
+}
+
+// --- The isometric camera ---
+
+test('the isometric direction is the classic angle: 35.26 degrees above the floor, at 45 degrees to the walls', () => {
+  const direction = isometricDirection();
+  assert.ok(Math.abs(ISO_ELEVATION - Math.atan(1 / Math.SQRT2)) < 1e-9);
+  assert.ok(Math.abs(Math.abs(direction.x) - Math.abs(direction.z)) < 1e-9, 'equal angle to both wall axes');
+  assert.ok(Math.abs(direction.length() - 1) < 1e-9);
+});
+
+test('framed, the whole building is on screen with an orthographic projection', () => {
+  for (const aspect of [16 / 9, 0.6]) {
+    const { camera } = framedCamera(aspect);
+    for (const corner of corners(BUILDING)) {
+      const ndc = corner.clone().project(camera);
+      assert.ok(Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1 && Math.abs(ndc.z) <= 1, `corner ${corner.toArray()} at ${ndc.toArray()} (aspect ${aspect})`);
+    }
+  }
+});
+
+test('no perspective distortion: the same floor length has the same screen length near and far', () => {
+  const { camera } = framedCamera();
+  const screenLength = (z: number) => new THREE.Vector3(1, 0, z).project(camera).distanceTo(new THREE.Vector3(-1, 0, z).project(camera));
+  assert.ok(Math.abs(screenLength(-18) - screenLength(18)) < 1e-9);
+});
+
+test('the wheel zooms within limits and the zoom reads as an overview-like distance', () => {
+  const { iso } = framedCamera();
+  const framed = iso.halfHeight;
+  const distance = iso.equivalentDistance(60);
+  iso.zoom(-400);
+  assert.ok(iso.halfHeight < framed);
+  assert.ok(iso.equivalentDistance(60) < distance, 'zooming in lowers the distance the label rules read');
+  for (let i = 0; i < 50; i++) iso.zoom(-1000);
+  assert.ok(iso.halfHeight >= iso.minHalfHeight - 1e-9);
+  for (let i = 0; i < 50; i++) iso.zoom(1000);
+  assert.ok(iso.halfHeight <= iso.maxHalfHeight + 1e-9);
+});
+
+test('the same zoom gives the same screen size as the overview at that distance', () => {
+  const { iso, camera } = framedCamera();
+  iso.zoom(-600);
+  iso.applyTo(camera, 16 / 9, 60);
+  camera.updateMatrixWorld();
+  const perspective = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 500);
+  perspective.position.copy(iso.target).addScaledVector(isometricDirection(), iso.equivalentDistance(60));
+  perspective.lookAt(iso.target);
+  perspective.updateMatrixWorld();
+  const size = (cam: THREE.Camera) => iso.target.clone().add(new THREE.Vector3(1, 0, 1)).project(cam).distanceTo(iso.target.clone().project(cam));
+  assert.ok(Math.abs(size(camera) - size(perspective)) < 1e-6, `ortho ${size(camera)} vs perspective ${size(perspective)}`);
+});
+
+test('a drag moves the floor with the pointer, and the target stays over the building', () => {
+  const { iso, camera } = framedCamera();
+  const start = iso.target.clone();
+  iso.drag(-100, 0, 900);
+  assert.ok(iso.target.distanceTo(start) > 0.5, 'a drag pans');
+  // The floor point under the pointer follows it: the target moved right on screen by 100 px of floor
+  iso.applyTo(camera, 16 / 9, 60);
+  camera.updateMatrixWorld();
+  const moved = start.clone().project(camera);
+  assert.ok(Math.abs(moved.x * 800 + 100) < 1, `start point now ${moved.x * 800} px from the center`);
+  for (let i = 0; i < 100; i++) iso.pan(100, 100);
+  assert.ok(iso.target.x <= BUILDING.max.x && iso.target.z >= BUILDING.min.z);
+});
+
+test('a vertical drag keeps the floor point under the pointer despite the tilt', () => {
+  const { iso, camera } = framedCamera();
+  const start = iso.target.clone();
+  iso.drag(0, 90, 900);
+  iso.applyTo(camera, 16 / 9, 60);
+  camera.updateMatrixWorld();
+  const moved = start.clone().project(camera);
+  assert.ok(Math.abs(moved.y * 450 + 90) < 1, `start point now ${moved.y * 450} px from the center`);
+});
+
+// --- View controller ---
+
+const fixedLayout: LayoutStrategy = {
+  id: 'fixed',
+  seatFor: (agent): Seat => ({ key: agent.id, position: new THREE.Vector3(4, 0, -3), lookAt: new THREE.Vector3(4, 0, 0) }),
+  release: () => undefined,
+};
+
+function setup(hash = '', options: { figureShiftPx?: () => number; view?: 'first-person' | 'overview' | 'isometric' } = {}) {
+  const document = dom.window.document;
+  const scene = new THREE.Scene();
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+  wall.userData.overviewHidden = true;
+  scene.add(wall);
+  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
+  camera.position.set(-12, 5.5, 11);
+  const canvas = document.createElement('canvas');
+  Object.defineProperty(canvas, 'clientWidth', { value: 1600 });
+  Object.defineProperty(canvas, 'clientHeight', { value: 900 });
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1600, bottom: 900, width: 1600, height: 900, x: 0, y: 0, toJSON: () => ({}) });
+  document.body.appendChild(canvas);
+  const manager = new AgentManager(scene, fixedLayout);
+  const selection = new SelectionState();
+  const hint = document.getElementById('pointer-hint');
+  const modes: string[] = [];
+  const view = new ViewController({
+    camera, canvas, scene, selection, hint,
+    agents: () => manager.getAgents(),
+    keys: dom.window,
+    hash,
+    modeChanged: (mode) => modes.push(mode),
+    ...options,
+  });
+  const press = (code: string) => dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { code, key: code }));
+  const settle = () => { for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60); };
+  return { view, camera, canvas, scene, manager, selection, wall, hint, press, modes, settle };
+}
+
+test('#view=iso starts in the isometric view with an orthographic camera and no near walls', () => {
+  assert.equal(parseViewHash('#view=iso').view, 'isometric');
+  const { view, wall, modes, hint } = setup('#view=iso');
+  view.update(0, 1 / 60);
+  assert.equal(view.mode, 'isometric');
+  assert.ok((view.activeCamera as THREE.OrthographicCamera).isOrthographicCamera);
+  assert.equal(wall.visible, false);
+  assert.deepEqual(modes, ['isometric']);
+  assert.match(hint!.textContent ?? '', /isometric/i);
+});
+
+test('without the isometric view the active camera stays the perspective camera (old behavior)', () => {
+  const { view, camera, press } = setup();
+  assert.equal(view.activeCamera, camera);
+  press('KeyO');
+  assert.equal(view.activeCamera, camera);
+});
+
+test('key I enters the isometric view and goes back to the view before it; O from it goes to the overview', () => {
+  const { view, camera, wall, press, modes, settle } = setup();
+  press('KeyI');
+  assert.equal(view.mode, 'isometric');
+  assert.equal(wall.visible, false);
+  press('KeyI');
+  assert.equal(view.mode, 'first-person');
+  assert.equal(wall.visible, true);
+  assert.equal(view.activeCamera, camera);
+  assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, 5.5, 11)) < 1e-6, 'first person comes back where it was');
+
+  press('KeyO');
+  press('KeyI');
+  assert.equal(view.mode, 'isometric');
+  press('KeyO');
+  assert.equal(view.mode, 'overview');
+  assert.equal(wall.visible, false);
+  press('KeyO');
+  assert.equal(view.mode, 'first-person');
+  settle();
+  assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, 5.5, 11)) < 1e-6, 'first person survives a trip through both views');
+  assert.deepEqual(modes, ['first-person', 'isometric', 'first-person', 'overview', 'isometric', 'overview', 'first-person']);
+});
+
+test('the given start view can be the isometric view (the remembered view)', () => {
+  const { view } = setup('', { view: 'isometric' });
+  assert.equal(view.mode, 'isometric');
+});
+
+test('in the isometric view the wheel zooms and the zoom distance follows it', () => {
+  const { view, canvas, settle } = setup('#view=iso');
+  settle();
+  const before = view.zoomDistance;
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+  const heightBefore = camera.top - camera.bottom;
+  canvas.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -400, cancelable: true }));
+  view.update(2, 1 / 60);
+  assert.ok(view.zoomDistance < before, `zoomed in (${view.zoomDistance} < ${before})`);
+  assert.ok(camera.top - camera.bottom < heightBefore, 'the orthographic frustum shrinks');
+});
+
+test('in the isometric view a drag and WASD pan the camera', () => {
+  const { view, canvas, press, settle } = setup('#view=iso');
+  settle();
+  const camera = view.activeCamera;
+  const start = camera.position.clone();
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 800, clientY: 450, button: 0 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 700, clientY: 450 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointerup', { clientX: 700, clientY: 450 }));
+  view.update(2, 1 / 60);
+  const dragged = camera.position.clone();
+  assert.ok(dragged.distanceTo(start) > 0.1, 'a drag pans');
+  press('KeyD');
+  for (let i = 0; i < 30; i++) view.update(3 + i / 60, 1 / 60);
+  dom.window.dispatchEvent(new dom.window.KeyboardEvent('keyup', { code: 'KeyD' }));
+  assert.ok(camera.position.distanceTo(dragged) > 0.1, 'D pans');
+});
+
+test('in the isometric view a click on a figure selects it, through the orthographic camera', () => {
+  const { view, canvas, scene, manager, selection, settle } = setup('#view=iso');
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  settle();
+  scene.updateMatrixWorld(true);
+  const camera = view.activeCamera;
+  camera.updateMatrixWorld();
+  const chest = new THREE.Vector3(4, 1.1, -3).project(camera);
+  const x = (chest.x + 1) * 800;
+  const y = (1 - chest.y) * 450;
+  assert.equal(view.pickAt(x, y), 'a');
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: x, clientY: y, button: 0 }));
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: x, clientY: y }));
+  assert.equal(selection.selected, 'a');
+  assert.equal(view.pickAt(5, 5), null);
+});
+
+for (const shift of [0, 300]) {
+  test(`isometric: a selection flies to the figure ${shift ? 'left of the open agent card' : 'at the center'}`, () => {
+    const { view, manager, selection, settle } = setup('#view=iso', shift ? { figureShiftPx: () => shift } : {});
+    manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+    settle();
+    const framed = view.zoomDistance;
+    selection.select('a');
+    for (let i = 0; i < 60; i++) view.update(2 + i / 60, 1 / 60);
+    const camera = view.activeCamera;
+    camera.updateMatrixWorld();
+    const at = new THREE.Vector3(4, 0, -3).project(camera);
+    const expected = shift ? -shift / 800 : 0;
+    assert.ok(Math.abs(at.x - expected) < 0.02, `figure at x=${at.x}, want ${expected}`);
+    assert.ok(Math.abs(at.y) < 0.02, `figure at y=${at.y}`);
+    assert.ok(view.zoomDistance < framed, 'the camera zooms in on the figure');
+  });
+}
+
+// --- View memory and labels ---
+
+test('the remembered view and the hash include the isometric view; the header names it', () => {
+  const storage = { getItem: () => 'isometric' };
+  assert.equal(chooseViewMode('', storage, 'overview'), 'isometric');
+  assert.equal(chooseViewMode('#view=iso', undefined, 'overview'), 'isometric');
+  assert.equal(chooseViewMode('#view=isometric', undefined, 'overview'), 'isometric');
+  assert.equal(viewStatusText('Building', 'isometric'), 'Building layout · Isometric');
+});
+
+test('label rules in the isometric view follow its zoom like the overview', () => {
+  const facts = { attention: undefined, selected: false, hovered: false, distance: 999 };
+  const near = { mode: 'smart' as const, viewMode: 'isometric' as const, zoomDistance: OVERVIEW_FULL_LABEL_ZOOM - 1 };
+  const far = { ...near, zoomDistance: 40 };
+  assert.equal(labelDetail(facts, near), 'full');
+  assert.equal(labelDetail(facts, far), 'compact');
+  assert.equal(signVisible({ hovered: false, distance: 999, hoverOnly: false }, near), true);
+  assert.equal(signVisible({ hovered: false, distance: 999, hoverOnly: false }, far), false);
+  assert.equal(roomLabelVisible({ viewMode: 'isometric', cameraInside: true }), true);
+  assert.deepEqual(
+    roomLabelPose({ viewMode: 'isometric', zoomDistance: 30, detail: false }, 3),
+    roomLabelPose({ viewMode: 'overview', zoomDistance: 30, detail: false }, 3),
+  );
+});
+
+test('the isometric view renders with the overview quality', () => {
+  assert.deepEqual(renderQuality('isometric', 2), renderQuality('overview', 2));
+});
+
+// --- Frame loop ---
+
+test('the frame loop draws through the active camera, cuts walls and ceilings in the isometric view, and idles', () => {
+  const scene = new THREE.Scene();
+  scene.add(createWalls());
+  const roomWalls = new THREE.Group();
+  roomWalls.add(new THREE.Mesh(new THREE.BoxGeometry(4, 3, 0.2), new THREE.MeshLambertMaterial()));
+  markStatic(roomWalls, { zone: 'room-walls', overviewLower: 3 });
+  scene.add(roomWalls);
+  const perspective = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
+  perspective.position.set(0, 1.7, 5);
+  const { camera: ortho } = framedCamera();
+  const drawn: THREE.Camera[] = [];
+  const renderer = {
+    render: (_scene: THREE.Scene, camera: THREE.Camera) => { drawn.push(camera); }, info: { render: { calls: 0, triangles: 0 }, reset: () => undefined },
+    shadowMap: { needsUpdate: false, type: THREE.PCFSoftShadowMap }, getPixelRatio: () => 1, setPixelRatio: () => undefined,
+  };
+  const loop = new FrameLoop({
+    scene, camera: perspective, activeCamera: () => ortho, renderer: renderer as never, labelRenderer: { render: () => undefined },
+    update: () => undefined, figures: () => [], mode: () => 'isometric',
+  });
+  loop.frame(0);
+  assert.equal(drawn[drawn.length - 1], ortho);
+  assert.equal(findCeilings(scene)[0].visible, false, 'no ceiling in the isometric view');
+  const lowered = scene.children.some((zone) => typeof zone.userData.overviewLower === 'number' && zone.scale.y < 1);
+  assert.ok(lowered, 'the cutaway walls drop as in the overview');
+  const frames = drawn.length;
+  for (let t = 100; t < 900; t += 34) loop.frame(t);
+  assert.equal(drawn.length, frames, 'a still isometric view renders nothing more');
+});

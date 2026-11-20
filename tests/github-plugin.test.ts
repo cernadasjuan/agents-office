@@ -247,6 +247,19 @@ test('a card names its repository only when the issue belongs to a configured on
   ]);
 });
 
+test('a bare branch number present on two configured boards is not guessed to either one', async () => {
+  const p = createGithubPlugin({ repos: 'o/alpha,o/beta', now: () => NOW,
+    run: async () => JSON.stringify([ghIssue(31)]) });
+  await world(p);
+  const file = writeTranscript([bash('git switch -c 31-x')]);
+  const observations = [observation(file)];
+
+  await enrich(p, observations);
+
+  assert.deepEqual(observations[0].display.issues, [{ number: 31, title: '' }],
+    'both o/alpha and o/beta have issue 31: no evidence names either, so no repo and no link');
+});
+
 test('the enricher keeps the 5 most recent issues and the projection never sends more than 5', async () => {
   const { plugin: p } = plugin('gabriel-amyot/agents-office');
   const file = writeTranscript(Array.from({ length: 9 }, (_, i) => bash(`gh issue view ${i + 1}`)));

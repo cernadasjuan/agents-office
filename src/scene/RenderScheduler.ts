@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ViewMode } from './Selection.js';
+import { isViewFromAbove, type ViewMode } from './Selection.js';
 
 /**
  * Render on demand. The frame loop runs its logic at most `maxFps` times a
@@ -53,10 +53,10 @@ export interface RenderQuality {
   shadowType: THREE.ShadowMapType;
 }
 
-/** First person keeps the full look. The overview sees the office from far: fewer pixels, hard shadows. */
+/** First person keeps the full look. The overview and the isometric view see the office from far: fewer pixels, hard shadows. */
 export function renderQuality(mode: ViewMode, devicePixelRatio: number): RenderQuality {
   const dpr = devicePixelRatio > 0 ? devicePixelRatio : 1;
-  return mode === 'overview'
+  return isViewFromAbove(mode)
     ? { pixelRatio: Math.min(dpr, 1.5), shadowType: THREE.BasicShadowMap }
     : { pixelRatio: Math.min(dpr, 2), shadowType: THREE.PCFShadowMap };
 }
