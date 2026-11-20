@@ -73,13 +73,17 @@ export class ViewController {
   private dragged = false;
   private pendingFocus: string | null;
   /**
-   * `#zoom=` paired with `#select=`/`#focus=` (issue #89 review): the pending `#select=`
-   * selection has not happened yet when `applyStartZoom` runs, so its own flight (`flyToAgent`,
-   * through `focusOn`) would otherwise override the requested zoom with its own fixed framing
-   * distance on the very next poll. Consumed once, by the first flight only; a later selection
-   * (a click, a different `#select=`) uses the normal fixed distance, as before.
+   * `#zoom=` paired with `#select=`/`#focus=` (issue #89 review, fix round 2): only ever set
+   * when the URL also names an agent to select, and only applies to that exact agent's own
+   * first flight, never a bare `#zoom=` (that only sets the view's own initial framing,
+   * `applyStartZoom` below) and never a different agent `selectionChanged` sees first. A
+   * decoy selected before the named agent ever appears gets its own normal framing, not the
+   * requested zoom; once any other selection or a click happens, the request is dropped for
+   * good, matching `pendingZoomTarget` going stale.
    */
   private pendingStartZoom: number | null;
+  /** The one agent id `pendingStartZoom` is reserved for, or null once it no longer applies. */
+  private pendingZoomTarget: string | null;
   private marker: SelectionMarker;
   private selection: SelectionState;
   private raycaster = new THREE.Raycaster();
@@ -90,7 +94,8 @@ export class ViewController {
     this.marker = new SelectionMarker(options.scene);
     const start = parseViewHash(options.hash ?? '');
     this.pendingFocus = start.focus;
-    this.pendingStartZoom = start.zoom;
+    this.pendingZoomTarget = start.focus;
+    this.pendingStartZoom = start.focus !== null ? start.zoom : null;
 
     setPointerLockFilter((event) => this.currentMode === 'first-person' && this.pickAt(event.clientX, event.clientY) === null);
     this.listen();
@@ -333,6 +338,14 @@ export class ViewController {
   }
 
   private selectionChanged(agentId: string | null): void {
+    // Any selection other than the one #select= named drops the pending #zoom= for good
+    // (issue #89 review, fix round 2): a decoy selected first must never steal it, and the
+    // named agent, once it finally appears, must get its own normal framing instead, not a
+    // stale request meant for someone else.
+    if (agentId !== this.pendingZoomTarget) {
+      this.pendingStartZoom = null;
+      this.pendingZoomTarget = null;
+    }
     const agent = agentId ? this.selectedAgent() : undefined;
     if (!agent) {
       this.marker.hide();
@@ -364,6 +377,7 @@ export class ViewController {
     // (and only this one) honors the requested zoom instead of focusOn's own fixed distance.
     const startZoom = this.pendingStartZoom;
     this.pendingStartZoom = null;
+    this.pendingZoomTarget = null;
     if (this.currentMode === 'isometric') {
       const from: IsometricState = this.isometric.state();
       this.isometric.focusOn(point);

@@ -108,6 +108,28 @@ test('issue #89: #zoom= is clamped into the view’s own pan/zoom limits, like t
   assert.ok(view.zoomDistance <= overview.maxDistance + 1e-6, `clamped to the zoom-out limit (${view.zoomDistance} vs ${overview.maxDistance})`);
 });
 
+test('issue #89 review, fix round 2: a bare #zoom= (no #select=) only sets the initial framing; a later, unrelated click gets its own normal framing', () => {
+  const { view, manager, selection } = setup('#view=overview&zoom=20');
+  view.update(0, 1 / 60);
+  manager.addAgent({ id: 'other', name: 'Other', activity: 'idle' });
+  selection.select('other');
+  for (let i = 0; i < 120; i++) view.update(i / 60, 1 / 60);
+  assert.notEqual(view.zoomDistance, 20, `an unrelated click should use its own normal framing, not the bare #zoom= (got ${view.zoomDistance})`);
+});
+
+test('issue #89 review, fix round 2: #zoom=&select=wanted — a decoy selected first gets normal framing, and "wanted" never steals it back', () => {
+  const { view, manager, selection } = setup('#view=overview&zoom=20&select=wanted');
+  manager.addAgent({ id: 'decoy', name: 'Decoy', activity: 'idle' });
+  selection.select('decoy'); // selected before "wanted" ever appears
+  for (let i = 0; i < 120; i++) view.update(i / 60, 1 / 60);
+  assert.notEqual(view.zoomDistance, 20, `the decoy should get its own normal framing, not the zoom meant for "wanted" (got ${view.zoomDistance})`);
+
+  manager.addAgent({ id: 'wanted', name: 'Wanted', activity: 'idle' });
+  view.agentsChanged(manager.getAgents());
+  for (let i = 0; i < 120; i++) view.update(120 / 60 + i / 60, 1 / 60);
+  assert.notEqual(view.zoomDistance, 20, '"wanted" lost its claim once another agent was selected first: the URL zoom is dropped for good, not reclaimed');
+});
+
 /** A room away from the default scene origin, so framing it looks different from the view's own default. */
 function fixtureRoomView(): { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } {
   const bounds = new THREE.Box3(new THREE.Vector3(20, 0, -6), new THREE.Vector3(32, 2.6, 6));

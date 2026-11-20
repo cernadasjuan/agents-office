@@ -340,6 +340,27 @@ test('roomView matches a mission room by its slugified title or its public id â€
     [missionRect.minX, missionRect.maxX, missionRect.minZ, missionRect.maxZ]);
 });
 
+test('roomView picks none when two mission rooms slugify to the same title; the exact public id still works (review fix round 2)', () => {
+  const { layout } = setup();
+  const publicId = createFakePublicId();
+  const projected = projectWorld(
+    [{ rooms: [
+      { key: 'mission:media-plan', kind: 'mission', title: 'Media Plan', state: 'open', walls: {} },
+      { key: 'mission:media/plan', kind: 'mission', title: 'Media/Plan', state: 'open', walls: {} },
+    ] }],
+    ['missions'],
+    publicId,
+  ).rooms;
+  assert.notEqual(projected[0]!.id, projected[1]!.id, 'two distinct rooms, two distinct ids');
+
+  layout.syncWorldRooms(projected.map((room) => ({ id: room.id, kind: 'mission' as const, title: room.title, state: 'open' as const, sleepers: [], walls: {} })));
+
+  assert.equal(layout.roomView('media-plan'), null, 'ambiguous by title: picks none, not whichever came first');
+  assert.ok(layout.roomView(projected[0]!.id), 'the exact public id still resolves its own room');
+  assert.ok(layout.roomView(projected[1]!.id), 'and the other room by its own id');
+  assert.notDeepEqual(layout.roomView(projected[0]!.id), layout.roomView(projected[1]!.id));
+});
+
 test('roomView\'s first-person standing point sits inside the room, facing further into it', () => {
   const { layout } = setup();
   const view = layout.roomView('office')!;

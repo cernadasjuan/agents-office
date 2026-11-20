@@ -183,8 +183,17 @@ export class BuildingLayout implements LayoutStrategy {
       if (record) slot = slotFor(record.index);
     }
     if (!slot) {
-      const mission = [...this.missionRooms.values()].find((room) => room.id === name || slugify(room.title) === query);
-      if (mission) slot = mission.slot;
+      const byId = [...this.missionRooms.values()].find((room) => room.id === name);
+      if (byId) {
+        slot = byId.slot;
+      } else {
+        // Two mission rooms can slugify to the same title (issue #89 review, fix round 2):
+        // picking the first one silently would show the wrong room. The exact public id
+        // always disambiguates them; a title match only resolves when exactly one applies.
+        const byTitle = [...this.missionRooms.values()].filter((room) => slugify(room.title) === query);
+        if (byTitle.length === 1) slot = byTitle[0]!.slot;
+        else if (byTitle.length > 1) console.debug(`roomView("${name}") matches more than one mission room by title; none resolved`);
+      }
     }
     return slot ? roomViewFromSlot(slot) : null;
   }
