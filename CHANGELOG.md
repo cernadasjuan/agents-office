@@ -22,6 +22,7 @@
 - Arm and head rotations reset between poses
 - Docs match the code (22 stations, no mock fallback, test commands)
 - GitHub plugin: issue cards move from the hand to the shoulders and upper arms, like badges. They stay upright, turn to the camera, read `<repo>#N` and take the issue label color as border. All cards draw in one call. The floating label shows the issue IDs, also in the overview
+- A small waiting queue stands mirrored around the center instead of one agent dead center and the next offset to a side
 
 ### Changes
 

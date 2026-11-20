@@ -4,7 +4,7 @@ import { buildSkeleton, Joints } from './StickFigureParts.js';
 import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
 import { ACTIVITY_LABELS, activityLabelFor } from '../agents/AgentData.js';
-import { attentionLine, callsForYou } from '../ui/attention.js';
+import { attentionLine, callsForYou, formatWaitShort } from '../ui/attention.js';
 import type { AgentExtras } from '../agents/AgentData.js';
 import { getToonMaterial } from '../utils/Materials.js';
 import type { Posture } from '../layout/LayoutStrategy.js';
@@ -133,7 +133,9 @@ export class StickFigure {
 
   private refreshLabel(): void {
     const activityText = activityLabelFor(this.targetActivity, this.subagent);
-    updateLabel(this.label, this.name, attentionLine(activityText, this.attention, this.waitMinutes, this.stuck), this.tag, this.shortId);
+    const waiting = this.attention === 'waiting' || this.attention === 'your-turn';
+    const wait = waiting && this.waitMinutes !== undefined ? formatWaitShort(this.waitMinutes) : undefined;
+    updateLabel(this.label, this.name, attentionLine(activityText, this.attention, this.waitMinutes, this.stuck), this.tag, this.shortId, wait);
   }
 
   /** Force a posture for the current seat, or undefined to let the activity decide. */

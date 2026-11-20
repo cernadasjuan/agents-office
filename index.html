@@ -66,6 +66,15 @@
     }
     .agent-label.compact .activity { display: none; }
     .agent-label.compact .agent-id-tag { display: none; }
+    /* The wait chip keeps the wait time readable on a compact label, where the activity line hides. */
+    .agent-label .wait { display: none; }
+    .agent-label.compact .wait {
+      display: inline-block;
+      margin-left: 4px;
+      vertical-align: middle;
+      font-size: 9px;
+      color: #ffb020;
+    }
 
     #ui-panel {
       position: fixed;
