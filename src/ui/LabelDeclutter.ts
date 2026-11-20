@@ -37,21 +37,27 @@ export function labelPriority(facts: DeclutterFacts): number {
   return facts.idle ? 7 : 6;
 }
 
-/** Approximate on-screen box of a label, in CSS pixels, anchored at its center.
+/**
+ * Fallback box for a label, in CSS pixels, anchored at its center: used only
+ * when no real rendered size exists (a test, or a label not yet laid out).
  * Agent labels are a fixed-size CSS2D overlay: they never scale with camera
- * distance (unlike room labels, which are a distance-scaled sprite). A real
- * label's width varies with the name; these are a safe upper estimate from
- * the rendered CSS (`.agent-label`, `index.html`), padded for a long name. */
+ * distance (unlike room labels, which are a distance-scaled sprite), but a
+ * real label's width varies with the name, so the caller prefers the real
+ * size (`getBoundingClientRect`) and only falls back to this estimate.
+ */
 export const FULL_LABEL_SIZE = { width: 150, height: 42 } as const;
 export const COMPACT_LABEL_SIZE = { width: 110, height: 24 } as const;
 
-export function labelRect(centerX: number, centerY: number, level: 'full' | 'compact'): Rect {
+/** `measuredWidth`/`measuredHeight`: the label's real rendered size, when known (0 or absent falls back to the fixed estimate for `level`). */
+export function labelRect(centerX: number, centerY: number, level: 'full' | 'compact', measuredWidth?: number, measuredHeight?: number): Rect {
   const size = level === 'full' ? FULL_LABEL_SIZE : COMPACT_LABEL_SIZE;
+  const width = measuredWidth && measuredWidth > 0 ? measuredWidth : size.width;
+  const height = measuredHeight && measuredHeight > 0 ? measuredHeight : size.height;
   return {
-    left: centerX - size.width / 2,
-    right: centerX + size.width / 2,
-    top: centerY - size.height / 2,
-    bottom: centerY + size.height / 2,
+    left: centerX - width / 2,
+    right: centerX + width / 2,
+    top: centerY - height / 2,
+    bottom: centerY + height / 2,
   };
 }
 

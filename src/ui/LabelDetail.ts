@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { isViewFromAbove, type ViewMode } from '../scene/Selection.js';
+import { projectToClip } from '../scene/OffscreenMarker.js';
 import { attentionBand, type Wait } from './attention.js';
 import { declutterLabels, labelPriority, labelRect, type DeclutterCandidate } from './LabelDeclutter.js';
 
@@ -21,10 +22,19 @@ export const LABEL_DETAIL_INTERVAL_MS = 150;
 const COMPACT_CLASS = 'compact';
 const MODE_TEXT: Record<LabelMode, string> = { smart: 'Labels: smart (V)', all: 'Labels: all (V)' };
 
-/** A world point's screen position, in CSS pixels from the canvas top-left. Standard NDC-to-pixel conversion, the same math CSS2DRenderer itself uses to position a label's DOM element. */
-function projectToScreen(position: THREE.Vector3, camera: THREE.Camera, width: number, height: number): { x: number; y: number } {
-  const ndc = position.clone().project(camera);
-  return { x: (ndc.x + 1) / 2 * width, y: (1 - ndc.y) / 2 * height };
+/**
+ * A world point's screen position, in CSS pixels from the canvas top-left, or
+ * null when the point is behind the camera, past the far plane, or outside
+ * the frustum: it would never draw there, so it must never win or lose a
+ * declutter decision against a label that is actually on screen. Otherwise
+ * the same NDC-to-pixel conversion CSS2DRenderer itself uses.
+ */
+function projectToScreen(position: THREE.Vector3, camera: THREE.Camera, width: number, height: number): { x: number; y: number } | null {
+  const projection = projectToClip(position, camera);
+  if (projection.behind || projection.pastFar) return null;
+  const { x, y } = projection.ndc;
+  if (x < -1 || x > 1 || y < -1 || y > 1) return null;
+  return { x: (x + 1) / 2 * width, y: (1 - y) / 2 * height };
 }
 
 export interface LabelFacts {
@@ -53,14 +63,19 @@ export interface LabelView {
 /** Full or compact label for one agent. Pure: no DOM, no scene. */
 export function labelDetail(facts: LabelFacts, view: LabelView): LabelLevel {
   if (view.mode === 'all') return 'full';
-  // A fresh wait always gets a full label (it calls for the user); an aging wait
-  // follows the normal distance/zoom rule instead, so a real queue (14+ agents,
-  // almost all aging) does not force every label full and overlap the others.
-  // Without a wait time (the old behavior), a block alone still forces it.
   const band = attentionBand({ attention: facts.attention, waitMinutes: facts.waitMinutes } as Wait);
-  const blockedRecently = facts.attention === 'waiting' && (band === undefined || band === 'fresh');
+  const fromAbove = isViewFromAbove(view.viewMode);
+  // Overview or isometric: only a fresh wait (or an unknown wait time, the old
+  // behavior) forces a full label; an aging wait follows the normal zoom rule
+  // instead, so a real queue (14+ agents, almost all aging) does not force every
+  // label full and overlap the others (#132). First person keeps the original
+  // rule (any wait that is not cold forces full): the issue that prompted this
+  // relief described overview crowding only, and first person's queue spacing
+  // (1.7 m) can already overlap on screen, so an aging wait nearby must not lose
+  // its activity line and go compact there.
+  const blockedRecently = facts.attention === 'waiting' && (fromAbove ? band === undefined || band === 'fresh' : band !== 'cold');
   if (blockedRecently || facts.stuck || facts.selected || facts.hovered) return 'full';
-  if (isViewFromAbove(view.viewMode)) return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
+  if (fromAbove) return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
   return facts.distance <= FIRST_PERSON_FULL_LABEL_DISTANCE ? 'full' : 'compact';
 }
 
@@ -230,7 +245,10 @@ export class LabelDetailController {
     const hovered = view.mode === 'smart' ? this.hoveredAgent() : null;
     camera.getWorldPosition(this.cameraPosition);
     const canvasRect = this.options.canvas.getBoundingClientRect();
-    const canDeclutter = view.mode === 'smart' && canvasRect.width > 0 && canvasRect.height > 0;
+    // Declutter only in the overview and the isometric view: first person's own
+    // queue spacing can already overlap on screen, and a waiting agent you stand
+    // near must never disappear there (review fix: PR #152).
+    const canDeclutter = view.mode === 'smart' && isViewFromAbove(view.viewMode) && canvasRect.width > 0 && canvasRect.height > 0;
     const agents = this.options.agents();
     const candidates: DeclutterCandidate[] = [];
     for (const agent of agents) {
@@ -249,9 +267,15 @@ export class LabelDetailController {
       if (!canDeclutter) continue;
       agent.figure.label.getWorldPosition(this.labelPosition);
       const point = projectToScreen(this.labelPosition, camera, canvasRect.width, canvasRect.height);
+      if (!point) continue; // behind the camera or outside the frustum: never a candidate
+      // The label's own rendered size (set by applyLabelDetail above, this same pass), measured
+      // once here and used only for this candidate: a long name does not silently escape the
+      // fixed-size estimate. Falls back to that estimate when no real layout exists (a test, or
+      // a label not yet in a laid-out document).
+      const box = agent.figure.label.element.getBoundingClientRect();
       candidates.push({
         id: agent.info.id,
-        rect: labelRect(point.x, point.y, level),
+        rect: labelRect(point.x, point.y, level, box.width, box.height),
         priority: labelPriority({
           selected: isSelected,
           hovered: isHovered,

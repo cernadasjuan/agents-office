@@ -61,12 +61,21 @@ test('smart mode: a cold block (waiting 24 h or more) gets a compact label like 
   assert.equal(labelDetail(coldBlock, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact');
 });
 
-test('smart mode: an aging block follows the normal distance/zoom rule, not forced full (#132)', () => {
+test('smart mode, overview or isometric: an aging block follows the normal zoom rule, not forced full (#132)', () => {
   const agingFar = facts({ attention: 'waiting', waitMinutes: 60, distance: 500 });
-  assert.equal(labelDetail(agingFar, view()), 'compact', 'far in first person: compact, same as a real queue at scale');
-  assert.equal(labelDetail(agingFar, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact', 'zoomed out: compact');
+  assert.equal(labelDetail(agingFar, view({ viewMode: 'overview', zoomDistance: zoomedOut })), 'compact', 'zoomed out: compact, same as a real queue at scale');
+  assert.equal(labelDetail(agingFar, view({ viewMode: 'isometric', zoomDistance: zoomedOut })), 'compact', 'isometric follows the same rule as overview');
+  assert.equal(labelDetail(facts({ attention: 'waiting', waitMinutes: 60, distance: 500 }), view({ viewMode: 'overview', zoomDistance: zoomedIn })), 'full', 'zoomed in: full, like any other agent');
+});
+
+test('smart mode, first person: an aging block still forces a full label, unchanged from before #132', () => {
+  // The issue #132 fixed described overview crowding only. First person's own
+  // queue spacing can already overlap on screen; an aging wait nearby must not
+  // lose its activity line (review fix: https://github.com/gabriel-amyot/agents-office/pull/152).
+  const agingFar = facts({ attention: 'waiting', waitMinutes: 60, distance: 500 });
+  assert.equal(labelDetail(agingFar, view()), 'full', 'far in first person: still full, the original rule');
   const agingNear = facts({ attention: 'waiting', waitMinutes: 60, distance: near });
-  assert.equal(labelDetail(agingNear, view()), 'full', 'still full up close, like any other agent');
+  assert.equal(labelDetail(agingNear, view()), 'full', 'still full up close too');
 });
 
 test('smart mode: "your turn" alone does not make a label full (most idle sessions have it)', () => {
@@ -308,7 +317,7 @@ function hiddenIds(agents: LabelAgent[]): string[] {
   return agents.filter((a) => a.figure.label.element.style.visibility === 'hidden').map((a) => a.info.id);
 }
 
-function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'overview'; zoom?: number } = {}) {
+function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'overview' | 'isometric'; zoom?: number } = {}) {
   const document = dom.window.document;
   const canvas = document.createElement('canvas');
   document.body.appendChild(canvas);
@@ -331,7 +340,7 @@ function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'o
     selected: () => state.selected,
     hash: options.hash,
   });
-  return { controller, agents, state, canvas };
+  return { controller, agents, state, canvas, camera };
 }
 
 test('declutter: a waiting agent overlapping a plain working one keeps the wait visible, hides the other', () => {
@@ -369,4 +378,53 @@ test('declutter: #labels=all shows every label, even ones that would otherwise o
   controller.update(0);
   controller.refresh();
   assert.deepEqual(hiddenIds(agents), []);
+});
+
+// --- Review fix round (PR #152): view-mode guard, real label size, behind-camera skip ---
+
+test('declutter: never runs in first person, even for labels that would overlap in the overview (review fix)', () => {
+  const { controller, agents, state } = declutterSetup({ viewMode: 'first-person' });
+  agents.push(agent('working', 0), agent('aging-wait', 0, 'waiting', false, 60));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), [], 'same screen spot, but first person never hides a label');
+  state.viewMode = 'overview';
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['working'], 'the same two agents do decide an overlap once in the overview');
+});
+
+test('declutter: runs in the isometric view too (review fix)', () => {
+  const { controller, agents } = declutterSetup({ viewMode: 'isometric' });
+  agents.push(agent('working', 0), agent('aging-wait', 0, 'waiting', false, 60));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['working']);
+});
+
+test('declutter: a long name\'s real rendered width can overlap a neighbor the fixed estimate alone would miss (review fix)', () => {
+  // Zoomed out, so labels go compact (zoom <= OVERVIEW_FULL_LABEL_ZOOM would force full and
+  // use FULL_LABEL_SIZE instead): x=0 and x=4 project about 115 px apart here, just past the
+  // sum of two compact half-widths (55+55=110).
+  const { controller, agents } = declutterSetup({ zoom: zoomedOut });
+  agents.push(agent('working', 0), agent('long-name-idle', 4, undefined, false, undefined, 'idle'));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), [], 'with the fixed compact-size estimate alone, these two do not overlap');
+
+  agents[1].figure.label.element.getBoundingClientRect = () => (
+    { width: 300, height: 24, left: 0, top: 0, right: 300, bottom: 24, x: 0, y: 0, toJSON: () => ({}) }
+  );
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['long-name-idle'], 'the real, wider box now overlaps "working" and the lower-priority idle one hides');
+});
+
+test('declutter: an agent behind the camera is never a candidate, so it cannot wrongly outrank an on-screen label (review fix)', () => {
+  const { controller, agents } = declutterSetup();
+  // Behind the camera along its own view direction: it looks toward -z from z=30, so z=60 sits past it.
+  const behind = agent('behind-camera', 0, 'waiting', false, 1);
+  behind.figure.group.position.set(0, 0, 60);
+  agents.push(agent('plain', 0), behind);
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['behind-camera'], 'never drawn on screen anyway, so its own label hides; "plain" is never hidden by it');
 });
