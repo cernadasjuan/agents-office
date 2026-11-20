@@ -39,6 +39,7 @@
 
 - Wayfinding (building layout): a name label above each room, numbered lounges, door frames in the room floor color, walls cut away in the overview, and mission room signs only when you zoom in or point at the room
 - Navigation: the building layout opens in the overview, the last view comes back after a reload (`#view=` wins), Shift+L with a confirmation switches the layout (one L does nothing), and the panel header shows the layout and the view. First person has no bounding box: you can walk into every room and fly above the building. The ceiling hides above 6 m and in the overview. Fly-to in first person keeps the camera inside the figure's room
+- Honest states: "Loading agents…" until the first answer, a panel footer with "Updated N s ago" that turns amber after 2 failed polls and red with "Server not reachable" after 5, a "?" legend for the signs, bands, rooms and keys, and "Done" instead of "Taking a break" for a finished subagent
 
 ## 1.1.0
 

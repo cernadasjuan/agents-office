@@ -262,3 +262,16 @@ test('the card docks again when the panel changes size (collapse or expand)', (t
   card.redock();
   assert.equal(root().style.right, '94px');
 });
+
+test('a finished subagent reads "Done" in its card and in the parent list; an idle main agent does not', (t) => {
+  const { card, selection, root, text } = makeCard(t);
+  const finished: AgentInfo = { ...sub, activity: 'idle' };
+  const restingMain: AgentInfo = { id: 'main-2', name: 'parked', activity: 'idle' };
+  card.render([main, finished, restingMain]);
+  selection.select('main-1');
+  assert.deepEqual([...root().querySelectorAll('.inspector-subagents button')].map((row) => row.textContent), ['>> explore · Done']);
+  selection.select('sub-1');
+  assert.equal(text('.inspector-activity'), 'Done');
+  selection.select('main-2');
+  assert.equal(text('.inspector-activity'), 'Taking a break');
+});

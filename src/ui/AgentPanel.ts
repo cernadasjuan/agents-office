@@ -1,4 +1,4 @@
-import { ACTIVITIES, ACTIVITY_LABELS, AgentInfo } from '../agents/AgentData.js';
+import { ACTIVITIES, ACTIVITY_LABELS, AgentInfo, activityLabel } from '../agents/AgentData.js';
 import type { Activity } from '../agents/ActivityAnimations.js';
 import { attentionBand, compareWaits, formatWait } from './attention.js';
 
@@ -73,11 +73,15 @@ export class AgentPanel {
   private groups = new Map<TriageGroupId, Group>();
   private selectedId: string | null = null;
   private chipBar: HTMLElement;
+  private loading: HTMLElement;
 
   constructor(
     private list: HTMLElement,
     private options: AgentPanelOptions = {},
   ) {
+    this.loading = document.createElement('div');
+    this.loading.className = 'triage-loading';
+    this.loading.textContent = 'Loading agents…';
     this.chipBar = document.createElement('div');
     this.chipBar.className = 'triage-chips';
     const body = document.createElement('div');
@@ -88,7 +92,7 @@ export class AgentPanel {
       this.chipBar.appendChild(group.chip);
       body.appendChild(group.section);
     }
-    this.list.replaceChildren(this.chipBar, body);
+    this.list.replaceChildren(this.loading, this.chipBar, body);
   }
 
   /** Mark the row of the selected agent, or none. */
@@ -97,7 +101,9 @@ export class AgentPanel {
     for (const [id, row] of this.rows) row.card.classList.toggle('selected', id === agentId);
   }
 
+  /** The first render follows the first answer of the server, so the loading text goes. */
   render(agents: AgentInfo[]): void {
+    this.loading.hidden = true;
     const present = new Set(agents.map((agent) => agent.id));
     for (const [id, row] of this.rows) {
       if (present.has(id)) continue;
@@ -183,7 +189,7 @@ export class AgentPanel {
     const waits = agent.extras?.attention !== undefined && minutes !== undefined;
     row.wait.textContent = waits ? formatWait(minutes) : '';
     row.wait.hidden = !waits;
-    row.activity.textContent = ACTIVITY_LABELS[agent.activity] ?? agent.activity;
+    row.activity.textContent = activityLabel(agent);
     this.updateTags(row, agent);
     if (row.menu && row.menu !== document.activeElement) row.menu.value = agent.activity;
   }

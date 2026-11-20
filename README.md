@@ -132,6 +132,15 @@ The chips at the top count each group ("2 need you · 22 your turn · 9 working 
 
 Without a status in the session file, every agent is in Working or Idle. `?demo=1` in the URL adds the prototype activity menu to each row. It previews an activity until the next update.
 
+The panel tells you how fresh its data is:
+
+- Before the first answer of the server, the list shows "Loading agents…". After that, an empty list means that no agent runs.
+- The footer shows "Updated N s ago". It counts up between polls.
+- After 2 failed polls in a row (no answer, an HTTP error or bad JSON), the footer turns amber and adds "retrying". After 5, it turns red and says "Server not reachable". The scene keeps the last known agents. The next good answer clears the warning.
+- A subagent at rest gave its final answer, so its label reads "Done", not "Taking a break". A main session at rest keeps "Taking a break".
+
+The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, the attention bands, the "Done" label, the rooms (building layout only) and the keys. Beds, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it.
+
 ### Location: stations
 
 | Station | Where | Seats | Activities |
@@ -331,6 +340,7 @@ AGENTS_OFFICE_PLUGINS=peek pnpm dev
 - **Esc** clears the selection (in first person it first releases the camera)
 - **Agent card:** a selection opens a card left of the triage panel. It shows the name, the activity, the attention band and wait, the herdr workspace, the provider, the personas, the subagents (a click selects one) and up to 10 linked issues, newest first, or "No linked issues". An issue reads `<repo>#N` when the server knows its repository. With the github plugin, such an issue of a configured repository is a link to GitHub. An issue number alone never links. With the `peek` plugin, the card also shows Recent, Assets and Equipment (see the peek plugin). The card updates in place on each poll. A click on another agent changes the card content. Esc or the close button closes it. The camera puts the selected figure in the free area left of the card
 - **V** to switch the labels between `smart` (the default) and `all` full labels. `#labels=all` in the URL starts with all labels
+- **?** to open or close the legend (also the **?** button in the panel header). Esc closes it without a change to the selection
 
 - `?dwell=<seconds>` in the URL (0 to 30, default 0) makes an agent in the original `activity` layout wait that long before it walks to a new station. A change back before the time cancels the walk. The figure shows the new activity at once.
 - The office remembers the last view (first person, overview or isometric) in the browser and opens in it after a reload. `#view=overview`, `#view=first-person` or `#view=iso` in the URL wins over the saved view. The side panel header shows the layout and the view.
