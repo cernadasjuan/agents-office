@@ -109,6 +109,20 @@ test('a codex agent shows a codex tag in its floating label; a Claude agent show
   assert.match(activityText('c')!, / · codex$/);
 });
 
+test('the floating label updates when parentId appears or disappears after creation', () => {
+  const manager = new AgentManager(new THREE.Scene(), new RecordingLayout());
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  const label = () => manager.getAgents()[0].figure.label.element.querySelector('.activity')!.textContent;
+
+  assert.doesNotMatch(label()!, /Done/, 'a main agent at rest keeps its activity label');
+
+  manager.setExtras('a', { parentId: 'main' });
+  assert.match(label()!, /Done/, 'the figure becomes a subagent once parentId appears');
+
+  manager.setExtras('a', undefined);
+  assert.doesNotMatch(label()!, /Done/, 'the figure reverts once parentId disappears');
+});
+
 test('a layout can move an agent on its own from its update hook', () => {
   const later: Seat = { key: 'later', position: new THREE.Vector3(9, 0, 9), lookAt: new THREE.Vector3(9, 1, 8) };
   let moved = false;

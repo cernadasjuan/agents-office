@@ -88,7 +88,8 @@
     }
     #ui-panel h2 { font-size: 14px; color: #fff; }
     .view-status { font-size: 11px; color: #a8b8ff; margin-top: 2px; }
-    #ui-panel-toggle {
+    .panel-buttons { display: flex; gap: 4px; }
+    .panel-button {
       background: none;
       border: 1px solid rgba(120, 120, 255, 0.3);
       border-radius: 4px;
@@ -98,6 +99,47 @@
       cursor: pointer;
     }
     #ui-panel.collapsed { min-width: 0; }
+    .triage-loading { color: #a8b8ff; font-size: 12px; padding: 4px 0; }
+    .triage-loading[hidden] { display: none; }
+    #ui-panel.collapsed .triage-loading { display: none; }
+    .panel-footer {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(120, 120, 255, 0.2);
+      font-size: 10px;
+      color: #8888aa;
+    }
+    .panel-footer[data-level="warn"] { color: #f3dc85; }
+    .panel-footer[data-level="down"] { color: #ff8a80; font-weight: 600; }
+    #legend {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(520px, calc(100vw - 32px));
+      max-height: calc(100vh - 64px);
+      overflow-y: auto;
+      background: rgba(20, 20, 40, 0.95);
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 12px;
+      padding: 14px 18px;
+      color: #e0e0ff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 12px;
+      backdrop-filter: blur(8px);
+      z-index: 300;
+    }
+    #legend[hidden] { display: none; }
+    .legend-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .legend-header h3 { font-size: 14px; color: #fff; }
+    .legend-close {
+      background: none; border: 1px solid rgba(120, 120, 255, 0.3); border-radius: 4px;
+      color: #e0e0ff; width: 22px; height: 22px; cursor: pointer;
+    }
+    #legend h4 { font-size: 11px; color: #a8b8ff; margin: 8px 0 3px; }
+    #legend dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; }
+    #legend dt { color: #fff; font-weight: 600; }
+    #legend dd { color: #c8c8e8; }
     #ui-panel.collapsed .triage-groups { display: none; }
     .triage-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
     .triage-chip {
@@ -283,9 +325,13 @@
         <h2>Agents Office <span id="label-mode" class="label-mode"></span></h2>
         <div id="view-status" class="view-status"></div>
       </div>
-      <button type="button" id="ui-panel-toggle" aria-controls="agent-list"></button>
+      <div class="panel-buttons">
+        <button type="button" id="legend-button" class="panel-button">?</button>
+        <button type="button" id="ui-panel-toggle" class="panel-button" aria-controls="agent-list"></button>
+      </div>
     </div>
     <div id="agent-list"></div>
+    <div id="panel-footer" class="panel-footer"></div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
