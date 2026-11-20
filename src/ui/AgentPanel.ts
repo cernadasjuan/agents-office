@@ -1,6 +1,6 @@
 import { ACTIVITIES, ACTIVITY_LABELS, AgentInfo, activityLabel } from '../agents/AgentData.js';
 import type { Activity } from '../agents/ActivityAnimations.js';
-import { attentionBand, compareWaits, formatWait, queueBucket } from './attention.js';
+import { attentionBand, compareWaits, formatWait, oldestFreshWait, queueBucket } from './attention.js';
 
 export type TriageGroupId = 'needs-you' | 'your-turn' | 'working' | 'idle' | 'cold';
 
@@ -28,6 +28,8 @@ export interface AgentPanelOptions {
   onPick?: (agentId: string, activity: Activity) => void;
   /** Show the prototype activity menu on each row (`?demo=1`). */
   demo?: boolean;
+  /** The top ("Needs you") chip, when it has a fresh wait to jump to. Without one, the chip only opens the group (the old behavior). */
+  onTopCount?: (agentId: string) => void;
 }
 
 interface Row {
@@ -48,6 +50,7 @@ interface Group {
   chip: HTMLElement;
   userOpen: boolean | undefined;
   count: number;
+  agents: AgentInfo[];
 }
 
 /** `?demo=1` shows the prototype activity menu. Live polls still overwrite a choice. */
@@ -146,6 +149,7 @@ export class AgentPanel {
       const ordered = orderGroup(id, members.get(id)!);
       this.placeRows(group, ordered);
       group.count = ordered.length;
+      group.agents = ordered;
       this.refreshGroup(group);
     }
     this.applyFilter();
@@ -169,7 +173,7 @@ export class AgentPanel {
     chip.className = 'triage-chip';
     chip.dataset.group = spec.id;
 
-    const group: Group = { spec, section, header, rows, chip, userOpen: undefined, count: 0 };
+    const group: Group = { spec, section, header, rows, chip, userOpen: undefined, count: 0, agents: [] };
     header.addEventListener('click', () => {
       group.userOpen = !this.isOpen(group);
       this.refreshGroup(group);
@@ -178,6 +182,10 @@ export class AgentPanel {
       group.userOpen = true;
       this.refreshGroup(group);
       if (typeof section.scrollIntoView === 'function') section.scrollIntoView({ block: 'nearest' });
+      if (spec.id === 'needs-you') {
+        const oldest = oldestFreshWait(group.agents);
+        if (oldest) this.options.onTopCount?.(oldest.id);
+      }
     });
     this.refreshGroup(group);
     return group;

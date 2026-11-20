@@ -14,10 +14,14 @@ import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js
 import { markStatic } from '../../scene/StaticMerge.js';
 import type { PickTarget } from '../../scene/Selection.js';
 
-/** Work that happens at the agent's own desk. Everything else is a trip. */
-const DESK_WORK = new Set<Activity>(['implementing', 'debugging', 'deploying']);
+/**
+ * Work that happens at the agent's own desk. Everything else is a trip. Planning
+ * stays here too: a war-room agent plans at that room's whiteboard (handled before
+ * this check); an agent with no war room has nowhere dedicated to plan, so it stays
+ * at its desk instead of a trip that would otherwise fall back to the lounge.
+ */
+const DESK_WORK = new Set<Activity>(['implementing', 'debugging', 'deploying', 'planning']);
 const TRIP_STATION: Partial<Record<Activity, string>> = {
-  planning: 'planning',
   researching: 'researching',
   testing: 'testing',
   reviewing: 'reviewing',

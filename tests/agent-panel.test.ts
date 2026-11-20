@@ -145,6 +145,33 @@ test('a click on a chip opens its group', (t) => {
   assert.equal(groupOf(list, 'idle').classList.contains('collapsed'), false);
 });
 
+test('a click on the top ("Needs you") chip jumps to the oldest fresh wait', (t) => {
+  const seen: string[] = [];
+  const { list, panel } = makePanel(t, { onTopCount: (agentId) => seen.push(agentId) });
+  panel.render([waiting('n1', 2), waiting('n2', 12), waiting('n3', 5)]);
+  const chip = list.querySelector<HTMLElement>('.triage-chip[data-group="needs-you"]')!;
+  chip.click();
+  assert.deepEqual(seen, ['n2']);
+});
+
+test('a click on the top chip does nothing without a fresh wait (aging only)', (t) => {
+  const seen: string[] = [];
+  const { list, panel } = makePanel(t, { onTopCount: (agentId) => seen.push(agentId) });
+  panel.render([waiting('n1', 60)]);
+  const chip = list.querySelector<HTMLElement>('.triage-chip[data-group="needs-you"]')!;
+  chip.click();
+  assert.deepEqual(seen, []);
+});
+
+test('other chips never call onTopCount', (t) => {
+  const seen: string[] = [];
+  const { list, panel } = makePanel(t, { onTopCount: (agentId) => seen.push(agentId) });
+  panel.render([yourTurn('y1', 2), idle('i1')]);
+  list.querySelector<HTMLElement>('.triage-chip[data-group="your-turn"]')!.click();
+  list.querySelector<HTMLElement>('.triage-chip[data-group="idle"]')!.click();
+  assert.deepEqual(seen, []);
+});
+
 test('updates keep the row elements, the order changes in place and the scroll stays', (t) => {
   const { list, panel } = makePanel(t);
   panel.render([waiting('n1', 1), waiting('n2', 5), working('w1')]);
