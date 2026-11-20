@@ -4,6 +4,7 @@ import { PIECES } from '../../furniture/index.js';
 import { getToonMaterial } from '../../utils/Materials.js';
 import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
+import type { PickTarget } from '../../scene/Selection.js';
 import type { WorldRoom } from '../../extensions.js';
 import { ROOM_SIZE, type Rect, type RoomSlot } from './RoomPlanner.js';
 import { buildWalls, doorFrame, markCutaway, markDoorCutaway, roomLabel, RoomFrame, setRoomLabelText } from './rooms.js';
@@ -23,7 +24,7 @@ export function missionSlot(index: number): RoomSlot {
   return { rect, door: { side: 'south', at }, outward: 'north', ring: row };
 }
 
-const MAX_BEDS = 12;
+export const MAX_TOMBSTONES = 12;
 const TABLE_SEATS = 8;
 const STANDING_SPOTS = 12;
 
@@ -46,21 +47,6 @@ function canvasBoard(width: number, height: number): { mesh: THREE.Mesh; draw: (
     texture.needsUpdate = true;
   };
   return { mesh, draw };
-}
-
-/** A bed with an agent asleep in it: one finished session of the mission. */
-function bed(): THREE.Group {
-  const group = new THREE.Group();
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.35, 1.9), getToonMaterial(0x7a5c42));
-  frame.position.y = 0.18;
-  const blanket = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.12, 1.3), getToonMaterial(0x5a7aad));
-  blanket.position.set(0, 0.42, 0.25);
-  const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.1, 0.35), getToonMaterial(0xf5f5f0));
-  pillow.position.set(0, 0.41, -0.7);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), getToonMaterial(0xf5deb3));
-  head.position.set(0, 0.55, -0.62);
-  group.add(frame, blanket, pillow, head);
-  return group;
 }
 
 /**
@@ -89,6 +75,8 @@ export interface MissionRoom {
   stations: Map<string, Station>;
   locked: boolean;
   update(room: WorldRoom): void;
+  /** This room's tombstones, pickable by a click or hover (issue #127). */
+  tombstonePickTargets(): PickTarget[];
 }
 
 const FLOOR_OPEN = 0x6f7f9a;
@@ -154,8 +142,11 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
 
   const title = sign(room.title, frame.point(0, 0.4, 3.0), slot.rect, false);
   group.add(title);
-  const beds = new THREE.Group();
-  group.add(beds);
+  const tombstonesGroup = new THREE.Group();
+  group.add(tombstonesGroup);
+  // One tombstone per ended session, along the side wall opposite the kanban, keyed by its own id
+  // (not by position): a session that returns removes its own tombstone, not whichever is oldest.
+  const tombstones = new Map<string, { object: THREE.Object3D; hoverSign: CSS2DObject; endedAt?: string }>();
   const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.4, 0.1), getToonMaterial(0x5a4a3a));
   door.position.copy(frame.point(slot.door.at - (slot.rect.minX + slot.rect.maxX) / 2, 0.02, 1.2));
   door.visible = false;
@@ -169,6 +160,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
 
   const result: MissionRoom = {
     id: room.id, index, slot, group, stations, locked: false,
+    tombstonePickTargets: () => [...tombstones].map(([id, { object }]) => ({ id, object })),
     update(next: WorldRoom) {
       result.locked = next.state === 'locked';
       title.element.textContent = next.title;
@@ -182,20 +174,36 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
       boards.issues.draw('Issues', (next.walls.issues ?? []).map((issue) => `${issue.state === 'closed' ? '✓' : '○'} #${issue.number} ${issue.title}`));
       boards.kanban.draw('Kanban', (next.walls.kanban ?? []).flatMap((column) =>
         [`${column.column} (${column.cards.length})`, ...column.cards.slice(0, 3).map((card) => `  T-${card.number} ${card.title}`)]));
-      // One bed per finished session, along the side wall opposite the kanban
-      const count = Math.min(next.sleepers ?? 0, MAX_BEDS);
-      while (beds.children.length > count) beds.remove(beds.children[beds.children.length - 1]);
-      while (beds.children.length < count) {
-        const i = beds.children.length;
-        const item = bed();
-        item.position.copy(frame.point(-ROOM_SIZE / 2 + 0.7 + (i % 2) * 1.05, 2.2 + Math.floor(i / 2) * 1.6, 0));
-        item.rotation.y = frame.faceDoor + Math.PI / 2;
-        beds.add(item);
+      // One tombstone per ended session, shown up to the cap; a session no longer in the list
+      // (it returned, or scrolled past the cap) removes by id, never by trimming the oldest.
+      const sleepers = next.sleepers ?? [];
+      const shown = sleepers.slice(0, MAX_TOMBSTONES);
+      const keep = new Set(shown.map((entry) => entry.id));
+      for (const [id, { object, hoverSign }] of [...tombstones]) {
+        if (keep.has(id)) continue;
+        tombstonesGroup.remove(object);
+        group.remove(hoverSign);
+        tombstones.delete(id);
       }
-      const extra = (next.sleepers ?? 0) - count;
+      shown.forEach((entry, i) => {
+        const position = frame.point(-ROOM_SIZE / 2 + 0.7 + (i % 2) * 1.05, 2.2 + Math.floor(i / 2) * 1.6, 0);
+        let item = tombstones.get(entry.id);
+        if (!item) {
+          const object = PIECES.tombstone().create();
+          object.rotation.y = frame.faceDoor + Math.PI / 2;
+          tombstonesGroup.add(object);
+          const hoverSign = sign(`Ended ${entry.endedAt ?? 'unknown'}`, position.clone().setY(0.6), slot.rect, true);
+          group.add(hoverSign);
+          item = { object, hoverSign, endedAt: entry.endedAt };
+          tombstones.set(entry.id, item);
+        }
+        item.object.position.copy(position);
+        item.hoverSign.position.copy(position.clone().setY(0.6));
+      });
+      const extra = sleepers.length - shown.length;
       if (sleepersSign) group.remove(sleepersSign);
-      sleepersSign = (next.sleepers ?? 0) > 0
-        ? sign(`${next.sleepers} past session${next.sleepers === 1 ? '' : 's'}${extra > 0 ? ` (+${extra} not shown)` : ''}`, frame.point(-ROOM_SIZE / 2 + 1.2, 1.4, 1.8), slot.rect, true)
+      sleepersSign = sleepers.length > 0
+        ? sign(`${sleepers.length} past session${sleepers.length === 1 ? '' : 's'}${extra > 0 ? ` (+${extra} not shown)` : ''}`, frame.point(-ROOM_SIZE / 2 + 1.2, 1.4, 1.8), slot.rect, true)
         : null;
       if (sleepersSign) group.add(sleepersSign);
     },

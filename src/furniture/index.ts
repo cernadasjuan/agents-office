@@ -12,6 +12,7 @@ import { createPrinter } from './Printer.js';
 import { createSofa } from './Sofa.js';
 import { createCredenza, createLowTable } from './Tables.js';
 import { createTestStation } from './TestStation.js';
+import { createTombstone } from './Tombstone.js';
 import { createWaterCooler } from './WaterCooler.js';
 import { createWhiteboard } from './Whiteboard.js';
 
@@ -55,6 +56,7 @@ export const PIECES = {
     piece('wallArt', 'furniture', () => createWallArt(width, height, color, frameColor)),
   clock: () => piece('clock', 'furniture', createClock),
   portrait: () => piece('portrait', 'furniture', createPortrait),
+  tombstone: () => piece('tombstone', 'furniture', createTombstone),
   plant: (scale = 1.2) => piece('plant', 'plant', () => createPlant(scale)),
   tallPlant: () => piece('tallPlant', 'plant', createTallPlant),
 } as const;

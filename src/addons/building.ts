@@ -20,4 +20,6 @@ registerLayout('building', (scene, stations) => {
 registerExtension({
   id: 'building-world-rooms',
   worldChanged: (world) => { activeBuilding?.syncWorldRooms(world.rooms); },
+  // A war room's tombstones (issue #127), so a click or hover can pick one.
+  pickTargets: () => activeBuilding?.tombstonePickTargets() ?? [],
 });

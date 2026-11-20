@@ -208,7 +208,8 @@ test('the hall side walls are replaced by walls with doors', () => {
 // --- Mission war rooms ---
 
 const missionRoom = (state: 'open' | 'locked' = 'open') => ({
-  id: 'room-1', kind: 'mission' as const, title: 'Office roadmap', state, sleepers: 3,
+  id: 'room-1', kind: 'mission' as const, title: 'Office roadmap', state,
+  sleepers: [{ id: 'tomb-1' }, { id: 'tomb-2' }, { id: 'tomb-3' }],
   walls: { statement: 'Ship it', docs: ['Explainer'], issues: [{ number: 46, title: 'Parent', state: 'open' as const }], kanban: [] },
 });
 

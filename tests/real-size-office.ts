@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createOffice } from '../src/scene/Office.js';
 import { addLighting } from '../src/scene/SceneSetup.js';
 import { BuildingLayout } from '../src/addons/building/BuildingLayout.js';
+import { MAX_TOMBSTONES } from '../src/addons/building/missionRooms.js';
 import { AgentManager } from '../src/agents/AgentManager.js';
 import { bmadHats } from '../plugins/bmad/client.js';
 import { GithubOfficeExtension } from '../plugins/github/client.js';
@@ -41,8 +42,10 @@ export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManag
   const layout = new BuildingLayout(scene, createOffice(scene), {
     storage: { getItem: (key: string) => store.get(key) ?? null, setItem: () => undefined },
   });
+  // Worst case: every war room at the tombstone cap, not just a handful.
   layout.syncWorldRooms(Array.from({ length: REAL_SIZE.missionRooms }, (_, i) => ({
-    id: `m${i}`, kind: 'mission', title: `Mission ${i}`, state: i === 8 ? 'locked' as const : 'open' as const, sleepers: 5,
+    id: `m${i}`, kind: 'mission', title: `Mission ${i}`, state: i === 8 ? 'locked' as const : 'open' as const,
+    sleepers: Array.from({ length: MAX_TOMBSTONES }, (_, j) => ({ id: `m${i}-tomb-${j}`, endedAt: '2026-11-18' })),
     walls: { statement: 'x', docs: ['a'], issues: [], kanban: [] },
   })));
   const manager = new AgentManager(scene, layout);
