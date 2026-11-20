@@ -274,6 +274,49 @@ test('hovering an agent that does not call for you reports no hint', () => {
   assert.deepEqual(calls[calls.length - 1], [null, null]);
 });
 
+test('pointer lock clears the tooltip at once, and a frozen-coordinate move while locked never brings it back (review fix)', () => {
+  const calls: Array<[string | null, { x: number; y: number } | null]> = [];
+  const { controller, canvas, state } = controllerSetup({ onHoverHint: (hint, point) => calls.push([hint, point]) });
+  try {
+    // Hover a calls-for-you agent before any lock: the hint shows, as the earlier test proves.
+    state.picked = 'blocked';
+    canvas.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 42, clientY: 24 }));
+    controller.refresh();
+    assert.ok(calls[calls.length - 1][0], 'the hint shows before any lock, same as the unlocked case above');
+
+    // The lock engages with no further pointer event at all: the change handler alone, not a
+    // later refresh, must clear it at once.
+    Object.defineProperty(canvas.ownerDocument, 'pointerLockElement', { value: canvas, configurable: true });
+    canvas.ownerDocument.dispatchEvent(new dom.window.Event('pointerlockchange'));
+    assert.deepEqual(calls[calls.length - 1], [null, null], 'the lock handler itself hides the tooltip, before any refresh runs');
+
+    // A refresh afterward must not resurrect it either.
+    controller.refresh();
+    assert.deepEqual(calls[calls.length - 1], [null, null]);
+
+    // A locked pointer keeps firing pointermove with the same frozen pre-lock coordinates in a
+    // real browser (the look deltas travel in movementX/movementY instead): this must never
+    // revive the stale cursor position.
+    canvas.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 42, clientY: 24 }));
+    controller.refresh();
+    assert.deepEqual(calls[calls.length - 1], [null, null], 'a locked pointermove at the old coordinates never brings the tooltip back');
+  } finally {
+    Object.defineProperty(canvas.ownerDocument, 'pointerLockElement', { value: null, configurable: true });
+  }
+});
+
+test('the beacon tooltip still works in #labels=all mode (review fix): the hover hint is not smart-only', () => {
+  const calls: Array<[string | null, { x: number; y: number } | null]> = [];
+  const { controller, canvas, state } = controllerSetup({ hash: '#labels=all', onHoverHint: (hint, point) => calls.push([hint, point]) });
+  assert.equal(controller.mode, 'all');
+  state.picked = 'blocked';
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 7, clientY: 9 }));
+  controller.refresh();
+  const [hint, point] = calls[calls.length - 1];
+  assert.ok(hint && hint.length > 0, 'the hint still reaches the cursor in all-labels mode, even though declutter stays smart-only');
+  assert.deepEqual(point, { x: 7, y: 9 });
+});
+
 test('without a hover, no hint is reported even while an agent calls for you elsewhere', () => {
   const calls: Array<[string | null, { x: number; y: number } | null]> = [];
   const { controller } = controllerSetup({ onHoverHint: (hint, point) => calls.push([hint, point]) });

@@ -250,7 +250,10 @@ export class LabelDetailController {
     const camera = this.camera();
     const view: LabelView = { mode: this.currentMode, viewMode: this.options.viewMode(), zoomDistance: this.options.zoomDistance() };
     const selected = this.options.selected();
-    const hovered = view.mode === 'smart' ? this.hoveredAgent() : null;
+    // Hover detection runs in every label mode now (review fix): the beacon hint must still
+    // reach the cursor in `#labels=all`, even though declutter (`canDeclutter` below) stays
+    // smart-only, and `labelDetail` itself ignores `hovered` in `all` mode regardless.
+    const hovered = this.hoveredAgent();
     camera.getWorldPosition(this.cameraPosition);
     const canvasRect = this.options.canvas.getBoundingClientRect();
     // Declutter only in the overview and the isometric view: first person's own
@@ -282,8 +285,9 @@ export class LabelDetailController {
       prepared.push({ agent, level, isSelected, isHovered });
     }
     // The hovered agent's beacon hint (issue #170 review), reusing the hover detection above.
-    // Pointer-locked (first person): `this.pointer` is null, there is no cursor to put a
-    // tooltip near, so this never fires there — the card line is the fallback in that view.
+    // Pointer-locked (first person): `listen()`'s `pointerlockchange` handler clears
+    // `this.pointer` the moment the lock engages and ignores every pointermove while it holds,
+    // so this never fires there — the card line is the fallback in that view.
     const hoveredAgent = prepared.find((candidate) => candidate.isHovered)?.agent;
     const hoveredCallsForYou = hoveredAgent !== undefined && this.pointer !== null && callsForYou({
       attention: hoveredAgent.info.extras?.attention as NonNullable<Wait>['attention'],
@@ -408,10 +412,24 @@ export class LabelDetailController {
       this.cycleMode();
     });
     canvas.addEventListener('pointermove', (event) => {
+      // A locked pointer keeps firing `pointermove`, with `clientX`/`clientY` frozen at the
+      // pre-lock position (the look deltas travel in `movementX`/`movementY` instead): ignored
+      // here, so a locked move can never resurrect a stale cursor position (review fix).
+      if (canvas.ownerDocument.pointerLockElement === canvas) return;
       this.pointer = { x: event.clientX, y: event.clientY };
     });
     canvas.addEventListener('pointerleave', () => {
       this.pointer = null;
+    });
+    // The lock can engage between two pointermove events (a click straight into first person),
+    // so this.pointer may still hold a pre-lock position when it does. Clearing it here, and
+    // telling the caller to hide the tooltip at once, closes that gap instead of waiting for
+    // the next throttled refresh (review fix: a beacon hint must never show a stale screen spot
+    // while the user looks around locked).
+    canvas.ownerDocument.addEventListener('pointerlockchange', () => {
+      if (canvas.ownerDocument.pointerLockElement !== canvas) return;
+      this.pointer = null;
+      this.options.onHoverHint?.(null, null);
     });
   }
 
