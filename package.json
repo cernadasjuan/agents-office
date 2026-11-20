@@ -18,12 +18,13 @@
   ],
   "scripts": {
     "dev": "vite",
-    "dev:fork": "AGENTS_OFFICE_PLUGINS=herdr,github,bmad,missions,library,peek AGENTS_OFFICE_HERDR_FOCUS=1 vite",
+    "dev:fork": "AGENTS_OFFICE_PLUGINS=herdr,github,bmad,missions,library,peek,skills AGENTS_OFFICE_HERDR_FOCUS=1 vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "measure": "tsx scripts/measure-scene.mts"
+    "measure": "tsx scripts/measure-scene.mts",
+    "smoke": "node scripts/smoke-test.mjs"
   },
   "keywords": [
     "claude",
@@ -45,6 +46,7 @@
     "@types/node": "^25.9.9",
     "@types/three": "^0.183.1",
     "jsdom": "^26.1.0",
+    "playwright": "^1.65.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   }

@@ -6,7 +6,8 @@ export const ISO_ELEVATION = Math.atan(1 / Math.SQRT2);
 /** At 45 degrees to both wall axes, from the front-left like the overview. */
 export const ISO_AZIMUTH = THREE.MathUtils.degToRad(-45);
 const FRAME_MARGIN = 1.04;
-const MIN_FRAME_HEIGHT = 2;
+/** A box of zero height still gets a usable frame: issue #89's room framing passes a floor-to-wall box this tall at minimum. */
+export const MIN_FRAME_HEIGHT = 2;
 const MAX_ZOOM_OUT = 1.5;
 /** Half the visible height when zoomed on a selected figure (the overview's 12-unit focus at 60 degrees). */
 export const ISO_FOCUS_HALF_HEIGHT = 7;
@@ -28,6 +29,30 @@ function screenAxes(): { back: THREE.Vector3; right: THREE.Vector3; up: THREE.Ve
   const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), back).normalize();
   const up = new THREE.Vector3().crossVectors(back, right).normalize();
   return { back, right, up };
+}
+
+/**
+ * The half height that keeps every corner of `box` on screen, centered on `box`. Pure,
+ * exported so a caller can frame a box without moving the live controller's own pan/zoom
+ * limits (issue #89, `#room=`: a room's own bounds use this directly, instead of `frame`,
+ * which would also narrow the whole view's limits to just that room).
+ */
+export function framedHalfHeight(box: THREE.Box3, aspect: number): number {
+  const center = box.getCenter(new THREE.Vector3());
+  const { right, up } = screenAxes();
+  let halfWidth = 0;
+  let halfHeight = 0;
+  const offset = new THREE.Vector3();
+  for (const x of [box.min.x, box.max.x]) {
+    for (const y of [box.min.y, box.max.y]) {
+      for (const z of [box.min.z, box.max.z]) {
+        offset.set(x, y, z).sub(center);
+        halfWidth = Math.max(halfWidth, Math.abs(offset.dot(right)));
+        halfHeight = Math.max(halfHeight, Math.abs(offset.dot(up)));
+      }
+    }
+  }
+  return Math.max(halfHeight, halfWidth / Math.max(aspect, 1e-6), MIN_HALF_HEIGHT) * FRAME_MARGIN;
 }
 
 /** What the isometric camera shows: a point on the floor and half the visible height (the zoom). */
@@ -53,22 +78,8 @@ export class IsometricController {
   frame(bounds: THREE.Box3, aspect: number): void {
     const box = bounds.clone();
     box.max.y = Math.max(box.max.y, box.min.y + MIN_FRAME_HEIGHT);
-    const center = box.getCenter(new THREE.Vector3());
-    const { right, up } = screenAxes();
-    let halfWidth = 0;
-    let halfHeight = 0;
-    const offset = new THREE.Vector3();
-    for (const x of [box.min.x, box.max.x]) {
-      for (const y of [box.min.y, box.max.y]) {
-        for (const z of [box.min.z, box.max.z]) {
-          offset.set(x, y, z).sub(center);
-          halfWidth = Math.max(halfWidth, Math.abs(offset.dot(right)));
-          halfHeight = Math.max(halfHeight, Math.abs(offset.dot(up)));
-        }
-      }
-    }
-    this.target.copy(center);
-    this.halfHeight = Math.max(halfHeight, halfWidth / Math.max(aspect, 1e-6), MIN_HALF_HEIGHT) * FRAME_MARGIN;
+    this.target.copy(box.getCenter(new THREE.Vector3()));
+    this.halfHeight = framedHalfHeight(box, aspect);
     this.maxHalfHeight = this.halfHeight * MAX_ZOOM_OUT;
     this.bounds = box.clone();
     this.reach = box.getBoundingSphere(new THREE.Sphere()).radius * 2 + 10;

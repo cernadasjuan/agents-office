@@ -74,6 +74,10 @@ export interface MissionRoom {
   group: THREE.Group;
   stations: Map<string, Station>;
   locked: boolean;
+  /** The room's current displayed title (issue #89 review, fix 2): `#room=` matches a
+   * slugified title against this, since `id` is the server's opaque hash of the mission key
+   * and a client never sees the raw slug. */
+  title: string;
   update(room: WorldRoom): void;
   /** This room's tombstones, pickable by a click or hover (issue #127). */
   tombstonePickTargets(): PickTarget[];
@@ -159,10 +163,11 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   let sleepersSign: CSS2DObject | null = null;
 
   const result: MissionRoom = {
-    id: room.id, index, slot, group, stations, locked: false,
+    id: room.id, index, slot, group, stations, locked: false, title: room.title,
     tombstonePickTargets: () => [...tombstones].map(([id, { object }]) => ({ id, object })),
     update(next: WorldRoom) {
       result.locked = next.state === 'locked';
+      result.title = next.title;
       title.element.textContent = next.title;
       setRoomLabelText(label, next.title);
       door.visible = result.locked;

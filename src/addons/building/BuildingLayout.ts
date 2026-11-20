@@ -3,9 +3,9 @@ import type { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { Activity } from '../../agents/ActivityAnimations.js';
 import { OFFICE_WALLS, type Station } from '../../scene/Office.js';
 import { OFFICE } from '../../utils/Constants.js';
-import type { LayoutAgent, LayoutMove, LayoutStrategy, Seat } from '../../layout/LayoutStrategy.js';
-import { HALL, matchingDoor, slotFor, type Door } from './RoomPlanner.js';
-import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, roomTitle, type RoomKind } from './rooms.js';
+import type { LayoutAgent, LayoutMove, LayoutStrategy, RoomView, Seat } from '../../layout/LayoutStrategy.js';
+import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type RoomSlot } from './RoomPlanner.js';
+import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, type RoomKind } from './rooms.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
@@ -44,6 +44,35 @@ function isLibrarian(extras: LayoutAgent['extras']): boolean {
 export const BUILDING_STORAGE_KEY = 'agents-office.building.rooms';
 const DEFAULT_DWELL_MS = 4000;
 const QUEUE_REFRESH_MS = 500;
+const ROOM_KINDS: readonly string[] = ['office', 'desks', 'library', 'lab', 'lounge'];
+/** A plausible standing eye height (issue #89, `#room=` first person), not a floor minimum like `MIN_EYE_HEIGHT`. */
+const ROOM_VIEW_EYE_HEIGHT = 1.6;
+
+/**
+ * Lowercased, non-alphanumeric runs collapsed to one `-`, leading/trailing `-` trimmed
+ * (issue #89 review, fix 2): `#room=<mission id>` matches a human-typed name against a
+ * mission room's own displayed title this way, never against `id` (the server's opaque hash
+ * of the mission key; a client never sees the raw slug the server hashed).
+ */
+function slugify(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/**
+ * The camera framing for a room's slot (issue #89, `#room=`): its world bounds, floor to
+ * wall height, and a first-person standing pose a third of the way in from the door,
+ * looking further inward toward the room's main (far) wall. Pure: no scene, no layout state.
+ */
+export function roomViewFromSlot(slot: RoomSlot): RoomView {
+  const bounds = new THREE.Box3(
+    new THREE.Vector3(slot.rect.minX, 0, slot.rect.minZ),
+    new THREE.Vector3(slot.rect.maxX, WALL_HEIGHT, slot.rect.maxZ),
+  );
+  const frame = new RoomFrame(slot.rect, slot.door);
+  const position = frame.point(0, ROOM_SIZE * 0.35, ROOM_VIEW_EYE_HEIGHT);
+  const lookAt = position.clone().addScaledVector(frame.inward, 4);
+  return { bounds, standing: { position, lookAt } };
+}
 
 type Target = 'home' | 'pod' | 'queue' | `trip:${string}` | `room:${string}`;
 
@@ -142,6 +171,41 @@ export class BuildingLayout implements LayoutStrategy {
   /** Every war room's tombstones, pickable by a click or hover (issue #127). */
   tombstonePickTargets(): PickTarget[] {
     return [...this.missionRooms.values()].flatMap((room) => room.tombstonePickTargets());
+  }
+
+  /**
+   * Where the camera should go to show a named room (issue #89, `#room=`). A room kind
+   * ("office": always the first one, "Your office", never a later overflow waiting room;
+   * "desks", "library", "lab", "lounge": the first room of that kind), or a mission room.
+   * A mission room never matches by a raw `mission:<slug>` key: `id` is the server's opaque
+   * hash of that key (`projectWorld`'s `publicId`), so a client never sees the slug it was
+   * hashed from (issue #89 review, fix 2). It matches instead by the room's own displayed
+   * title, slugified (`#room=media-plan` against the title "Media Plan"), or by the exact
+   * public id a reviewer could copy from `/api/world`. Unknown names return null; this never
+   * changes the scene, only reports where a camera could go.
+   */
+  roomView(name: string): RoomView | null {
+    const query = name.trim().toLowerCase();
+    if (!query) return null;
+    let slot: RoomSlot | null = null;
+    if (ROOM_KINDS.includes(query)) {
+      const record = this.rooms.find((room) => room.kind === query);
+      if (record) slot = slotFor(record.index);
+    }
+    if (!slot) {
+      const byId = [...this.missionRooms.values()].find((room) => room.id === name);
+      if (byId) {
+        slot = byId.slot;
+      } else {
+        // Two mission rooms can slugify to the same title (issue #89 review, fix round 2):
+        // picking the first one silently would show the wrong room. The exact public id
+        // always disambiguates them; a title match only resolves when exactly one applies.
+        const byTitle = [...this.missionRooms.values()].filter((room) => slugify(room.title) === query);
+        if (byTitle.length === 1) slot = byTitle[0]!.slot;
+        else if (byTitle.length > 1) console.debug(`roomView("${name}") matches more than one mission room by title; none resolved`);
+      }
+    }
+    return slot ? roomViewFromSlot(slot) : null;
   }
 
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
