@@ -149,9 +149,14 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
   const sofaA = jitter(rand, nearWall - 0.7, 0.1);
   const sofaD = jitter(rand, 6.2, 0.3);
   pieces.push({ piece: PIECES.sofa(), a: sofaA, d: sofaD, turn: -Math.PI / 2 });
-  // Issue #126: an idle agent sits here instead of a trip to the lounge; 2 seats, the sofa's own width
-  stations.push({ type: 'idle', a: sofaA - 0.6, d: sofaD - 0.6, look: [sofaA - 0.6, sofaD - 1.6, 1.0], posture: 'seated' });
-  stations.push({ type: 'idle', a: sofaA - 0.6, d: sofaD + 0.6, look: [sofaA - 0.6, sofaD + 1.6, 1.0], posture: 'seated' });
+  // Issue #126: an idle agent sits here instead of a trip to the lounge; 2 seats, the sofa's
+  // own width. The sofa's turn (issue #126 review round 2) swaps which axis is which: turned
+  // -90 deg, the sofa's 2 m width (where the 2 seats spread out) now runs along `d`, and its
+  // 0.8 m depth (the small offset off center, onto the cushion and off the backrest) runs
+  // along `a`, not the other way. A first pass spread the seats along `a` and offset them
+  // along `d`, which put an idle agent 0.6 m off the sofa's front edge, not on it.
+  stations.push({ type: 'idle', a: sofaA - 0.3, d: sofaD - 0.5, look: [sofaA - 1.3, sofaD - 0.5, 1.0], posture: 'seated' });
+  stations.push({ type: 'idle', a: sofaA - 0.3, d: sofaD + 0.5, look: [sofaA - 1.3, sofaD + 0.5, 1.0], posture: 'seated' });
 
   // The low table sits further from the sofa than a coffee table normally would: both carry
   // their own jitter, and the room has no room to spare between two independently-jittered pieces.

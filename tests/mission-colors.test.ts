@@ -76,6 +76,21 @@ test('an agent with no mission room keeps the old per-agent-id color, with plain
   assert.equal(figure.joints.leftHand.userData.tint, undefined, 'no tint: plain skin');
 });
 
+// --- Issue #125 part 3 review round 2: a mission's own enricher can attach `roomKey` to an
+// agent's extras after it already exists, not only at its first appearance ---
+
+test('a figure joining a mission after it already exists still takes that mission\'s colors', () => {
+  const scene = new THREE.Scene();
+  const manager = managerWithLayout(scene);
+  const figure = manager.addAgent({ id: 'a', name: 'a', activity: 'implementing' });
+  const beforeAccent = figure.accentColor.clone();
+  assert.equal(figure.joints.leftHand.userData.tint, undefined, 'no mission yet: plain skin hands');
+
+  manager.setExtras('a', { room: 'mission-late' });
+  assert.ok(!figure.accentColor.equals(beforeAccent), 'picks up the mission\'s body color, not its old per-id one');
+  assert.notEqual(figure.joints.leftHand.userData.tint, undefined, 'picks up a hand tint too, not plain skin anymore');
+});
+
 test('a mission hand color costs no extra draw call: one hand bucket for every mission in the room', () => {
   const scene = new THREE.Scene();
   const manager = managerWithLayout(scene);

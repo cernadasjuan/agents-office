@@ -82,6 +82,10 @@ export interface MissionRoom {
   update(room: WorldRoom): void;
   /** War-room furniture (issue #125): grows with the peak live count, never shrinks. */
   updateCounts(counts: WarRoomCounts): void;
+  /** The room's current peak (issue #129 review round 2): `BuildingLayout` persists this
+   * with the room id, so a reload while the room happens to be empty does not reset it to
+   * zero and undo the never-shrinks rule. */
+  readonly peakCounts: WarRoomCounts;
   /** This room's tombstones, pickable by a click or hover (issue #127). */
   tombstonePickTargets(): PickTarget[];
   /** This room's issue board, pickable by a click (issue #146): opens the real-link list. */
@@ -91,7 +95,7 @@ export interface MissionRoom {
 const FLOOR_OPEN = 0x6f7f9a;
 const FLOOR_LOCKED = 0x4a4f5a;
 
-export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
+export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?: WarRoomCounts): MissionRoom {
   const slot = missionSlot(index);
   const frame = new RoomFrame(slot.rect, slot.door);
   const group = new THREE.Group();
@@ -174,7 +178,7 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   const furniture = new THREE.Group();
   group.add(furniture);
   const furnitureKey = (n: number) => `mission${index}_furniture_${n}`;
-  let peakCounts: WarRoomCounts = { deskLike: 0, debugging: 0 };
+  let peakCounts: WarRoomCounts = initialCounts ? { ...initialCounts } : { deskLike: 0, debugging: 0 };
   let furnitureStationKeys: string[] = [];
 
   const rebuildFurniture = () => {
@@ -199,6 +203,9 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
 
   const result: MissionRoom = {
     id: room.id, index, slot, group, stations, locked: false, title: room.title,
+    get peakCounts() {
+      return peakCounts;
+    },
     updateCounts(next: WarRoomCounts) {
       const deskLike = Math.max(peakCounts.deskLike, next.deskLike);
       const debugging = Math.max(peakCounts.debugging, next.debugging);

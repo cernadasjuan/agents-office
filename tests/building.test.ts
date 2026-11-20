@@ -372,15 +372,74 @@ test('AC4: once the room\'s one researching spot is taken, the next researcher s
 
 // --- Issue #129: a 9th desk-like agent overflows to the room's standing ring, not a 9th desk ---
 
-test('AC4 (#129): once a war room\'s 8 desk slots are full, the next desk-like agent uses the room\'s standing ring', () => {
+test('AC4 (#129): once a war room\'s desk cap is full, the next desk-like agent uses the room\'s standing ring', () => {
   const { layout, agent, tick } = setup();
   layout.syncWorldRooms([missionRoom()]);
   for (let i = 0; i < 8; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
-  tick(0); // grows the desk grid to its 8-slot cap
+  tick(0); // grows the desk grid to its cap
   for (let i = 0; i < 8; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
   const overflow = layout.seatFor(agent('d8', 'implementing', { room: 'room-1' }), null)!;
-  assert.doesNotMatch(overflow.key, /_furniture_/, 'no 9th desk piece');
+  assert.doesNotMatch(overflow.key, /_furniture_/, 'no extra desk piece');
+  // mission0_seat_0 through 7 are the meeting table's own seats (TABLE_SEATS,
+  // missionRooms.ts); 8 and up are the standing ring. A desk-cap overflow must stand.
+  assert.doesNotMatch(overflow.key, /^mission0_seat_[0-7]$/, 'not seated at the meeting table');
   assert.match(overflow.key, /^mission0_seat_/, 'the room\'s own standing ring instead');
+});
+
+// --- Issue #129 review round 2: the standing ring fills before the meeting table's own
+// seats, even though they share one station type (posture is the only difference) ---
+
+test('every desk-cap overflow stands, until the standing ring itself is full', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  // room-1's door is off-center (missionSlot's first wing column, issue #125 review): 3 desk slots here.
+  for (let i = 0; i < 3; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
+  tick(0);
+  for (let i = 0; i < 3; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
+  // STANDING_SPOTS (missionRooms.ts) is 12: every one of the next 12 overflow agents must stand.
+  for (let i = 0; i < 12; i++) {
+    const seat = layout.seatFor(agent(`o${i}`, 'implementing', { room: 'room-1' }), null)!;
+    assert.doesNotMatch(seat.key, /^mission0_seat_[0-7]$/, `overflow ${i} sat at the meeting table instead of standing`);
+  }
+  // The 13th overflow: every desk and every standing spot is full, so only the table's own seats are left.
+  const lastResort = layout.seatFor(agent('o12', 'implementing', { room: 'room-1' }), null)!;
+  assert.match(lastResort.key, /^mission0_seat_[0-7]$/, 'the meeting table\'s own seats, the true last resort');
+});
+
+// --- Issue #126 review round 2: growth must actually reach seating, and an activity change
+// inside the same room must re-run claimInRoom, through the real BuildingLayout ---
+
+test('a desk-like agent moves onto a grown desk once one exists, not forever stuck on the generic ring', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const a = agent('a', 'implementing', { room: 'room-1' });
+  const first = layout.seatFor(a, null)!;
+  assert.match(first.key, /^mission0_seat_/, 'no desk exists yet: the generic ring');
+
+  tick(0); // grows one desk, now that an implementing agent is counted in the room
+  // Same activity, same room target string: only an activity-aware re-check (not the
+  // brand-new-agent path above) can notice the freshly grown desk is now free.
+  layout.seatFor(a, 'implementing');
+  const moves = tick(4000); // past the dwell time
+  const move = moves.find((m) => m.agentId === 'a');
+  assert.ok(move, 'the agent is moved once the dwell time passes');
+  assert.match(move!.seat.key, /mission0_furniture_/, 'onto the grown desk, not left on the generic ring');
+});
+
+test('an activity change inside the same war room re-runs claimInRoom, not swallowed as "same target"', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const a = agent('a', 'researching', { room: 'room-1' });
+  const first = layout.seatFor(a, null)!;
+  assert.match(first.key, /^mission0_furniture_\d+$/, 'the room\'s own bookshelf (a must-have, no growth needed)');
+
+  a.activity = 'planning';
+  const immediate = layout.seatFor(a, 'researching');
+  assert.equal(immediate, null, 'a mid-room activity change still waits for the dwell time, like any other move');
+  const moves = tick(4000);
+  const move = moves.find((m) => m.agentId === 'a');
+  assert.ok(move, 'the agent moves once the dwell time passes');
+  assert.notEqual(move!.seat.key, first.key, 'off the bookshelf, not stuck there forever');
 });
 
 test('a waiting agent still goes to the user office before its war room', () => {
@@ -413,6 +472,33 @@ test('a war room\'s furniture grows with the agents actually seated in it (issue
   tick(0);
   assert.equal(pieceCount('desk'), 2);
   assert.equal(pieceCount('debugStation'), 1);
+});
+
+// --- Issue #129 review round 2: a war room's peak counts persist, so a reload while the
+// room happens to be empty does not reset the never-shrinks rule to zero ---
+
+test('a war room\'s peak desk and debug counts survive a reload, even while the room is empty', () => {
+  const storage = new Map<string, string>();
+  const first = setup(storage);
+  first.layout.syncWorldRooms([missionRoom()]);
+  first.layout.seatFor(first.agent('a', 'implementing', { room: 'room-1' }), null);
+  first.layout.seatFor(first.agent('b', 'debugging', { room: 'room-1' }), null);
+  first.tick(0);
+  const pieceCount = (scene: THREE.Scene, name: string) => {
+    let n = 0;
+    scene.getObjectByName('mission-room-0')!.traverse((o) => { if (o.userData.piece === name) n++; });
+    return n;
+  };
+  assert.equal(pieceCount(first.scene, 'desk'), 1);
+  assert.equal(pieceCount(first.scene, 'debugStation'), 1);
+
+  // A reload: a fresh BuildingLayout and scene, the same storage, the room reported with no
+  // agents yet (the mission server itself tracks who is where, not a peak; this layout's own
+  // in-memory peak is what is at risk here).
+  const second = setup(storage);
+  second.layout.syncWorldRooms([missionRoom()]);
+  assert.equal(pieceCount(second.scene, 'desk'), 1, 'the peak survived the reload, not reset to zero');
+  assert.equal(pieceCount(second.scene, 'debugStation'), 1);
 });
 
 // --- roomView (issue #89, #room=) ---

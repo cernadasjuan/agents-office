@@ -57,6 +57,10 @@ function isLibrarian(extras: LayoutAgent['extras']): boolean {
 }
 
 export const BUILDING_STORAGE_KEY = 'agents-office.building.rooms';
+/** A war room's peak desk/debug counts, by room id (issue #129 review round 2): without
+ * this, a reload while the room happens to be empty resets its peak to zero in memory,
+ * undoing the never-shrinks rule the furniture itself otherwise keeps. */
+export const MISSION_COUNTS_STORAGE_KEY = 'agents-office.building.missionCounts';
 const DEFAULT_DWELL_MS = 4000;
 const QUEUE_REFRESH_MS = 500;
 const MISSIONS_BOARD_REFRESH_MS = 1000;
@@ -97,7 +101,13 @@ interface AgentState {
   target: Target | null;
   seat: string | null;
   home: string | null;
-  pending: { target: Target; since: number } | null;
+  /** The war-room piece type `seat` currently satisfies (`room:<id>:<type>`'s `<type>`), or
+   * null for a generic-ring seat, a non-room target, or no seat yet. Lets `seatFor` notice
+   * an activity change inside the same room (issue #126 review round 2: the target string
+   * alone, `room:<id>`, is the same for every activity in that room, so comparing only that
+   * swallowed the change before `claimInRoom` ever ran again). */
+  roomStationType: string | null;
+  pending: { target: Target; roomStationType: string | null; since: number } | null;
   queuedAt: number | null;
 }
 
@@ -170,7 +180,7 @@ export class BuildingLayout implements LayoutStrategy {
         continue;
       }
       const index = this.missionRooms.size;
-      const built = Object.assign(buildMissionRoom(room, index), { extraDoors: [] as Door[] });
+      const built = Object.assign(buildMissionRoom(room, index, this.rememberedMissionCounts(room.id)), { extraDoors: [] as Door[] });
       this.missionRooms.set(room.id, built);
       this.scene.add(built.group);
       roomLabelBatchFor(this.scene).collect(built.group);
@@ -245,13 +255,19 @@ export class BuildingLayout implements LayoutStrategy {
     const state = this.stateOf(agent);
     const desired = this.targetFor(state);
     if (previous === null || state.target === null) return this.assign(state, desired);
-    if (desired === state.target) {
+    // A room target alone (`room:<id>`) is the same string for every activity in that room;
+    // an activity change that wants a different piece there (researching -> planning, say)
+    // must still re-run `claimInRoom`, not be swallowed by the "same target" no-op below.
+    const desiredRoomStationType = desired.startsWith('room:') ? WAR_ROOM_STATION_FOR[state.agent.activity] ?? null : null;
+    if (desired === state.target && desiredRoomStationType === state.roomStationType) {
       state.pending = null;
       return null;
     }
     // Waiting for the user is urgent; any other change waits for the dwell time
     if (desired === 'queue') return this.assign(state, desired);
-    if (state.pending?.target !== desired) state.pending = { target: desired, since: this.now() };
+    if (state.pending?.target !== desired || state.pending?.roomStationType !== desiredRoomStationType) {
+      state.pending = { target: desired, roomStationType: desiredRoomStationType, since: this.now() };
+    }
     return null;
   }
 
@@ -301,7 +317,27 @@ export class BuildingLayout implements LayoutStrategy {
       else if (WAR_ROOM_DESK_LIKE.has(state.agent.activity)) entry.deskLike++;
       counts.set(roomId, entry);
     }
-    for (const [id, room] of this.missionRooms) room.updateCounts(counts.get(id) ?? { deskLike: 0, debugging: 0 });
+    let grew = false;
+    for (const [id, room] of this.missionRooms) {
+      const before = room.peakCounts;
+      room.updateCounts(counts.get(id) ?? { deskLike: 0, debugging: 0 });
+      if (room.peakCounts.deskLike !== before.deskLike || room.peakCounts.debugging !== before.debugging) grew = true;
+      // `updateCounts` rebuilds the room's own furniture stations (its `stations` map,
+      // `missionRooms.ts`); this routing table only ever copied them in once, at the room's
+      // first construction (`syncWorldRooms`), before any growth happened — so a grown desk
+      // or debug station was never actually reachable (issue #126 review round 2: the very
+      // first implementing agent in a fresh war room sat at the generic ring, not a desk).
+      // Growth never removes a key, only adds one or changes what an existing one is; a key
+      // already in this table keeps its own occupied flag, not the freshly built one's false.
+      for (const [key, station] of room.stations) {
+        const existing = this.stations.get(key);
+        this.stations.set(key, existing ? { ...station, occupied: existing.occupied } : station);
+      }
+    }
+    // Only on an actual change: a reload while every room happens to be empty must not
+    // reset a room's peak to zero (issue #129 review round 2), but writing on every tick
+    // regardless would be wasted work.
+    if (grew) this.saveMissionCounts();
   }
 
   // --- Targets ---
@@ -341,6 +377,11 @@ export class BuildingLayout implements LayoutStrategy {
     else if (target === 'queue') key = this.claimOfType('queue');
     else key = this.claimOfType(target.slice('trip:'.length));
     state.seat = key;
+    // The piece actually claimed, not just the one wanted: `claimInRoom` falls back to the
+    // generic ring (or the lounge) when its preferred piece is taken, and that still counts
+    // as "no specific piece", not the preferred type, for the next activity-change check.
+    const roomMatch = target.startsWith('room:') ? /^room:[^:]+:(.+)$/.exec(this.stations.get(key)!.type) : null;
+    state.roomStationType = roomMatch ? roomMatch[1] : null;
     return this.seat(key);
   }
 
@@ -386,14 +427,18 @@ export class BuildingLayout implements LayoutStrategy {
    * A seat in a war room: its own piece for the current activity first (issue #126), so a
    * researching agent stands at that room's bookshelf and a planning agent at its whiteboard,
    * never at the library or a dedicated room. Without a free piece for the activity, or without
-   * one at all, the agent takes any free seat in the room's generic ring. Only a room with no
-   * free seat of any kind falls back to the lounge.
+   * one at all, the agent takes a free spot in the room's generic ring: a standing spot first
+   * (issue #129 AC4, a desk-cap overflow stands, it does not sit at the meeting table), a table
+   * seat only once every standing spot is taken too. The table seats and the standing ring
+   * share one station type (`room:${roomId}`, `missionRooms.ts`); `posture` is the only thing
+   * that tells them apart. Only a room with no free spot of any kind falls back to the lounge.
    */
   private claimInRoom(roomId: string, activity: Activity): string {
     const preferredType = WAR_ROOM_STATION_FOR[activity];
     const preferred = preferredType && this.keysOfType(`room:${roomId}:${preferredType}`).find((key) => !this.stations.get(key)!.occupied);
     if (preferred) return this.claim([preferred], 'room');
-    const free = this.keysOfType(`room:${roomId}`).find((key) => !this.stations.get(key)!.occupied);
+    const ring = this.keysOfType(`room:${roomId}`).filter((key) => !this.stations.get(key)!.occupied);
+    const free = ring.find((key) => this.stations.get(key)!.posture !== 'seated') ?? ring[0];
     return free ? this.claim([free], 'room') : this.claimOfType('idle');
   }
 
@@ -492,7 +537,7 @@ export class BuildingLayout implements LayoutStrategy {
   private stateOf(agent: LayoutAgent): AgentState {
     let state = this.agents.get(agent.id);
     if (!state) {
-      state = { agent, target: null, seat: null, home: null, pending: null, queuedAt: null };
+      state = { agent, target: null, seat: null, home: null, roomStationType: null, pending: null, queuedAt: null };
       this.agents.set(agent.id, state);
     }
     state.agent = agent;
@@ -575,6 +620,31 @@ export class BuildingLayout implements LayoutStrategy {
   private saveRooms(): void {
     try {
       this.storage?.setItem(BUILDING_STORAGE_KEY, JSON.stringify(this.rooms.map((room) => room.kind)));
+    } catch {
+      // Storage full or blocked: the building still works for this page
+    }
+  }
+
+  /** A remembered peak for one mission id, read back when that room is (re)built. A
+   * malformed or missing entry is treated the same as no history: start at zero. */
+  private rememberedMissionCounts(roomId: string): WarRoomCounts | undefined {
+    try {
+      const parsed: unknown = JSON.parse(this.storage?.getItem(MISSION_COUNTS_STORAGE_KEY) ?? '{}');
+      if (typeof parsed !== 'object' || parsed === null) return undefined;
+      const entry = (parsed as Record<string, unknown>)[roomId];
+      if (typeof entry !== 'object' || entry === null) return undefined;
+      const { deskLike, debugging } = entry as Record<string, unknown>;
+      if (typeof deskLike !== 'number' || typeof debugging !== 'number') return undefined;
+      return { deskLike, debugging };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private saveMissionCounts(): void {
+    try {
+      const byRoomId = Object.fromEntries([...this.missionRooms].map(([id, room]) => [id, room.peakCounts]));
+      this.storage?.setItem(MISSION_COUNTS_STORAGE_KEY, JSON.stringify(byRoomId));
     } catch {
       // Storage full or blocked: the building still works for this page
     }

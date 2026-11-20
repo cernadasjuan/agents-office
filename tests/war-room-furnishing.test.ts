@@ -222,3 +222,21 @@ test('every piece in a war room plan is a factory from the furniture library', (
     assert.equal(typeof placement.piece.create, 'function', `${placement.piece.name} is a PieceSpec`);
   }
 });
+
+// --- Issue #126 review round 2: an idle station must sit on the sofa's own footprint, not
+// beside it; the sofa's turn (a rotated piece) changes which axis its width and depth run
+// along, and the two offsets must follow that turn, not a fixed, untouched pair of axes ---
+
+test('both idle stations sit inside the sofa\'s own footprint, in every seed', () => {
+  for (let seed = 0; seed < 20; seed++) {
+    const plan = furnishWarRoom(`mission-sofa-${seed}`, { deskLike: 2, debugging: 0 });
+    const sofa = plan.pieces.find((p) => p.piece.name === 'sofa')!;
+    const box = footprint(sofa);
+    const idleStations = plan.stations.filter((s) => s.type === 'idle');
+    assert.equal(idleStations.length, 2);
+    for (const spot of idleStations) {
+      assert.ok(spot.a >= box.minA && spot.a <= box.maxA && spot.d >= box.minD && spot.d <= box.maxD,
+        `idle spot (${spot.a.toFixed(2)}, ${spot.d.toFixed(2)}) is outside the sofa's footprint (seed ${seed})`);
+    }
+  }
+});

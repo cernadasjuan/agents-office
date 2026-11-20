@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { buildSkeleton, Joints } from './StickFigureParts.js';
+import { buildSkeleton, handTintFor, Joints } from './StickFigureParts.js';
 import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
 import { ACTIVITY_LABELS, activityLabelFor } from '../agents/AgentData.js';
@@ -18,7 +18,7 @@ export class StickFigure {
   joints: Joints;
   label: CSS2DObject;
   name: string;
-  readonly accentColor: THREE.Color;
+  accentColor: THREE.Color;
   activity: Activity = 'idle';
   private targetActivity: Activity = 'idle';
   private transitionProgress = 1;
@@ -62,6 +62,28 @@ export class StickFigure {
     this.targetActivity = activity;
     this.transitionProgress = 0;
     this.refreshLabel();
+  }
+
+  /**
+   * A later mission color (issue #125 part 3, review round 2): a figure built before its
+   * mission room was known (extras arrive after `AgentManager.addAgent`, not only at
+   * construction) otherwise keeps its original color forever. Swaps the torso's cached
+   * material (never a new one, the same `getToonMaterial` cache every other figure's
+   * color already draws from) and the hands' per-instance tint; a no-op if unchanged.
+   */
+  setAccentColor(accentColor: THREE.Color, secondColor?: THREE.Color): void {
+    if (this.accentColor.equals(accentColor)) return;
+    this.accentColor = accentColor.clone();
+    this.joints.torso.material = getToonMaterial(accentColor);
+    if (secondColor) {
+      const tint = handTintFor(secondColor);
+      this.joints.leftHand.userData.tint = tint;
+      this.joints.rightHand.userData.tint = tint;
+    } else {
+      delete this.joints.leftHand.userData.tint;
+      delete this.joints.rightHand.userData.tint;
+    }
+    this.label.element.style.setProperty('--agent-color', `#${this.accentColor.getHexString()}`);
   }
 
   /** A subagent at rest reads "Done": it has finished its task. */

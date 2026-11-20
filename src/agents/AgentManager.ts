@@ -63,8 +63,8 @@ export class AgentManager {
     // A subagent wears its parent's color and stands a little smaller, so you see whose helper it is.
     // A mission agent (and its subagents) wears that mission's own 2 colors instead (issue #125).
     const parentId = info.extras?.parentId;
-    const mission = info.extras?.room ? missionColorsFor(info.extras.room) : undefined;
-    const figure = new StickFigure(info.name, mission?.[0] ?? accentColorFor(parentId ?? info.id), mission?.[1]);
+    const [accent, second] = this.colorsFor(info);
+    const figure = new StickFigure(info.name, accent, second);
     if (parentId) figure.group.scale.setScalar(SUBAGENT_SCALE);
     figure.setSubagent(parentId !== undefined);
     figure.setTag(info.extras?.provider);
@@ -92,11 +92,25 @@ export class AgentManager {
     managed.figure.setActivity(activity);
   }
 
+  /**
+   * Which 2 colors a figure wears: a mission's own pair if its `extras.room` names one,
+   * else the plain per-agent-id accent and no second color. `room` can arrive after
+   * `addAgent` (issue #125 part 3 review round 2: a mission's own enricher attaches
+   * `roomKey` to a session's extras as it scans the transcript, not always at the agent's
+   * first appearance), so `setExtras` recomputes this the same way, every time.
+   */
+  private colorsFor(info: AgentInfo): [THREE.Color, THREE.Color | undefined] {
+    const mission = info.extras?.room ? missionColorsFor(info.extras.room) : undefined;
+    return [mission?.[0] ?? accentColorFor(info.extras?.parentId ?? info.id), mission?.[1]];
+  }
+
   /** New display data from plugins. The layout may move the agent (for example to a room). */
   setExtras(agentId: string, extras: AgentExtras | undefined): void {
     const managed = this.agents.get(agentId);
     if (!managed) return;
     managed.info.extras = extras;
+    const [accent, second] = this.colorsFor(managed.info);
+    managed.figure.setAccentColor(accent, second);
     managed.figure.setSubagent(extras?.parentId !== undefined);
     managed.figure.setTag(extras?.provider);
     managed.figure.setAttention(extras?.attention, extras?.waitMinutes);
