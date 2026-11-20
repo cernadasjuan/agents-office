@@ -22,6 +22,11 @@ pnpm build
 pnpm dev
 ```
 
+`pnpm smoke` is a separate, opt-in check (issue #89): it starts the dev server against a
+fixture agent list, opens it in one headless Chromium page (`pnpm install` also fetches
+Chromium, since `playwright` is a dev dependency, never a runtime one, P6), and fails on any
+page error. It never runs as part of `pnpm test` and never touches port 5173.
+
 ## macOS launcher (this fork)
 
 A fork-only launcher app so the office opens from Spotlight or Applications instead of a
@@ -387,7 +392,7 @@ AGENTS_OFFICE_PLUGINS=peek pnpm dev
 - The office remembers the last view (first person, overview or isometric) in the browser and opens in it after a reload. `#view=overview`, `#view=first-person` or `#view=iso` in the URL wins over the saved view. The side panel header shows the layout and the view.
 - First person has no bounding box: you can walk through every doorway into a room, and fly above the building (Space). Only the floor stops the camera. The ceiling hides when the camera is above it (6 m), in the overview and in the isometric view. There is no wall collision.
 - **Shift+L** switches the layout after a confirmation (the page reloads). The layout choice is saved too.
-- `#view=overview` in the URL starts in the overview, `#view=iso` in the isometric view. `#focus=<agent id>` selects that agent when it appears (agent IDs change when the server restarts)
+- `#view=overview` in the URL starts in the overview, `#view=iso` in the isometric view. `#select=<agent id>` (`#focus=`, its older name, still works) selects that agent when it appears (agent IDs change when the server restarts). `#zoom=<distance>` starts the view at that camera distance instead of its own default framing; the number is the same overview-equivalent distance the side panel's zoom reads, for both the overview and the isometric view (issue #89)
 
 ## Architecture
 

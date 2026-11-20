@@ -114,12 +114,27 @@ test('a press and release close together is a click, a drag is not', () => {
 });
 
 test('the URL hash picks the start view and the agent to focus', () => {
-  assert.deepEqual(parseViewHash(''), { view: 'first-person', focus: null });
-  assert.deepEqual(parseViewHash('#view=overview'), { view: 'overview', focus: null });
-  assert.deepEqual(parseViewHash('#focus=ab12cd&view=overview'), { view: 'overview', focus: 'ab12cd' });
-  assert.deepEqual(parseViewHash('#view=sideways&focus=a'), { view: 'first-person', focus: 'a' });
-  assert.deepEqual(parseViewHash('#focus=<script>'), { view: 'first-person', focus: null });
-  assert.deepEqual(parseViewHash(`#focus=${'a'.repeat(200)}`), { view: 'first-person', focus: null });
+  assert.deepEqual(parseViewHash(''), { view: 'first-person', focus: null, zoom: null });
+  assert.deepEqual(parseViewHash('#view=overview'), { view: 'overview', focus: null, zoom: null });
+  assert.deepEqual(parseViewHash('#focus=ab12cd&view=overview'), { view: 'overview', focus: 'ab12cd', zoom: null });
+  assert.deepEqual(parseViewHash('#view=sideways&focus=a'), { view: 'first-person', focus: 'a', zoom: null });
+  assert.deepEqual(parseViewHash('#focus=<script>'), { view: 'first-person', focus: null, zoom: null });
+  assert.deepEqual(parseViewHash(`#focus=${'a'.repeat(200)}`), { view: 'first-person', focus: null, zoom: null });
+});
+
+test('issue #89: #select= is the current name for the agent to focus; #focus= still works', () => {
+  assert.deepEqual(parseViewHash('#select=ab12cd&view=overview'), { view: 'overview', focus: 'ab12cd', zoom: null });
+  // Both given: #select wins, it is the name the issue's own acceptance criteria use.
+  assert.deepEqual(parseViewHash('#select=a&focus=b'), { view: 'first-person', focus: 'a', zoom: null });
+  assert.deepEqual(parseViewHash('#select=<script>'), { view: 'first-person', focus: null, zoom: null });
+});
+
+test('issue #89: #zoom= starts the view at that camera distance', () => {
+  assert.deepEqual(parseViewHash('#view=overview&zoom=12.5'), { view: 'overview', focus: null, zoom: 12.5 });
+  assert.deepEqual(parseViewHash('#zoom=0'), { view: 'first-person', focus: null, zoom: null }, 'zero is not a usable distance');
+  assert.deepEqual(parseViewHash('#zoom=-5'), { view: 'first-person', focus: null, zoom: null }, 'negative is not a usable distance');
+  assert.deepEqual(parseViewHash('#zoom=not-a-number'), { view: 'first-person', focus: null, zoom: null });
+  assert.deepEqual(parseViewHash(''), { view: 'first-person', focus: null, zoom: null }, 'missing stays null, not 0');
 });
 
 test('a tombstone (static-merged furniture, source moved to its own layer) is still pickable', () => {

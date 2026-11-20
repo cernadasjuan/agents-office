@@ -87,6 +87,22 @@ export class ViewController {
     const startView = options.view ?? start.view;
     if (startView !== 'first-person') this.setMode(startView, false);
     else options.modeChanged?.(this.currentMode);
+    if (start.zoom !== null) this.applyStartZoom(start.zoom);
+  }
+
+  /** `#zoom=<distance>` (issue #89): starts the view at that camera distance instead of its own default framing. A no-op in first person, which has no zoom. */
+  private applyStartZoom(zoomDistance: number): void {
+    if (this.currentMode === 'isometric') {
+      this.isometric.halfHeight = THREE.MathUtils.clamp(
+        zoomDistance * Math.tan(THREE.MathUtils.degToRad(this.options.camera.fov) / 2),
+        this.isometric.minHalfHeight,
+        this.isometric.maxHalfHeight,
+      );
+      this.applyIsometric();
+    } else if (this.currentMode === 'overview') {
+      this.overview.distance = THREE.MathUtils.clamp(zoomDistance, this.overview.minDistance, this.overview.maxDistance);
+      this.applyPose(this.overview.pose());
+    }
   }
 
   get mode(): ViewMode {

@@ -83,6 +83,30 @@ test('#view=overview starts in the overview', () => {
   assert.ok(camera.position.y > 15);
 });
 
+test('issue #89: #zoom= starts the overview at that camera distance, not its own default framing', () => {
+  const baseline = setup('#view=overview');
+  const { view, camera } = setup('#view=overview&zoom=15');
+  view.update(0, 1 / 60);
+  assert.equal(view.mode, 'overview');
+  assert.ok(Math.abs(view.zoomDistance - 15) < 1e-6, `zoomDistance is the requested 15 (got ${view.zoomDistance})`);
+  assert.notEqual(view.zoomDistance, baseline.view.zoomDistance, 'different from the view’s own default framing');
+  assert.ok(camera.position.y > 0, 'still a real overview pose, not a degenerate one');
+});
+
+test('issue #89: #zoom= starts the isometric view at the equivalent camera distance', () => {
+  const { view } = setup('#view=iso&zoom=15');
+  view.update(0, 1 / 60);
+  assert.equal(view.mode, 'isometric');
+  assert.ok(Math.abs(view.zoomDistance - 15) < 1e-6, `zoomDistance reads the overview-equivalent 15 (got ${view.zoomDistance})`);
+});
+
+test('issue #89: #zoom= is clamped into the view’s own pan/zoom limits, like the wheel already is', () => {
+  const { view } = setup('#view=overview&zoom=1000000');
+  view.update(0, 1 / 60);
+  const overview = (view as unknown as { overview: { maxDistance: number } }).overview;
+  assert.ok(view.zoomDistance <= overview.maxDistance + 1e-6, `clamped to the zoom-out limit (${view.zoomDistance} vs ${overview.maxDistance})`);
+});
+
 test('a click picks a tombstone, not just an agent figure (issue #127)', () => {
   const document = dom.window.document;
   const scene = new THREE.Scene();
@@ -159,6 +183,16 @@ test('#focus selects the agent once it appears, and flies the camera to it', () 
   selection.clear();
   view.agentsChanged(manager.getAgents());
   assert.equal(selection.selected, null, 'the focus applies only once');
+});
+
+test('issue #89: #select= selects the agent once it appears, the same as #focus=', () => {
+  const { view, manager, selection } = setup('#view=overview&select=agent-1');
+  view.agentsChanged(manager.getAgents());
+  assert.equal(selection.selected, null);
+
+  manager.addAgent({ id: 'agent-1', name: 'One', activity: 'idle' });
+  view.agentsChanged(manager.getAgents());
+  assert.equal(selection.selected, 'agent-1');
 });
 
 test('Esc clears the selection and an agent that leaves is deselected', () => {

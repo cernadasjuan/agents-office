@@ -147,16 +147,33 @@ export function isViewFromAbove(mode: ViewMode): boolean {
 export interface ViewHash {
   view: ViewMode;
   focus: string | null;
+  /** The overview-equivalent camera distance to start at (`zoomDistance` units), or null for the view's own default framing. */
+  zoom: number | null;
 }
 
 const PUBLIC_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
-/** `#view=overview` starts in the overview, `#view=iso` in the isometric view. `#focus=<agent id>` selects that agent once it appears. */
+/** A finite, positive `#zoom=` value, or null for anything else (missing, zero, negative, not a number). */
+function parseZoom(value: string | null): number | null {
+  if (value === null) return null;
+  const zoom = Number(value);
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : null;
+}
+
+/**
+ * `#view=overview` starts in the overview, `#view=iso` in the isometric view. `#select=<agent
+ * id>` (or `#focus=`, its older name, still read) selects that agent once it appears.
+ * `#zoom=<distance>` starts at that camera distance instead of the view's own default framing
+ * (issue #89): the overview reads it as `OverviewController.distance` directly, the isometric
+ * view converts it to the equivalent `halfHeight`, so one number means the same zoom level in
+ * both, the same way `ViewController.zoomDistance` already reports both in one unit.
+ */
 export function parseViewHash(hash: string): ViewHash {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
-  const focus = params.get('focus');
+  const focus = params.get('select') ?? params.get('focus');
   return {
     view: viewModeFromName(params.get('view')) ?? 'first-person',
     focus: focus && PUBLIC_ID.test(focus) ? focus : null,
+    zoom: parseZoom(params.get('zoom')),
   };
 }

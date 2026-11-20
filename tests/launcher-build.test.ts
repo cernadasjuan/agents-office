@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -66,6 +66,79 @@ test('a repo root with a space, a quote and a $ never changes what the generated
   } finally {
     fs.rmSync(path.dirname(repoRoot), { recursive: true, force: true });
     fs.rmSync(destDir, { recursive: true, force: true });
+  }
+});
+
+const FIND_NODE_SCRIPT = path.join(REPO_ROOT, 'scripts', 'launcher', 'find-node.sh');
+
+/**
+ * Sources find-node.sh and calls one of its nvm helpers directly, with HOME replaced. Calls
+ * `nvm_default_node`/`highest_installed_nvm_node`, not `find_node` itself: `find_node` checks
+ * the hardcoded `/opt/homebrew/bin/node` and `/usr/local/bin/node` paths first, which are
+ * real, machine-specific paths a test cannot safely erase, so it would answer from whatever
+ * this machine has installed instead of exercising the nvm logic under test.
+ */
+function callNvmHelper(fn: 'nvm_default_node' | 'highest_installed_nvm_node', home: string): { stdout: string; status: number } {
+  const probe = `
+    set -e
+    source "${FIND_NODE_SCRIPT}"
+    ${fn}
+  `;
+  const result = spawnSync('/bin/bash', ['-c', probe], { encoding: 'utf8', env: { HOME: home } });
+  if (result.error) throw result.error;
+  return { stdout: (result.stdout ?? '').trim(), status: result.status ?? 1 };
+}
+
+function fakeNvmInstall(home: string, versions: string[], defaultAlias?: string): void {
+  for (const version of versions) {
+    const binDir = path.join(home, '.nvm', 'versions', 'node', version, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(binDir, 'node'), '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(path.join(binDir, 'node'), 0o755);
+  }
+  if (defaultAlias !== undefined) {
+    const aliasDir = path.join(home, '.nvm', 'alias');
+    fs.mkdirSync(aliasDir, { recursive: true });
+    fs.writeFileSync(path.join(aliasDir, 'default'), `${defaultAlias}\n`);
+  }
+}
+
+test('nvm_default_node resolves a default set to a bare major ("22") to the highest installed v22.x', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-find-node-'));
+  try {
+    // v18 is installed too, and it is not the highest overall: picking it would mean the
+    // bare-major lookup fell through to "highest installed version" by coincidence, not by
+    // actually resolving the major the user asked for.
+    fakeNvmInstall(home, ['v18.20.4', 'v22.11.0', 'v22.15.0'], '22');
+    const { stdout, status } = callNvmHelper('nvm_default_node', home);
+    assert.equal(status, 0);
+    assert.equal(stdout, path.join(home, '.nvm', 'versions', 'node', 'v22.15.0', 'bin', 'node'));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('nvm_default_node resolves a default set to a full version exactly, no major fallback needed', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-find-node-'));
+  try {
+    fakeNvmInstall(home, ['v20.11.0', 'v22.15.0'], '20.11.0');
+    const { stdout, status } = callNvmHelper('nvm_default_node', home);
+    assert.equal(status, 0);
+    assert.equal(stdout, path.join(home, '.nvm', 'versions', 'node', 'v20.11.0', 'bin', 'node'));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('highest_installed_nvm_node falls back correctly when no default resolves', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-find-node-'));
+  try {
+    fakeNvmInstall(home, ['v18.20.4', 'v9.0.0', 'v22.15.0']); // no default alias at all
+    const { stdout, status } = callNvmHelper('highest_installed_nvm_node', home);
+    assert.equal(status, 0);
+    assert.equal(stdout, path.join(home, '.nvm', 'versions', 'node', 'v22.15.0', 'bin', 'node'), 'sort -V, not a lexical sort: v9 does not beat v18 or v22');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
