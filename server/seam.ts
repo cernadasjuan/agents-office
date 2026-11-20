@@ -80,9 +80,20 @@ export interface BoardInput {
   columns: Array<{ name: string; cards: Array<{ number: number; title: string }> }>;
 }
 
+/** One ticket of a personal Jira board (issue #145). `url` is the browse link built from the key. */
+export interface JiraTicketInput {
+  key: string;
+  summary: string;
+  status: string;
+  assignee?: string;
+  priority?: string;
+  url?: string;
+}
+
 export interface WorldInput {
   rooms?: RoomInput[];
   boards?: BoardInput[];
+  jiraTickets?: JiraTicketInput[];
 }
 
 export interface WorldProvider {
@@ -224,6 +235,28 @@ function issueList(issues: DisplayExtras['issues'], max: number) {
   return list.length > 0 ? list : undefined;
 }
 
+/** `PREFIX-123`, the same key shape the peek plugin already links (`plugins/peek/transcript.ts`). */
+const JIRA_KEY = /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/;
+
+/** One Jira ticket (issue #145): the key, a capped summary and status, and optional priority, assignee and link. */
+function jiraTicket(ticket: JiraTicketInput) {
+  if (typeof ticket?.key !== 'string' || !JIRA_KEY.test(ticket.key)) return undefined;
+  const status = displayText(ticket.status, 32);
+  if (!status) return undefined;
+  const summary = displayText(ticket.summary, 80);
+  const assignee = typeof ticket.assignee === 'string' ? displayText(ticket.assignee, 40) : '';
+  const priority = typeof ticket.priority === 'string' ? displayText(ticket.priority, 16) : '';
+  const url = httpsUrl(ticket.url);
+  return {
+    key: ticket.key,
+    summary,
+    status,
+    ...(assignee ? { assignee } : {}),
+    ...(priority ? { priority } : {}),
+    ...(url ? { url } : {}),
+  };
+}
+
 export type PublicId = (raw: string) => string;
 
 const NO_ACTIONS: ReadonlySet<string> = new Set();
@@ -343,5 +376,7 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         .filter((card) => card.number !== undefined),
     })),
   }));
-  return { plugins: pluginNames.filter((name) => /^[a-z0-9-]{1,32}$/.test(name)), rooms, boards };
+  const jiraTickets = parts.flatMap((part) => part.jiraTickets ?? []).slice(0, 50)
+    .map(jiraTicket).filter((ticket): ticket is NonNullable<ReturnType<typeof jiraTicket>> => ticket !== undefined);
+  return { plugins: pluginNames.filter((name) => /^[a-z0-9-]{1,32}$/.test(name)), rooms, boards, jiraTickets };
 }

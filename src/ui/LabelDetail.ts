@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { isViewFromAbove, type ViewMode } from '../scene/Selection.js';
-import { attentionBand } from './attention.js';
+import { projectToClip } from '../scene/OffscreenMarker.js';
+import { attentionBand, type Wait } from './attention.js';
+import { declutterLabels, labelPriority, labelRect, type DeclutterCandidate } from './LabelDeclutter.js';
 
 /** `smart` shows full labels only where they matter; `all` is the original behavior. */
 export type LabelMode = 'smart' | 'all';
@@ -20,9 +22,24 @@ export const LABEL_DETAIL_INTERVAL_MS = 150;
 const COMPACT_CLASS = 'compact';
 const MODE_TEXT: Record<LabelMode, string> = { smart: 'Labels: smart (V)', all: 'Labels: all (V)' };
 
+/**
+ * A world point's screen position, in CSS pixels from the canvas top-left, or
+ * null when the point is behind the camera, past the far plane, or outside
+ * the frustum: it would never draw there, so it must never win or lose a
+ * declutter decision against a label that is actually on screen. Otherwise
+ * the same NDC-to-pixel conversion CSS2DRenderer itself uses.
+ */
+function projectToScreen(position: THREE.Vector3, camera: THREE.Camera, width: number, height: number): { x: number; y: number } | null {
+  const projection = projectToClip(position, camera);
+  if (projection.behind || projection.pastFar) return null;
+  const { x, y } = projection.ndc;
+  if (x < -1 || x > 1 || y < -1 || y > 1) return null;
+  return { x: (x + 1) / 2 * width, y: (1 - y) / 2 * height };
+}
+
 export interface LabelFacts {
   attention: string | undefined;
-  /** Minutes the agent has waited for the user, when known. A cold block gets no full label. */
+  /** Minutes the agent has waited for the user, when known. Only a fresh block forces a full label; an aging or cold block does not. */
   waitMinutes?: number;
   selected: boolean;
   hovered: boolean;
@@ -46,9 +63,19 @@ export interface LabelView {
 /** Full or compact label for one agent. Pure: no DOM, no scene. */
 export function labelDetail(facts: LabelFacts, view: LabelView): LabelLevel {
   if (view.mode === 'all') return 'full';
-  const blockedRecently = facts.attention === 'waiting' && attentionBand({ attention: facts.attention, waitMinutes: facts.waitMinutes }) !== 'cold';
+  const band = attentionBand({ attention: facts.attention, waitMinutes: facts.waitMinutes } as Wait);
+  const fromAbove = isViewFromAbove(view.viewMode);
+  // Overview or isometric: only a fresh wait (or an unknown wait time, the old
+  // behavior) forces a full label; an aging wait follows the normal zoom rule
+  // instead, so a real queue (14+ agents, almost all aging) does not force every
+  // label full and overlap the others (#132). First person keeps the original
+  // rule (any wait that is not cold forces full): the issue that prompted this
+  // relief described overview crowding only, and first person's queue spacing
+  // (1.7 m) can already overlap on screen, so an aging wait nearby must not lose
+  // its activity line and go compact there.
+  const blockedRecently = facts.attention === 'waiting' && (fromAbove ? band === undefined || band === 'fresh' : band !== 'cold');
   if (blockedRecently || facts.stuck || facts.selected || facts.hovered) return 'full';
-  if (isViewFromAbove(view.viewMode)) return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
+  if (fromAbove) return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
   return facts.distance <= FIRST_PERSON_FULL_LABEL_DISTANCE ? 'full' : 'compact';
 }
 
@@ -129,10 +156,18 @@ export function applyLabelDetail(element: HTMLElement, level: LabelLevel): boole
   return true;
 }
 
+/** Show or hide a label with `visibility`, which CSS2DRenderer leaves alone (same pattern as a sign). */
+export function applyLabelVisibility(element: HTMLElement, visible: boolean): boolean {
+  const value = visible ? '' : 'hidden';
+  if (element.style.visibility === value) return false;
+  element.style.visibility = value;
+  return true;
+}
+
 /** The part of a managed agent this module reads. */
 export interface LabelAgent {
-  info: { id: string; extras?: { attention?: string; waitMinutes?: number; stuck?: boolean } };
-  figure: { group: THREE.Object3D; label: { element: HTMLElement } };
+  info: { id: string; activity?: string; extras?: { attention?: string; waitMinutes?: number; stuck?: boolean } };
+  figure: { group: THREE.Object3D; label: { element: HTMLElement; getWorldPosition: (target: THREE.Vector3) => THREE.Vector3 } };
 }
 
 export interface LabelDetailOptions {
@@ -172,6 +207,7 @@ export class LabelDetailController {
   private lastRun = Number.NEGATIVE_INFINITY;
   private pointer: { x: number; y: number } | null = null;
   private figurePosition = new THREE.Vector3();
+  private labelPosition = new THREE.Vector3();
   private cameraPosition = new THREE.Vector3();
   private signPosition = new THREE.Vector3();
   private raycaster = new THREE.Raycaster();
@@ -208,17 +244,55 @@ export class LabelDetailController {
     const selected = this.options.selected();
     const hovered = view.mode === 'smart' ? this.hoveredAgent() : null;
     camera.getWorldPosition(this.cameraPosition);
-    for (const agent of this.options.agents()) {
+    const canvasRect = this.options.canvas.getBoundingClientRect();
+    // Declutter only in the overview and the isometric view: first person's own
+    // queue spacing can already overlap on screen, and a waiting agent you stand
+    // near must never disappear there (review fix: PR #152).
+    const canDeclutter = view.mode === 'smart' && isViewFromAbove(view.viewMode) && canvasRect.width > 0 && canvasRect.height > 0;
+    const agents = this.options.agents();
+    const candidates: DeclutterCandidate[] = [];
+    for (const agent of agents) {
       agent.figure.group.getWorldPosition(this.figurePosition);
+      const isSelected = agent.info.id === selected;
+      const isHovered = agent.info.id === hovered;
       const level = labelDetail({
         attention: agent.info.extras?.attention,
         waitMinutes: agent.info.extras?.waitMinutes,
-        selected: agent.info.id === selected,
-        hovered: agent.info.id === hovered,
+        selected: isSelected,
+        hovered: isHovered,
         distance: this.figurePosition.distanceTo(this.cameraPosition),
         stuck: agent.info.extras?.stuck,
       }, view);
       applyLabelDetail(agent.figure.label.element, level);
+      if (!canDeclutter) continue;
+      agent.figure.label.getWorldPosition(this.labelPosition);
+      const point = projectToScreen(this.labelPosition, camera, canvasRect.width, canvasRect.height);
+      if (!point) continue; // behind the camera or outside the frustum: never a candidate
+      // The label's own rendered size (set by applyLabelDetail above, this same pass), measured
+      // once here and used only for this candidate: a long name does not silently escape the
+      // fixed-size estimate. Falls back to that estimate when no real layout exists (a test, or
+      // a label not yet in a laid-out document).
+      const box = agent.figure.label.element.getBoundingClientRect();
+      candidates.push({
+        id: agent.info.id,
+        rect: labelRect(point.x, point.y, level, box.width, box.height),
+        priority: labelPriority({
+          selected: isSelected,
+          hovered: isHovered,
+          stuck: agent.info.extras?.stuck === true,
+          attention: agent.info.extras?.attention,
+          waitMinutes: agent.info.extras?.waitMinutes,
+          idle: agent.info.activity === 'idle',
+        }),
+        waitMinutes: agent.info.extras?.waitMinutes ?? -1,
+      });
+    }
+    if (canDeclutter) {
+      const visible = declutterLabels(candidates);
+      for (const agent of agents) applyLabelVisibility(agent.figure.label.element, visible.has(agent.info.id));
+    } else {
+      // `all` mode or a zero-size canvas: show every label, nothing hides.
+      for (const agent of agents) applyLabelVisibility(agent.figure.label.element, true);
     }
     this.refreshSigns(view);
   }

@@ -8,6 +8,7 @@ function world(boards: Array<{ title: string; numbers: number[] }>, plugins = ['
     plugins,
     rooms: [],
     boards: boards.map((board, i) => ({ id: `b${i}`, title: board.title, columns: [{ name: 'To do', cards: board.numbers.map((number) => ({ number, title: `t${number}` })) }] })),
+    jiraTickets: [],
   };
 }
 
