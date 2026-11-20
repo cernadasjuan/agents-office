@@ -38,16 +38,19 @@ export function createGithubPlugin(options: GithubPluginOptions = {}): OfficePlu
   const transcripts = new TranscriptIssues();
 
   /**
-   * The card names a repository only when it is a configured one and the issue
-   * was found there or the call named it (`-R`, URL). A bare number from an agent
-   * in another repository gets no name: the card then reads `#N`. The border
-   * color comes from the issue's labels on the board data (see `cardColor` in gh.ts).
+   * The card names a repository only when the call named it (`-R`, URL) and it is
+   * a configured one, or when exactly one configured repository has that issue
+   * number. A bare number that matches no board, or matches more than one, is a
+   * guess either way: the card then reads `#N` with no repository and no link.
+   * The border color comes from the issue's labels on the board data (see
+   * `cardColor` in gh.ts).
    */
   function card(ref: IssueRef): IssueCard {
     const candidates = ref.repo ? [ref.repo].filter((repo) => repos.includes(repo)) : repos;
-    for (const repo of candidates) {
-      const issue = cache.issues(repo)?.find((item) => item.number === ref.number);
-      if (!issue) continue;
+    const matches = candidates.filter((repo) => cache.issues(repo)?.some((item) => item.number === ref.number));
+    if (matches.length === 1) {
+      const [repo] = matches;
+      const issue = cache.issues(repo)!.find((item) => item.number === ref.number)!;
       const column = columnOf(issue, now());
       return { number: issue.number, title: issue.title, ...(column ? { column } : {}), repo: shortName(repo),
         ...(issue.labelColor ? { color: issue.labelColor } : {}) };
