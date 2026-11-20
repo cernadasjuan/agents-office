@@ -23,6 +23,7 @@ const { findCeilings } = await import('../src/scene/Cutaway.js');
 const { createWalls } = await import('../src/furniture/Walls.js');
 const { FrameLoop } = await import('../src/scene/FrameLoop.js');
 const { markStatic } = await import('../src/scene/StaticMerge.js');
+const { EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -176,7 +177,7 @@ function setup(hash = '', options: { figureShiftPx?: () => number; view?: 'first
   wall.userData.overviewHidden = true;
   scene.add(wall);
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
-  camera.position.set(-12, 5.5, 11);
+  camera.position.set(-12, EYE_HEIGHT, 11); // issue #174: first person settles here every frame it is grounded
   const canvas = document.createElement('canvas');
   Object.defineProperty(canvas, 'clientWidth', { value: 1600 });
   Object.defineProperty(canvas, 'clientHeight', { value: 900 });
@@ -226,7 +227,7 @@ test('key I enters the isometric view and goes back to the view before it; O fro
   assert.equal(view.mode, 'first-person');
   assert.equal(wall.visible, true);
   assert.equal(view.activeCamera, camera);
-  assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, 5.5, 11)) < 1e-6, 'first person comes back where it was');
+  assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, EYE_HEIGHT, 11)) < 1e-6, 'first person comes back where it was');
 
   press('KeyO');
   press('KeyI');
@@ -237,7 +238,7 @@ test('key I enters the isometric view and goes back to the view before it; O fro
   press('KeyO');
   assert.equal(view.mode, 'first-person');
   settle();
-  assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, 5.5, 11)) < 1e-6, 'first person survives a trip through both views');
+  assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, EYE_HEIGHT, 11)) < 1e-6, 'first person survives a trip through both views');
   assert.deepEqual(modes, ['first-person', 'isometric', 'first-person', 'overview', 'isometric', 'overview', 'first-person']);
 });
 

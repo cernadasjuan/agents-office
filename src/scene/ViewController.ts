@@ -15,7 +15,7 @@ const PAN_SPEED_PER_DISTANCE = 0.9;
 const FAST_MULTIPLIER = 2.5;
 
 export const VIEW_HINTS: Record<ViewMode, string> = {
-  'first-person': 'Click to look around — WASD to move — Space/Q up/down — Shift = fast — ESC to release — Click a figure to select — O = overview — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
+  'first-person': 'Click to look around — WASD to walk — double-tap W to run — Shift to crouch — Space to jump — ESC to release — Click a figure to select — O = overview — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
   overview: 'Overview — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — O = first person — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
   isometric: 'Isometric — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — I = back — O = overview — Shift+L = layout — N = next — F = focus — / = filter',
 };

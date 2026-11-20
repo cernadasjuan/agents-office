@@ -15,6 +15,7 @@ const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { ViewController } = await import('../src/scene/ViewController.js');
 const { SelectionState } = await import('../src/scene/Selection.js');
 const { STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
+const { EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -33,7 +34,7 @@ function setup(hash = '', figureShiftPx?: () => number, roomView?: (name: string
   wall.userData.overviewHidden = true;
   scene.add(wall);
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
-  camera.position.set(-12, 5.5, 11);
+  camera.position.set(-12, EYE_HEIGHT, 11); // issue #174: first person settles here every frame it is grounded
   const canvas = document.createElement('canvas');
   Object.defineProperty(canvas, 'clientWidth', { value: 1600 });
   Object.defineProperty(canvas, 'clientHeight', { value: 900 });
@@ -57,7 +58,7 @@ test('first person stays the default and the camera does not move by itself', ()
   const { view, camera, wall } = setup();
   view.update(1, 1 / 60);
   assert.equal(view.mode, 'first-person');
-  assert.deepEqual(camera.position.toArray(), [-12, 5.5, 11]);
+  assert.deepEqual(camera.position.toArray(), [-12, EYE_HEIGHT, 11]);
   assert.equal(wall.visible, true);
 });
 
@@ -74,7 +75,7 @@ test('key O switches to the overview and back, hiding near walls only in the ove
   for (let i = 0; i < 60; i++) view.update(1 + i / 60, 1 / 60);
   assert.equal(view.mode, 'first-person');
   assert.equal(wall.visible, true);
-  assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, 5.5, 11)) < 1e-6);
+  assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, EYE_HEIGHT, 11)) < 1e-6);
 });
 
 test('#view=overview starts in the overview', () => {
@@ -133,7 +134,9 @@ test('issue #89 review, fix round 2: #zoom=&select=wanted — a decoy selected f
 /** A room away from the default scene origin, so framing it looks different from the view's own default. */
 function fixtureRoomView(): { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } {
   const bounds = new THREE.Box3(new THREE.Vector3(20, 0, -6), new THREE.Vector3(32, 2.6, 6));
-  return { bounds, standing: { position: new THREE.Vector3(24, 1.6, 0), lookAt: new THREE.Vector3(30, 1.6, 0) } };
+  // issue #174: first person always settles at EYE_HEIGHT once grounded, so a standing
+  // fixture at any other height would never survive a single `view.update()` call.
+  return { bounds, standing: { position: new THREE.Vector3(24, EYE_HEIGHT, 0), lookAt: new THREE.Vector3(30, EYE_HEIGHT, 0) } };
 }
 
 test('issue #89: #room= frames a named room in the overview, via the active layout', () => {

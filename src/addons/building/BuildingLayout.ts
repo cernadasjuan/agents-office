@@ -13,6 +13,7 @@ import type { WorldRoom } from '../../extensions.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
 import { markStatic } from '../../scene/StaticMerge.js';
 import type { PickTarget } from '../../scene/Selection.js';
+import { FIGURE_EYE_HEIGHT } from '../../characters/StickFigureParts.js';
 
 /**
  * Work that happens at the agent's own desk. Everything else is a trip. Planning,
@@ -45,8 +46,8 @@ export const BUILDING_STORAGE_KEY = 'agents-office.building.rooms';
 const DEFAULT_DWELL_MS = 4000;
 const QUEUE_REFRESH_MS = 500;
 const ROOM_KINDS: readonly string[] = ['office', 'desks', 'library', 'lab', 'lounge'];
-/** A plausible standing eye height (issue #89, `#room=` first person), not a floor minimum like `MIN_EYE_HEIGHT`. */
-const ROOM_VIEW_EYE_HEIGHT = 1.6;
+/** A standing agent's own eye height (issue #89, `#room=` first person; issue #174 aligned this with `FreeCamera`'s own ground-walk eye height). */
+const ROOM_VIEW_EYE_HEIGHT = FIGURE_EYE_HEIGHT;
 
 /**
  * Lowercased, non-alphanumeric runs collapsed to one `-`, leading/trailing `-` trimmed

@@ -14,7 +14,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { ViewController, VIEW_HINTS } = await import('../src/scene/ViewController.js');
 const { SelectionState } = await import('../src/scene/Selection.js');
-const { updateFreeCamera, setFreeCameraLook, focusPosition, MIN_EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
+const { updateFreeCamera, setFreeCameraLook, focusPosition, EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
 const { floorUnder } = await import('../src/scene/OverviewCamera.js');
 const { chooseViewMode, rememberViewMode, viewStatusText, VIEW_STORAGE_KEY } = await import('../src/scene/ViewMemory.js');
 const { applyCeilingCut, findCeilings, CEILING_HEIGHT } = await import('../src/scene/Cutaway.js');
@@ -45,21 +45,26 @@ test('every view hint lists N, F and the filter key', () => {
   }
 });
 
-// --- Free camera: no bounding box ---
+// --- Free camera: ground-walk, no flying (issue #174) ---
 
-test('first person keeps a position far outside the old office box and above the building', () => {
+test('first person keeps x/z free outside the old office box (no horizontal bounding box)', () => {
   const camera = new THREE.PerspectiveCamera();
   setFreeCameraLook(camera, new THREE.Vector3(40, 20, -35), new THREE.Vector3(0, 0, 0));
   updateFreeCamera(camera, 1 / 30);
-  assert.deepEqual(camera.position.toArray(), [40, 20, -35]);
+  assert.equal(camera.position.x, 40);
+  assert.equal(camera.position.z, -35);
 });
 
-test('first person still cannot sink below the floor', () => {
+test('first person settles at standing eye height, never flies (issue #174, replaces the old floor-only clamp)', () => {
   const camera = new THREE.PerspectiveCamera();
+  setFreeCameraLook(camera, new THREE.Vector3(30, 20, 0), new THREE.Vector3(0, 0, 0));
+  updateFreeCamera(camera, 1 / 30);
+  assert.equal(camera.position.y, EYE_HEIGHT, 'a placement above the ground comes straight back down to standing height');
+  assert.equal(camera.position.x, 30);
+
   setFreeCameraLook(camera, new THREE.Vector3(30, -4, 0), new THREE.Vector3(0, 0, 0));
   updateFreeCamera(camera, 1 / 30);
-  assert.equal(camera.position.y, MIN_EYE_HEIGHT);
-  assert.equal(camera.position.x, 30);
+  assert.equal(camera.position.y, EYE_HEIGHT, 'a placement below the ground also settles at standing height, not at the floor');
 });
 
 // --- Fly-to: the camera ends on the agent's side of the walls ---
