@@ -7,7 +7,7 @@ import { claudeSource } from './claudeSource.js';
 import { codexSource } from './codexSource.js';
 import { attentionEnricher } from './attention.js';
 import { isOfficePlugin, pluginEntry } from './plugins.js';
-import { describeWorld, observe, projectAgents, projectWorld, type Observation, type OfficePlugin } from './seam.js';
+import { describeWorld, observe, projectAgents, projectPeek, projectWorld, VIEW_NAMES, type Observation, type OfficePlugin, type OfficeView } from './seam.js';
 import { defaultAuditLogPath, WriteActions } from './actions.js';
 import { portraitPathFrom, readPortrait } from './portrait.js';
 
@@ -80,6 +80,13 @@ function admit(server: ViteDevServer, req: IncomingMessage, res: ServerResponse,
   return true;
 }
 
+const PUBLIC_ID = /^[a-f0-9]{64}$/;
+
+function notFound(res: ServerResponse): void {
+  res.statusCode = 404;
+  res.end(JSON.stringify({ error: 'Not found' }));
+}
+
 /** True when the request names the mounted path itself, not a sub path. */
 function isExactPath(req: IncomingMessage): boolean {
   const pathname = (req.url ?? '').split('?')[0];
@@ -132,6 +139,12 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
         auditLogPath: settings.auditLogPath ?? defaultAuditLogPath(),
       }) : undefined;
       const enabledActions: ReadonlySet<string> = writeActions?.names ?? new Set();
+      // Read views (opt-in plugins, for example peek) answer for one agent of the last poll.
+      const views = new Map<string, OfficeView>();
+      for (const view of plugins.flatMap((plugin) => plugin.views ?? [])) {
+        if ((VIEW_NAMES as readonly string[]).includes(view.name) && !views.has(view.name)) views.set(view.name, view);
+      }
+      const remembersAgents = writeActions !== undefined || views.size > 0;
 
       if (writeActions) {
         server.middlewares.use((_req, res, next) => {
@@ -170,11 +183,33 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
         try {
           const { core, sources, enrichers } = pipeline();
           const observations = await observe(core, sources, enrichers);
-          if (writeActions) agentsByPublicId = new Map(observations.map((agent) => [publicId(agent.id), agent]));
+          if (remembersAgents) agentsByPublicId = new Map(observations.map((agent) => [publicId(agent.id), agent]));
           res.end(JSON.stringify(projectAgents(observations, publicId, enabledActions)));
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: 'Unable to detect agents' }));
+        }
+      });
+
+      // GET /api/views/<name>?agent=<public id>. Mounted always, so a missing view is a plain 404.
+      server.middlewares.use('/api/views', async (req, res) => {
+        if (!admit(server, req, res)) return;
+        const url = new URL(req.url ?? '/', 'http://local');
+        const view = views.get(url.pathname.replace(/^\/+|\/+$/g, ''));
+        if (!view) return notFound(res);
+        const agentId = url.searchParams.get('agent') ?? '';
+        if (!PUBLIC_ID.test(agentId)) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: 'Bad agent id' }));
+          return;
+        }
+        const agent = agentsByPublicId.get(agentId);
+        if (!agent) return notFound(res);
+        try {
+          res.end(JSON.stringify(projectPeek(await view.read(agent))));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'Unable to read the view' }));
         }
       });
 

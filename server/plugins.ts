@@ -20,5 +20,5 @@ export function isOfficePlugin(value: unknown): value is OfficePlugin {
   if (typeof value !== 'object' || value === null) return false;
   const plugin = value as Record<string, unknown>;
   return typeof plugin.name === 'string'
-    && ['sources', 'enrichers', 'world', 'actions'].every((key) => plugin[key] === undefined || Array.isArray(plugin[key]));
+    && ['sources', 'enrichers', 'world', 'actions', 'views'].every((key) => plugin[key] === undefined || Array.isArray(plugin[key]));
 }
