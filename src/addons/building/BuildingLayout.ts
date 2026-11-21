@@ -42,12 +42,13 @@ const WAR_ROOM_DESK_LIKE = new Set<Activity>(['implementing', 'reviewing', 'test
 /**
  * War-room routing (issue #126): an agent's activity maps to a piece in its own war room first.
  * A desk-like activity (not debugging) shares the room's desk grid, same as the growth rule above.
+ * Issue #209: no `idle` entry here any more — a war room has no sofa left to send it to; an
+ * idle mission agent's `targetFor` below never reaches the room branch at all.
  */
 const WAR_ROOM_STATION_FOR: Partial<Record<Activity, string>> = {
   debugging: 'debugging',
   planning: 'planning',
   researching: 'researching',
-  idle: 'idle',
 };
 for (const activity of WAR_ROOM_DESK_LIKE) WAR_ROOM_STATION_FOR[activity] = 'implementing';
 const TRIP_STATION: Partial<Record<Activity, string>> = {
@@ -486,7 +487,9 @@ export class BuildingLayout implements LayoutStrategy {
     const cold = attentionBand(agent.extras) === 'cold';
     if (!parentId && (queuesForYou(agent.extras) || (agent.activity === 'meeting' && !cold))) return 'queue';
     const room = agent.extras?.room ? this.missionRooms.get(agent.extras.room) : undefined;
-    if (!parentId && room && !room.locked) return `room:${room.id}`;
+    // Issue #209: an idle mission agent skips its own war room (no sofa there any more) and
+    // falls through to the generic `trip:idle` branch below, the main room's lounge/cafeteria.
+    if (!parentId && room && !room.locked && agent.activity !== 'idle') return `room:${room.id}`;
     const parent = parentId ? this.agents.get(parentId) : undefined;
     // Only the Librarian persona fetches from the library-knowledge shelves (issue #128):
     // a real persona-hat badge, not a name or role tag (Prospero's own review on the issue).
@@ -589,9 +592,17 @@ export class BuildingLayout implements LayoutStrategy {
    * seated posture instead, the same `postureOverride` mechanism the sofa's idle
    * seats already use (`ActivityAnimations.ts`), so a busy or idle pod subagent
    * both read as "has a place," not as a crowd that needs attention.
+   *
+   * Issue #209 review: `targetFor`'s `pod` decision reads the parent's state at the
+   * child's own dwell time, not at assign time; if the parent goes idle (leaving its
+   * room, `home` still unset — a mission parent only ever gets a `home` desk through
+   * the plain desk-work branch, never through the room branch) in the same tick its
+   * child's own pending `pod` assignment matures, `parent.home!` reads `undefined`
+   * and this throws. `parent.seat` is always set once a parent has been assigned at
+   * all, room or no room, so it is the safe fallback, not a bare `home!`.
    */
   private podKeys(parent: AgentState): string[] {
-    const anchorKey = parent.target?.startsWith('room:') && parent.seat ? parent.seat : parent.home!;
+    const anchorKey = (parent.target?.startsWith('room:') && parent.seat ? parent.seat : parent.home) ?? parent.seat!;
     const desk = this.stations.get(anchorKey)!;
     const facing = new THREE.Vector3().subVectors(desk.lookAt, desk.position).setY(0).normalize();
     const side = new THREE.Vector3(-facing.z, 0, facing.x);

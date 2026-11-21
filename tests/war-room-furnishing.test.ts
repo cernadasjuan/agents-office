@@ -56,10 +56,52 @@ test('tierFor matches the rulebook thresholds', () => {
 test('AC1: a new war room has every must-have piece, even with no agents yet', () => {
   const plan = furnishWarRoom('mission-a', ZERO);
   const names: string[] = plan.pieces.map((p) => p.piece.name);
-  for (const must of ['clock', 'whiteboard', 'bookshelf', 'sofa', 'lowTable']) {
+  for (const must of ['clock', 'whiteboard', 'bookshelf', 'desk', 'debugStation']) {
     assert.ok(names.includes(must), `missing ${must}`);
   }
   assert.ok(names.filter((n) => n === 'plant' || n === 'tallPlant').length >= 3, 'plants present');
+});
+
+// --- Issue #209: a war room is a work space only, no sofa and no coffee table ---
+
+test('issue #209: no sofa and no low table in a war room, at any count', () => {
+  for (const counts of [ZERO, { deskLike: 6, debugging: 2 }]) {
+    const plan = furnishWarRoom('mission-no-lounge', counts);
+    const names = plan.pieces.map((p) => p.piece.name);
+    assert.ok(!names.includes('sofa'), 'issue #209: no sofa in a war room');
+    assert.ok(!names.includes('lowTable'), 'issue #209: no coffee table in a war room');
+    assert.ok(!plan.stations.some((s) => s.type === 'idle'), 'issue #209: no idle station in a war room');
+  }
+});
+
+// --- Issue #209: the base work set is present even with zero agents, and never shrinks below it ---
+
+test('issue #209: an empty war room still shows the base work set (1 workstation + 1 debug station)', () => {
+  const plan = furnishWarRoom('mission-empty-209', ZERO);
+  const deskPieces = plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation');
+  assert.equal(deskPieces.length, 2, 'base work set: one workstation + one debug station');
+  assert.equal(deskPieces.filter((p) => p.piece.name === 'debugStation').length, 1);
+  assert.equal(deskPieces.filter((p) => p.piece.name === 'desk').length, 1);
+});
+
+test('issue #209: the base work set still fits clear of the door, at every off-center door position', () => {
+  for (const doorAlong of [-1, -3, 1, 3]) {
+    const plan = furnishWarRoom(`mission-empty-door-${doorAlong}`, ZERO, doorAlong);
+    const deskPieces = plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation');
+    assert.equal(deskPieces.length, 2, `base work set at doorAlong=${doorAlong}`);
+  }
+});
+
+// Review: at the room's own full slot cap (MAX_DESK_SLOTS, or fewer near an off-center door),
+// debugging headcount alone used to fill every slot and starve the base desk guaranteed above
+// (debug stations fill first). A desk must still survive once the cap, not the floor, is what
+// actually limits the grid.
+test('review: the base desk survives even when debugging headcount alone fills the room\'s full slot cap', () => {
+  for (const doorAlong of [0, -3, 3]) {
+    const plan = furnishWarRoom(`mission-debug-saturated-${doorAlong}`, { deskLike: 0, debugging: 8 }, doorAlong);
+    const names = plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation').map((p) => p.piece.name);
+    assert.ok(names.includes('desk'), `missing the base desk at doorAlong=${doorAlong}, got ${names.join(',')}`);
+  }
 });
 
 // --- AC2: the same mission id gives the same layout, on every reload ---
@@ -207,25 +249,29 @@ function meetingRoomSpots(): Rect[] {
   return spots;
 }
 
-test('no two floor-standing pieces overlap, at the full desk cap, over many seeds and door positions', () => {
+// Issue #209: the base work set (1 desk + 1 debug station, no agents counted yet) is included
+// alongside the full desk cap, so the fuzz covers both ends of the growth range, not just the top.
+test('no two floor-standing pieces overlap, at the base work set and the full desk cap, over many seeds and door positions', () => {
   const failures: string[] = [];
   const meetingSpots = meetingRoomSpots();
   for (const doorAlong of [0, -1, -3, 1, 3]) {
     for (let seed = 0; seed < 40; seed++) {
-      const plan = furnishWarRoom(`mission-overlap-${doorAlong}-${seed}`, { deskLike: 6, debugging: 2 }, doorAlong);
-      const boxes = plan.pieces.filter(standsOnFloor).map((p) => ({ name: p.piece.name, box: footprint(p) }));
-      for (let i = 0; i < boxes.length; i++) {
-        if (overlaps(boxes[i].box, TOMBSTONE_STRIP)) {
-          failures.push(`${boxes[i].name} on the tombstone strip (door=${doorAlong}, seed=${seed})`);
-        }
-        meetingSpots.forEach((spot, n) => {
-          if (overlaps(boxes[i].box, spot)) {
-            failures.push(`${boxes[i].name} on meeting-room spot ${n} (door=${doorAlong}, seed=${seed})`);
+      for (const counts of [ZERO, { deskLike: 6, debugging: 2 }]) {
+        const plan = furnishWarRoom(`mission-overlap-${doorAlong}-${seed}-${counts.deskLike}`, counts, doorAlong);
+        const boxes = plan.pieces.filter(standsOnFloor).map((p) => ({ name: p.piece.name, box: footprint(p) }));
+        for (let i = 0; i < boxes.length; i++) {
+          if (overlaps(boxes[i].box, TOMBSTONE_STRIP)) {
+            failures.push(`${boxes[i].name} on the tombstone strip (door=${doorAlong}, seed=${seed}, counts=${counts.deskLike})`);
           }
-        });
-        for (let j = i + 1; j < boxes.length; j++) {
-          if (overlaps(boxes[i].box, boxes[j].box)) {
-            failures.push(`${boxes[i].name} overlaps ${boxes[j].name} (door=${doorAlong}, seed=${seed})`);
+          meetingSpots.forEach((spot, n) => {
+            if (overlaps(boxes[i].box, spot)) {
+              failures.push(`${boxes[i].name} on meeting-room spot ${n} (door=${doorAlong}, seed=${seed}, counts=${counts.deskLike})`);
+            }
+          });
+          for (let j = i + 1; j < boxes.length; j++) {
+            if (overlaps(boxes[i].box, boxes[j].box)) {
+              failures.push(`${boxes[i].name} overlaps ${boxes[j].name} (door=${doorAlong}, seed=${seed}, counts=${counts.deskLike})`);
+            }
           }
         }
       }
@@ -241,20 +287,6 @@ test('every piece in a war room plan is a factory from the furniture library', (
   }
 });
 
-// --- Issue #126 review round 2: an idle station must sit on the sofa's own footprint, not
-// beside it; the sofa's turn (a rotated piece) changes which axis its width and depth run
-// along, and the two offsets must follow that turn, not a fixed, untouched pair of axes ---
-
-test('both idle stations sit inside the sofa\'s own footprint, in every seed', () => {
-  for (let seed = 0; seed < 20; seed++) {
-    const plan = furnishWarRoom(`mission-sofa-${seed}`, { deskLike: 2, debugging: 0 });
-    const sofa = plan.pieces.find((p) => p.piece.name === 'sofa')!;
-    const box = footprint(sofa);
-    const idleStations = plan.stations.filter((s) => s.type === 'idle');
-    assert.equal(idleStations.length, 2);
-    for (const spot of idleStations) {
-      assert.ok(spot.a >= box.minA && spot.a <= box.maxA && spot.d >= box.minD && spot.d <= box.maxD,
-        `idle spot (${spot.a.toFixed(2)}, ${spot.d.toFixed(2)}) is outside the sofa's footprint (seed ${seed})`);
-    }
-  }
-});
+// Issue #209 retired the war room's sofa and its idle stations (the #126 review round 2
+// sofa-footprint test above this used to cover); an idle mission agent now goes to the main
+// room's lounge instead, covered in `tests/building.test.ts`.
