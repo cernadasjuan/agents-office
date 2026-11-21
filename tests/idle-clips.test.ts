@@ -42,27 +42,53 @@ test('an idle figure holds its base pose for a good while before any clip plays'
   assert.ok(Math.abs(joints.neck.rotation.z) < 0.05, `neck still level: ${joints.neck.rotation.z}`);
 });
 
+/**
+ * Review fix: the original version of this test set `sawClip` on the very
+ * first simulated frame, from the settle-in ease alone (rotation.x starts at
+ * 0 and eases toward -1.2 over about 0.4s) — no scheduled clip could start
+ * that early, so the assertion passed even with the clip feature removed
+ * entirely. This version fixes the figure's uuid (so the schedule is
+ * reproducible), settles fully first without checking, asserts the held
+ * pose stays exactly put through the whole gap the config guarantees (up to
+ * `minGap`, 45s), and only then watches for the first real deviation.
+ */
+function isHeldPose(joints: ReturnType<typeof buildSkeleton>): boolean {
+  return Math.abs(joints.rightUpperArm.rotation.x - -1.2) < 0.05 && Math.abs(joints.neck.rotation.z) < 0.05;
+}
+
 test('an idle figure eventually plays a clip, then returns to the held base pose', () => {
   const joints = buildSkeleton(new THREE.Color(0x4a90d9));
+  joints.root.uuid = 'fixture-idle-clip-1';
+
+  // Settle fully first (not checked): the ease-in from rest must never read as a clip.
+  let t = hold(joints, 'idle', 0, 3);
+  assert.ok(isHeldPose(joints), 'not yet settled on the held pose after 3s');
+
+  // The config guarantees at least 45s (minGap) before any clip can start: no deviation here.
+  t = hold(joints, 'idle', t, 44 - 3);
+  assert.ok(isHeldPose(joints), 'a clip started before the configured minimum gap');
+
+  // Watch for the first real deviation, stopping the instant it appears.
   let sawClip = false;
-  let t = 0;
-  // minGap is 45s; run well past the maxGap (90s) to be sure one clip starts.
   for (; t < 150; t += FRAME) {
     animateActivity(joints, 'idle', t, FRAME);
-    const holdingCup = Math.abs(joints.rightUpperArm.rotation.x - -1.2) < 0.05 && Math.abs(joints.neck.rotation.z) < 0.05;
-    if (!holdingCup) sawClip = true;
+    if (!isHeldPose(joints)) { sawClip = true; break; }
   }
-  assert.ok(sawClip, 'no clip played in 150 simulated seconds');
+  assert.ok(sawClip, 'no clip played by 150 simulated seconds, for this fixed uuid');
 
-  // After the clip ends it settles back to the same held pose, same as #163.
-  hold(joints, 'idle', t, 5);
-  assert.ok(Math.abs(joints.rightUpperArm.rotation.x - -1.2) < 0.05, `back on the held pose: ${joints.rightUpperArm.rotation.x}`);
-  assert.ok(Math.abs(joints.neck.rotation.z) < 0.05, `neck back level: ${joints.neck.rotation.z}`);
+  // The clip lasts at most its configured duration (1.6s); 3 more seconds clears it with
+  // margin, and stays well short of the next scheduled clip (at least 45s further out).
+  t = hold(joints, 'idle', t, 3);
+  assert.ok(isHeldPose(joints), `back on the held pose: rightUpperArm.x=${joints.rightUpperArm.rotation.x}, neck.z=${joints.neck.rotation.z}`);
 });
 
 test('two idle figures with different skeletons (so different seeds) do not start their first clip at the same instant', () => {
   const a = buildSkeleton(new THREE.Color(0x4a90d9));
   const b = buildSkeleton(new THREE.Color(0xe08a3c));
+  // Fixed, distinct uuids: a real THREE uuid is random per run, which could coincidentally
+  // draw the same gap for both figures and make this assertion flaky (review fix spirit).
+  a.root.uuid = 'fixture-lockstep-a';
+  b.root.uuid = 'fixture-lockstep-b';
   let startA = -1;
   let startB = -1;
   const held = () => ({
@@ -80,6 +106,53 @@ test('two idle figures with different skeletons (so different seeds) do not star
   }
   assert.ok(startA >= 0 && startB >= 0, 'both figures should have played a clip by 150s');
   assert.notEqual(startA.toFixed(2), startB.toFixed(2), 'two different figures should not draw the same start time');
+});
+
+// --- Review fix 1: a clip never plays on a figure a raised hand or hands-on-hips owns ---
+
+test('a raised hand suppresses the idle clip entirely: the left arm and neck never leave their resting values', () => {
+  const joints = buildSkeleton(new THREE.Color(0x4a90d9));
+  joints.root.uuid = 'fixture-2'; // draws the stretch clip first, which moves the left arm and neck
+  let t = 0;
+  // Run well past several clip windows (minGap 45s, up to 90s apart): with the fix, none ever play.
+  for (; t < 200; t += FRAME) animateActivity(joints, 'idle', t, FRAME, undefined, true);
+  assert.ok(Math.abs(joints.leftUpperArm.rotation.x - 0.1) < 0.05, `left arm strayed from rest: ${joints.leftUpperArm.rotation.x}`);
+  assert.ok(Math.abs(joints.neck.rotation.z) < 0.05, `neck strayed from rest: ${joints.neck.rotation.z}`);
+  // The right arm is the raised-hand's own: it is expected to be up, not at the held pose.
+  assert.ok(joints.rightUpperArm.rotation.x < -2.5, 'the raised hand itself still works');
+});
+
+test('hands-on-hips suppresses the idle clip entirely: both arms stay on the hips pose, never a clip target', () => {
+  const joints = buildSkeleton(new THREE.Color(0x4a90d9));
+  joints.root.uuid = 'fixture-2';
+  let t = 0;
+  for (; t < 200; t += FRAME) animateActivity(joints, 'idle', t, FRAME, undefined, false, true);
+  // The hands-on-hips pose (`animateHandsOnHips`), the same bilateral fold the existing
+  // orchestrating test in activity-animations.test.ts checks: never the stretch clip's -2.6.
+  assert.ok(joints.leftUpperArm.rotation.x > -1, `left arm reached a clip angle: ${joints.leftUpperArm.rotation.x}`);
+  assert.ok(joints.rightUpperArm.rotation.x > -1, `right arm reached a clip angle: ${joints.rightUpperArm.rotation.x}`);
+  assert.ok(joints.leftUpperArm.rotation.z > 0.1, 'left arm folds in toward the hip, same direction as the orchestrating test');
+  assert.ok(joints.rightUpperArm.rotation.z < -0.1, 'right arm folds in toward the hip, same direction as the orchestrating test');
+});
+
+// --- Review fix 3: a clip owns its joints while it plays; the base pose does not fight it ---
+
+test('the stretch clip reaches its own target, not a compromise with the held pose fighting it', () => {
+  const joints = buildSkeleton(new THREE.Color(0x4a90d9));
+  // This fixed uuid draws the stretch clip (the one that moves the left arm) first, starting
+  // at t=59.41 by the same formula `occasionalVariant` uses (minGap 45 + a seeded fraction of
+  // the 45s span). Stop well before that so the unconditional settle-in never runs past it.
+  joints.root.uuid = 'fixture-2';
+  let t = hold(joints, 'idle', 0, 55);
+  assert.ok(Math.abs(joints.leftUpperArm.rotation.x - 0.1) < 0.05, 'still on the held pose before the clip starts');
+
+  // Run until the stretch clip visibly starts (left arm leaves its resting 0.1), then
+  // check it reaches close to -2.6, not a halfway point a fighting base pose would leave it at.
+  for (; t < 65; t += FRAME) {
+    animateActivity(joints, 'idle', t, FRAME);
+    if (joints.leftUpperArm.rotation.x < -2.4) break;
+  }
+  assert.ok(joints.leftUpperArm.rotation.x < -2.4, `the stretch never got close to its target: ${joints.leftUpperArm.rotation.x}`);
 });
 
 test('testing occasionally prays instead of watching with crossed arms, Gabriel\'s favorite new one', () => {

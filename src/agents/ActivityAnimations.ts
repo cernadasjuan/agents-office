@@ -244,7 +244,12 @@ export function animateActivity(
   const hips = !raiseHand && orchestrating
     ? [joints.leftUpperArm.rotation.clone(), joints.leftForearm.rotation.clone(), joints.rightUpperArm.rotation.clone(), joints.rightForearm.rotation.clone()]
     : null;
-  animateActivityPose(joints, activity, elapsed, delta);
+  // Review fix (#164): either override owns an arm (or both) that an idle/testing/planning
+  // clip also reaches for (the other arm, or the neck). Saving and restoring only the
+  // joints each override names let a clip still move the rest mid-override; the clip
+  // scheduler itself must not run at all while either override is active, so its own
+  // clock keeps waiting rather than drawing and losing a clip.
+  animateActivityPose(joints, activity, elapsed, delta, raiseHand || orchestrating);
   if (rightArm) {
     joints.rightUpperArm.rotation.copy(rightArm[0]);
     joints.rightForearm.rotation.copy(rightArm[1]);
@@ -275,13 +280,14 @@ function animateHandsOnHips(j: Joints, dt: number): void {
   j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -1.9, dt);
 }
 
-function animateActivityPose(joints: Joints, activity: Activity, elapsed: number, delta: number): void {
+/** `suppressVariant`: true while a raised hand or hands-on-hips owns an arm the clip scheduler would also reach for (#164 review fix). */
+function animateActivityPose(joints: Joints, activity: Activity, elapsed: number, delta: number, suppressVariant: boolean): void {
   switch (activity) {
     case 'idle':
-      animateIdle(joints, elapsed, delta);
+      animateIdle(joints, elapsed, delta, suppressVariant);
       break;
     case 'planning':
-      animatePlanning(joints, elapsed, delta);
+      animatePlanning(joints, elapsed, delta, suppressVariant);
       break;
     case 'implementing':
       animateImplementing(joints, elapsed, delta);
@@ -290,7 +296,7 @@ function animateActivityPose(joints: Joints, activity: Activity, elapsed: number
       animateResearching(joints, elapsed, delta);
       break;
     case 'testing':
-      animateTesting(joints, elapsed, delta);
+      animateTesting(joints, elapsed, delta, suppressVariant);
       break;
     case 'debugging':
       animateDebugging(joints, elapsed, delta);
@@ -353,11 +359,28 @@ const IDLE_CLIPS: Array<(j: Joints, t: number, dt: number) => void> = [
  * coffee machine or on open floor (no idle seat was free, #164): an overflow
  * standing idle figure is not a special case, it reads the same "taking a
  * break" as a seated one, clips included.
+ *
+ * `suppressVariant` (review fix): a raised hand or hands-on-hips already owns
+ * an arm a clip would also reach for. Rather than save and restore every
+ * joint a clip could touch, the clip scheduler does not run at all while
+ * either override is active — its own clock keeps waiting, so nothing is
+ * lost, a clip simply never starts (or shows) during an override.
+ *
+ * Review fix: the clip owns every joint it drives for the frames it plays.
+ * The base held pose and a clip used to both write the same joints every
+ * frame (base, then the clip on top), so the two targets fought and a clip
+ * like the stretch settled around half its real angle. Below, exactly one of
+ * the two branches runs per frame on those joints.
  */
-function animateIdle(j: Joints, t: number, dt: number): void {
+function animateIdle(j: Joints, t: number, dt: number, suppressVariant = false): void {
   applyStandingBase(j, dt);
-
   j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
+
+  const clip = suppressVariant ? -1 : occasionalVariant(j.root, 'idle', t, IDLE_CLIP_CONFIG);
+  if (clip >= 0) {
+    IDLE_CLIPS[clip](j, t, dt);
+    return;
+  }
 
   // Base pose: holding a coffee cup.
   j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -1.2, dt);
@@ -367,10 +390,6 @@ function animateIdle(j: Joints, t: number, dt: number): void {
   j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -0.1, dt);
 
   j.neck.rotation.z = approach(j.neck.rotation.z, 0, dt);
-
-  // #164: an occasional canned clip on top of the held pose.
-  const clip = occasionalVariant(j.root, 'idle', t, IDLE_CLIP_CONFIG);
-  if (clip >= 0) IDLE_CLIPS[clip](j, t, dt);
 }
 
 /** #164: now and then, sketches on a notepad instead of the whiteboard: hands lower, closer to the body. */
@@ -389,8 +408,16 @@ function applyDrawing(j: Joints, t: number, dt: number): void {
 }
 
 // --- PLANNING: Writing on whiteboard ---
-function animatePlanning(j: Joints, t: number, dt: number): void {
+function animatePlanning(j: Joints, t: number, dt: number, suppressVariant = false): void {
   applyStandingBase(j, dt);
+  j.neck.rotation.z = approach(j.neck.rotation.z, Math.sin(t * 1.5) * 0.05, dt);
+  j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
+
+  const clip = suppressVariant ? -1 : occasionalVariant(j.root, 'planning', t, PLANNING_VARIANT_CONFIG);
+  if (clip >= 0) {
+    applyDrawing(j, t, dt);
+    return;
+  }
 
   const writeX = Math.sin(t * 3) * 0.3;
   const writeY = Math.cos(t * 2.1) * 0.15;
@@ -402,11 +429,6 @@ function animatePlanning(j: Joints, t: number, dt: number): void {
   j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -0.2, dt);
 
   j.neck.rotation.x = approach(j.neck.rotation.x, -0.2, dt);
-  j.neck.rotation.z = approach(j.neck.rotation.z, Math.sin(t * 1.5) * 0.05, dt);
-
-  j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
-
-  if (occasionalVariant(j.root, 'planning', t, PLANNING_VARIANT_CONFIG) >= 0) applyDrawing(j, t, dt);
 }
 
 // --- IMPLEMENTING: Typing at keyboard ---
@@ -460,8 +482,16 @@ function applyPraying(j: Joints, dt: number): void {
 }
 
 // --- TESTING: Arms crossed, watching monitor ---
-function animateTesting(j: Joints, t: number, dt: number): void {
+function animateTesting(j: Joints, t: number, dt: number, suppressVariant = false): void {
   applyStandingBase(j, dt);
+  j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
+  j.neck.rotation.z = approach(j.neck.rotation.z, 0, dt);
+
+  const clip = suppressVariant ? -1 : occasionalVariant(j.root, 'testing', t, TESTING_VARIANT_CONFIG);
+  if (clip >= 0) {
+    applyPraying(j, dt);
+    return;
+  }
 
   j.leftUpperArm.rotation.x = approach(j.leftUpperArm.rotation.x, -1.2, dt);
   j.leftUpperArm.rotation.z = approach(j.leftUpperArm.rotation.z, 0.5, dt);
@@ -471,12 +501,7 @@ function animateTesting(j: Joints, t: number, dt: number): void {
   j.rightUpperArm.rotation.z = approach(j.rightUpperArm.rotation.z, -0.5, dt);
   j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -1.5, dt);
 
-  j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
-
   j.neck.rotation.x = approach(j.neck.rotation.x, -0.1, dt);
-  j.neck.rotation.z = approach(j.neck.rotation.z, 0, dt);
-
-  if (occasionalVariant(j.root, 'testing', t, TESTING_VARIANT_CONFIG) >= 0) applyPraying(j, dt);
 }
 
 // --- DEBUGGING: Scratching head, looking at red screen ---
