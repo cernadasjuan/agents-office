@@ -256,6 +256,34 @@ test('a mission issue keeps a clean owner/repo, and drops one that does not matc
   ]);
 });
 
+// --- Issue #191: a room/board's own `repo` tag (RoomInput/BoardInput) ---
+
+test('a room or board keeps a clean owner/repo tag, or a bare short name, and drops anything else', () => {
+  const world = projectWorld([
+    { rooms: [{ key: 'm-1', kind: 'mission', title: 'Clean owner/repo', state: 'open', repo: 'gabriel-amyot/agents-office', walls: {} }] },
+    { rooms: [{ key: 'm-2', kind: 'mission', title: 'Bare short name', state: 'open', repo: 'agents-office', walls: {} }] },
+    { boards: [{ key: 'b-1', title: 'Clean board', columns: [], repo: 'gabriel-amyot/agents-office' }] },
+  ], ['missions', 'github'], publicId);
+
+  assert.equal(world.rooms[0].repo, 'gabriel-amyot/agents-office');
+  assert.equal(world.rooms[1].repo, 'agents-office');
+  assert.equal(world.boards[0].repo, 'gabriel-amyot/agents-office');
+});
+
+test('a repo tag with a "." or ".." segment is dropped, never reaching the client (issue #191 review nit: the owner/repo whitelist only rejected the literal "./.", not a general relative segment)', () => {
+  const world = projectWorld([
+    { rooms: [{ key: 'm-1', kind: 'mission', title: 'Dotdot owner', state: 'open', repo: '../private', walls: {} }] },
+    { rooms: [{ key: 'm-2', kind: 'mission', title: 'Dot owner', state: 'open', repo: './secret', walls: {} }] },
+    { rooms: [{ key: 'm-3', kind: 'mission', title: 'Dotdot repo', state: 'open', repo: 'owner/..', walls: {} }] },
+    { boards: [{ key: 'b-1', title: 'Dotdot board', columns: [], repo: '../private' }] },
+  ], ['missions', 'github'], publicId);
+
+  assert.equal('repo' in world.rooms[0], false);
+  assert.equal('repo' in world.rooms[1], false);
+  assert.equal('repo' in world.rooms[2], false);
+  assert.equal('repo' in world.boards[0], false);
+});
+
 test('plugin names cannot leave the plugins folder', () => {
   assert.deepEqual(parsePluginNames('herdr, ../etc,missions,herdr,BAD'), ['herdr', 'missions']);
   assert.equal(pluginEntry('/tmp/plugins', '../escape'), null);

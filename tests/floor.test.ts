@@ -159,6 +159,15 @@ test('a repo whose config has no origin remote, or an unparsable url, falls back
   assert.equal(new FloorResolver().resolve(badUrl), 'projects/bad-url');
 });
 
+test('an oversized .git/config falls back to the parent-dir qualifier rather than being read in full (issue #191 review nit: a size cap, like the worktree-file reader\'s own bounded read)', () => {
+  const repo = makeRepo('oversized-config', 'projects');
+  // A real `[remote "origin"]` section is in here too, so a successful read-without-a-cap
+  // would otherwise resolve a real owner/repo — the point is that it never gets the chance.
+  const filler = '#'.repeat(200_000);
+  fs.writeFileSync(path.join(repo, '.git', 'config'), `${filler}\n[remote "origin"]\n\turl = https://github.com/gabriel-amyot/agents-office.git\n`);
+  assert.equal(new FloorResolver().resolve(repo), 'projects/oversized-config');
+});
+
 test('a worktree resolves its main repository\'s own remote owner/repo, not the worktree directory', () => {
   const mainRepo = makeRepoWithRemote('worktree-main-repo', 'https://github.com/gabriel-amyot/agents-office.git', 'projects');
   const worktree = makeWorktree(mainRepo, '191-floors-step2');

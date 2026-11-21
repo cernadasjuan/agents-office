@@ -82,14 +82,22 @@ function ownerRepoFromRemote(url: string): string | undefined {
   return validSegment(owner) && validSegment(repo) ? `${owner}/${repo}` : undefined;
 }
 
+/** A real git config is a handful of lines; anything past this is never read at all (review
+ * nit: the worktree-file reader right above already bounds its own read the same way). */
+const MAX_GIT_CONFIG_BYTES = 65_536;
+
 /** A repo directory's own remote owner/repo, read straight from its `.git/config` (never a
  * shell-out: `server/floor.ts` is core, not an opt-in plugin, and P-no-shell applies everywhere
  * here, not only inside a plugin). Undefined on any read or parse failure — a repo with no
- * `.git/config`, no `origin` remote, or an unparsable URL, falls back to the parent-dir
- * qualifier below, exactly as before this existed. */
+ * `.git/config`, a config that is not a plain file, one over `MAX_GIT_CONFIG_BYTES`, no
+ * `origin` remote, or an unparsable URL, falls back to the parent-dir qualifier below, exactly
+ * as before this existed. */
 function remoteOwnerRepo(repoDir: string): string | undefined {
+  const configPath = path.join(repoDir, '.git', 'config');
   try {
-    const url = originUrl(fs.readFileSync(path.join(repoDir, '.git', 'config'), 'utf8'));
+    const stat = fs.lstatSync(configPath);
+    if (!stat.isFile() || stat.size > MAX_GIT_CONFIG_BYTES) return undefined;
+    const url = originUrl(fs.readFileSync(configPath, 'utf8'));
     return url ? ownerRepoFromRemote(url) : undefined;
   } catch {
     return undefined;

@@ -88,6 +88,22 @@ export function knownFloors(agents: ReadonlyArray<{ floor?: string }>): string[]
 }
 
 /**
+ * Whether a previously chosen floor is still among the floors any currently observed agent
+ * resolves to (issue #191 review, blocking). A floor a user already focused can stop existing
+ * under that exact name — the remote-naming revision renamed every repo with a remote, for
+ * example `projects/agents-office` to `gabriel-amyot/agents-office` — while the stored or
+ * hashed name stays the old one. Without this check, `AgentPoller`'s own exact-equality floor
+ * filter (`a.floor === this.focusFloor`) would keep zero agents, and a focused floor filters
+ * `BuildingLayout`'s rooms and `plugins/github/client.ts`'s boards the same way: the whole
+ * building goes empty with no error, not a graceful "nothing matched." `GENERAL_FLOOR` is
+ * always known (`knownFloors` always includes it), so this is only ever false for a specific
+ * renamed or otherwise vanished floor — never for the shared general floor.
+ */
+export function floorStillKnown(floor: string, agents: ReadonlyArray<{ floor?: string }>): boolean {
+  return knownFloors(agents).includes(floor);
+}
+
+/**
  * The floor to focus: `#floor=` in the URL first (an explicit link always wins, the same
  * URL-first order `chooseViewMode`/`chooseLayoutId` already use), then the last floor the
  * user visited, else `ALL_FLOORS` (review: a fresh page load has not polled any agent yet,

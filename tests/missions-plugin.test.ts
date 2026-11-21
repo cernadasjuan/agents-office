@@ -134,9 +134,9 @@ test('with no GitHub reference and a root whose own git remote resolves one, the
   }
 });
 
-test('with no GitHub reference and a root that resolves to no repo at all, a mission tags the general floor', () => {
+test('with no GitHub reference and a root that resolves to no repo at all, a mission carries no repo tag (issue #191 review: "general" is itself a selectable floor, so tagging it there would wrongly pull every such mission in when a user actually focuses general)', () => {
   const mission = summarizeMission('x', { title: 'No GH ref, no repo' }, root);
-  assert.equal(mission?.repo, 'general');
+  assert.ok(!('repo' in mission!));
 });
 
 test('with no GitHub reference and no root given, a mission carries no repo tag', () => {

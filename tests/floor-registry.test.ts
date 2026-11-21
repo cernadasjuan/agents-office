@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  ALL_FLOORS, defaultFloor, floorFromHash, floorRepo, floorRoomsStorageKey, GENERAL_FLOOR, isFloorName,
-  knownFloors, LEGACY_ROOMS_KEY, matchesFloor, reloadForFloorSwitch, rememberFloor,
+  ALL_FLOORS, defaultFloor, floorFromHash, floorRepo, floorRoomsStorageKey, floorStillKnown, GENERAL_FLOOR,
+  isFloorName, knownFloors, LEGACY_ROOMS_KEY, matchesFloor, reloadForFloorSwitch, rememberFloor,
 } from '../src/floors/FloorRegistry.js';
 
 function memoryStorage(initial: Record<string, string> = {}): { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void; data: Map<string, string> } {
@@ -70,6 +70,22 @@ test('knownFloors lists every floor with a tracked session plus general, sorted,
 
 test('knownFloors always includes general even with zero agents', () => {
   assert.deepEqual(knownFloors([]), [GENERAL_FLOOR]);
+});
+
+// --- floorStillKnown (issue #191 review, blocking: a floor renamed since it was last chosen —
+// the remote-naming revision renamed every repo with a remote — must fall back to All floors,
+// never silently filter the whole building down to nothing) ---
+
+test('floorStillKnown is true for a floor at least one currently observed agent resolves to', () => {
+  assert.equal(floorStillKnown('agents-office', [{ floor: 'agents-office' }, { floor: 'widget-service' }]), true);
+});
+
+test('floorStillKnown is true for the general floor even with zero agents (knownFloors always includes it)', () => {
+  assert.equal(floorStillKnown(GENERAL_FLOOR, []), true);
+});
+
+test('floorStillKnown is false for a stored floor no agent currently resolves to (the exact renamed-floor case)', () => {
+  assert.equal(floorStillKnown('projects/agents-office', [{ floor: 'gabriel-amyot/agents-office' }]), false);
 });
 
 // --- defaultFloor ---

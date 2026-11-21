@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
-import { FloorResolver } from '../../server/floor.js';
+import { FloorResolver, GENERAL_FLOOR } from '../../server/floor.js';
 import type { Enricher, Observation, OfficePlugin, RoomInput, WorldProvider } from '../../server/seam.js';
 import { EMPTY_GITHUB_CONFIG, parseGithubConfig, readSessionStory, SESSION_SLUG, type GithubConfig } from './sessionStoryReader.js';
 
@@ -42,9 +42,10 @@ export interface MissionSummary {
   closedAt?: string;
   /** The mission's own repo, for the focused floor to scope its war room by (issue #191): its
    * `root_issue`'s own `owner/repo`, else its first GitHub member's, else — with neither — the
-   * mission's own root directory's floor (`'general'` when that root resolves to no repo at
-   * all). Absent only when no root was given either (`summarizeMission` called directly, with
-   * nothing to fall back to). */
+   * mission's own root directory's floor. Absent when no root was given either, or when that
+   * root resolves to no repo at all (`GENERAL_FLOOR`): `'general'` is itself a selectable
+   * floor, so tagging it there would wrongly pull in every such mission once a user actually
+   * focuses it — an unresolved repo shows on `ALL_FLOORS` only. */
   repo?: string;
 }
 
@@ -100,8 +101,10 @@ function threadNumber(id: unknown): number | undefined {
  * an exact comparison against an org-qualified floor). With neither, it falls back to `root`'s
  * own floor (the mission record's directory, resolved the same way a session's cwd is, so it
  * may itself be `owner/repo` when that directory's own git remote resolves one). `undefined`
- * only when no root was given either, the shape `summarizeMission`'s direct callers (every
- * existing test) already use.
+ * when no root was given either, or when the root resolves to `GENERAL_FLOOR` (review,
+ * blocking: `'general'` is itself a selectable floor, not "no repo" — tagging a mission with it
+ * would pull every such mission in the moment a user actually focuses the general floor, the
+ * exact wrong-guess this field must never make; an unresolved repo shows on `ALL_FLOORS` only).
  */
 function missionRepo(mission: Record<string, unknown>, root: string | undefined): string | undefined {
   const fromRootIssue = rootIssue(mission)?.repo;
@@ -109,7 +112,9 @@ function missionRepo(mission: Record<string, unknown>, root: string | undefined)
   const member = list(mission.members).find((m) => text(m.kind) === 'gh' && issueRef(m.ref)?.repo);
   const fromMember = member ? issueRef(member.ref)?.repo : undefined;
   if (fromMember) return fromMember;
-  return root ? floorResolver.resolve(root) : undefined;
+  if (!root) return undefined;
+  const floor = floorResolver.resolve(root);
+  return floor === GENERAL_FLOOR ? undefined : floor;
 }
 
 /** Turn one mission record into what its room shows. Unknown or missing fields give empty walls.

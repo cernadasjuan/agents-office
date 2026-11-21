@@ -121,18 +121,24 @@ test('on a specific floor, only the board whose repo matches the focused floor h
   const tagged = (repo: string) => ({ ...board(repo), repo });
 
   setFocusedFloor('agents-office');
+  drawn.length = 0;
   extension.worldChanged(world([tagged('agents-office'), tagged('widget-service')]));
   assert.equal(boards().length, 1);
+  assert.ok(drawn.includes('agents-office') && !drawn.includes('widget-service'), 'the matching board survived, not just any one board');
 
   setFocusedFloor('gabriel-amyot/agents-office');
   extension.worldChanged(world([]));
+  drawn.length = 0;
   extension.worldChanged(world([tagged('agents-office'), tagged('widget-service')]));
   assert.equal(boards().length, 1, 'an org-qualified floor still matches the bare repo tag');
+  assert.ok(drawn.includes('agents-office') && !drawn.includes('widget-service'));
 
   setFocusedFloor(ALL_FLOORS);
   extension.worldChanged(world([]));
+  drawn.length = 0;
   extension.worldChanged(world([tagged('agents-office'), tagged('widget-service')]));
   assert.equal(boards().length, 2);
+  assert.ok(drawn.includes('agents-office') && drawn.includes('widget-service'));
 });
 
 // --- Badges on the shoulders and upper arms, upright and facing the camera (issue #77) ---

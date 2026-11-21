@@ -378,17 +378,31 @@ test('agents of a mission work in its war room, their helpers stand near them, a
 
 // --- Issue #191: a floor shows only its own mission war rooms ---
 
+/** The title text actually drawn on a built mission room's own label, by its scene index
+ * (`mission-room-<n>`, `buildMissionRoom`'s own naming) — identity, not just a count (review:
+ * a filter that kept the wrong room would still pass a count-only assertion). */
+function missionRoomTitles(scene: THREE.Scene, count: number): string[] {
+  return Array.from({ length: count }, (_, index) => {
+    const group = scene.getObjectByName(`mission-room-${index}`)!;
+    let title: string | undefined;
+    group.traverse((child) => { if (child.name === 'room-label') title = child.userData.roomLabel as string; });
+    return title!;
+  });
+}
+
 test('on a specific floor, only a mission room whose repo matches it is built; "all floors" keeps building every one', () => {
-  const widget = { ...missionRoom(), id: 'room-2', repo: 'widget-service' };
-  const own = { ...missionRoom(), repo: 'agents-office' };
+  const widget = { ...missionRoom(), id: 'room-2', title: 'Widget migration', repo: 'widget-service' };
+  const own = { ...missionRoom(), title: 'Office roadmap', repo: 'agents-office' };
 
   const onFloor = setup(new Map(), 'agents-office');
   onFloor.layout.syncWorldRooms([own, widget]);
   assert.equal(onFloor.layout.missionRoomCount, 1);
+  assert.deepEqual(missionRoomTitles(onFloor.scene, 1), ['Office roadmap'], 'the matching room survived, not just any one room');
 
   const allFloors = setup();
   allFloors.layout.syncWorldRooms([own, widget]);
   assert.equal(allFloors.layout.missionRoomCount, 2);
+  assert.deepEqual(missionRoomTitles(allFloors.scene, 2), ['Office roadmap', 'Widget migration']);
 });
 
 test('an org-qualified floor still matches a mission tagged with the bare repo name', () => {

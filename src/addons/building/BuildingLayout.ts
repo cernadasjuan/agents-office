@@ -743,6 +743,16 @@ export class BuildingLayout implements LayoutStrategy {
    * a floor that already has its own room list is never overwritten, and the legacy key itself
    * is left behind, read but never deleted or rewritten (review: a dual-read path was explicitly
    * ruled out by the design, but "leave the key behind" still means never touching it).
+   *
+   * Not covered (issue #191 review, documented rather than fixed): a floor renamed after a user
+   * already grew its room list there — the remote-naming revision renamed every repo with a
+   * remote, `projects/agents-office` to `gabriel-amyot/agents-office` for example — has no
+   * migration from the old `floorStorageKey` to the new one. The client never sees a repo's raw
+   * directory path (S4), so it has no way to recompute what the old parent-dir-qualified name
+   * would have been from the new one; only the server, which resolved both, could have made
+   * that link, and it only ever hands the client the final name. A renamed floor's grown rooms
+   * (beyond office and library) regrow from scratch under the new name, the same cold-start
+   * experience a floor gets the first time it is ever focused.
    */
   private migrateLegacyRooms(): void {
     if (this.floor === undefined) return;

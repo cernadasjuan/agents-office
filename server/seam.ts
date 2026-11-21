@@ -381,20 +381,27 @@ function projectStory(input: SessionStoryInput | undefined) {
 
 const OWNER_REPO = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
 
-/** A full `owner/name` pair, or undefined when the value does not match that shape. */
+/** A full `owner/name` pair, or undefined when the value does not match that shape. Neither
+ * segment may be `.` or `..` (review, issue #191: the shape alone, both sides drawn from the
+ * same character class the floor-name whitelist uses, admits a relative segment like `../x` or
+ * `owner/..` — the same rule `floorName` already applies segment-wise, not just to the one
+ * literal `'./.'` string this used to special-case). */
 function ownerRepo(value: unknown): string | undefined {
-  return typeof value === 'string' && OWNER_REPO.test(value) && value !== './.' ? value : undefined;
+  if (typeof value !== 'string' || !OWNER_REPO.test(value)) return undefined;
+  return value.split('/').some((segment) => segment === '.' || segment === '..') ? undefined : value;
 }
 
 /**
  * A `RoomInput`/`BoardInput` repo tag (issue #191 revision): a full `owner/repo` pair kept
- * whole when the value already has that shape, else the bare short name. Never `repoShortName`
- * alone for a value that already carries an owner: that function keeps only the text after the
- * *last* slash and would silently destroy the owner half `matchesFloor`
- * (`src/floors/FloorRegistry.ts`) needs for an exact comparison against an org-qualified floor.
+ * whole when the value already has that shape, else the bare short name. A value with a slash
+ * must pass the stricter `ownerRepo` whitelist outright, or is dropped whole — review, blocking:
+ * falling through to `repoShortName` for a value that merely *contains* a slash would keep only
+ * the text after its *last* one, silently admitting the tail of a rejected value like
+ * `../private` (owner `..`, repo `private`) as a seemingly clean bare name. `repoShortName`
+ * only ever runs on a value with no slash at all, the bare-name case it is actually for.
  */
 function repoTag(value: unknown): string | undefined {
-  return ownerRepo(value) ?? repoShortName(value);
+  return typeof value === 'string' && value.includes('/') ? ownerRepo(value) : repoShortName(value);
 }
 
 const HEX_COLOR = /^#?([0-9A-Fa-f]{6})$/;

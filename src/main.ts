@@ -20,7 +20,7 @@ import { FreshnessFooter } from './ui/freshness.js';
 import { Legend } from './ui/Legend.js';
 import { handleTriageKey } from './ui/TriageKeys.js';
 import { FloorSwitch } from './ui/FloorSwitch.js';
-import { ALL_FLOORS, defaultFloor, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
+import { ALL_FLOORS, defaultFloor, floorStillKnown, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
 import { focusedFloor, setFocusedFloor } from './floors/floorState.js';
 
 // Setup scene
@@ -265,7 +265,24 @@ window.setInterval(() => void pollWorld(), 10_000);
 // still sees the raw, unfiltered answer, so the floor-switch menu lists every floor with a
 // tracked session, not only the focused one.
 const poller = new AgentPoller(agentManager, undefined, focusFloor);
-poller.start(3000, buildUI, (health) => freshness.show(health), (agents) => floorSwitch?.render(agents));
+// Issue #191 review (blocking): a floor chosen before it was renamed (the remote-naming
+// revision, for example) can match zero currently observed agents. Checked once, against the
+// first poll's own raw agent list (the same point the design already treats as authoritative
+// for floor decisions, review: "a fresh page load has not polled any agent yet"): if the
+// focused floor is no longer known, it bounces back to All floors through the same reload path
+// a manual floor switch uses, rather than silently leaving the whole building — agents, rooms
+// and kanban boards alike — filtered down to nothing with no indication why.
+let checkedFloorIsKnown = false;
+poller.start(3000, buildUI, (health) => freshness.show(health), (agents) => {
+  floorSwitch?.render(agents);
+  if (!checkedFloorIsKnown && focusFloor !== undefined) {
+    checkedFloorIsKnown = true;
+    if (!floorStillKnown(focusFloor, agents)) {
+      rememberFloor(ALL_FLOORS, window.localStorage);
+      reloadForFloorSwitch(window.location, ALL_FLOORS);
+    }
+  }
+});
 
 // --- Render loop ---
 // On demand, at most 30 fps, once a second when nothing moves. `?debug=1` exposes `window.__officeStats`.
