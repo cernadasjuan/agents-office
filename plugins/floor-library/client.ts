@@ -142,15 +142,6 @@ const UNITS_PER_PIXEL = (2 * DEFAULT_ISOMETRIC_HALF_HEIGHT) / MEASURED_VIEWPORT_
 const ENTRY_LINE_HEIGHT = ((LABEL_HEIGHT_PX + LABEL_MARGIN_PX) * UNITS_PER_PIXEL) / ISO_ELEVATION_COS;
 const PLAQUE_GAP = ENTRY_LINE_HEIGHT;
 /**
- * Round 7 feedback (#214, reconciled here since that PR and this one touch the same file):
- * these labels used to fade in and out depending on where the mouse pointed (`hoverOnly:
- * true`), only within the generic war-room-sign read distance — Gabriel wants to read them by
- * standing near the shelf, not by hunting for the one mouse position that reveals them. Every
- * sign here is `hoverOnly: false` with its own, more generous read distance instead.
- */
-const LIBRARY_SIGN_MAX_DISTANCE = 20;
-
-/**
  * Round 7 feedback (#214): these labels "fade in and out depending on where I put my mouse"
  * (Gabriel, verbatim) and he'd like to read them without hovering. They used the war-room-sign
  * system (`LabelDetail.ts`'s `signVisible`), built for a sign you glance at from across a

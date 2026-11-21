@@ -16,7 +16,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout, BUILDING_STORAGE_KEY, floorStorageKey } = await import('../src/addons/building/BuildingLayout.js');
-const { missionSlot } = await import('../src/addons/building/missionRooms.js');
+const { missionSlot, combinedBoard } = await import('../src/addons/building/missionRooms.js');
 const { projectWorld } = await import('../server/seam.js');
 
 /** The same hashing `server/vitePlugin.ts` uses for `publicId`, with its own random key held
@@ -399,6 +399,50 @@ test('agents of a mission work in its war room, their helpers stand near them, a
   layout.syncWorldRooms([missionRoom('locked')]);
   const late = layout.seatFor(agent('late', 'implementing', { room: 'room-1' }), null)!;
   assert.doesNotMatch(late.key, /^mission/);
+});
+
+// --- Issue #223: the display wall's live-sessions list, through the real BuildingLayout ---
+
+// uv values ground-truthed against `drawSectionedBoardContent`'s own pixel layout (2 equal
+// 128 px sections, flipY texture; title at `top + 30`, rows at `top + 60 + j * 19`), not an
+// assumed even split — see the review fix in `missionRooms.ts`'s `resolveSessionRow`.
+//
+// Issue #223 vs #244: the kanban board (and its sessions section) lives inside
+// `combinedBoard`'s shared canvas, its own region (index 2 of the same 3 specs
+// `buildMissionRoom` passes it — only `width`/`height` affect a region's own bounds), so a
+// hit's `uv.y` is in that shared canvas's full UV space, not a region-local [0, 1].
+const kanbanRegion = combinedBoard([
+  { width: 3.6, height: 1.6, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 2.4, height: 1.6, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 3.6, height: 1.8, position: new THREE.Vector3(), rotationY: 0 },
+]).regionOf(2);
+const SECTION_TOP_PX = kanbanRegion.h / 2;
+const uvForCanvasY = (y: number) => kanbanRegion.vBottom + (1 - y / kanbanRegion.h) * (kanbanRegion.vTop - kanbanRegion.vBottom);
+
+test('the sessions board picks up a mission\'s own live agents on the next tick, by agent.extras.room', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  layout.seatFor(agent('blocked-one', 'implementing', { room: 'room-1', stuck: true }), null);
+  layout.seatFor(agent('working-one', 'researching', { room: 'room-1' }), null);
+  tick(0);
+
+  const [target] = layout.sessionsBoardPickTargets();
+  assert.ok(target, 'one war room, one sessions board target');
+  // Row 0 (drawn at `top + 60`) is "blocked" (ranked first); row 1 (`top + 79`) is "working"
+  // (the only other state present).
+  const hitAt = (v: number) => target.resolve!({ uv: new THREE.Vector2(0.5, v) } as THREE.Intersection);
+  assert.equal(hitAt(uvForCanvasY(SECTION_TOP_PX + 60)), 'blocked-one');
+  assert.equal(hitAt(uvForCanvasY(SECTION_TOP_PX + 79)), 'working-one');
+});
+
+test('an idle session still shows on its mission\'s sessions board, even though it physically sits in the lounge', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  layout.seatFor(agent('idler', 'idle', { room: 'room-1' }), null);
+  tick(0);
+
+  const [target] = layout.sessionsBoardPickTargets();
+  assert.equal(target.resolve!({ uv: new THREE.Vector2(0.5, uvForCanvasY(SECTION_TOP_PX + 60)) } as THREE.Intersection), 'idler');
 });
 
 // --- Issue #191: a floor shows only its own mission war rooms ---

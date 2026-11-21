@@ -276,6 +276,85 @@ test('the issue board is pickable, and its pick id points at this room', () => {
   assert.ok(target.object instanceof THREE.Object3D);
 });
 
+// uv values ground-truthed against `drawSectionedBoardContent`'s own pixel layout for the
+// kanban region (2 equal 128 px sections, flipY texture; title at `top + 30`, rows at
+// `top + 60 + j * 19`, review fix: tightened from 24 px so all 4 `MAX_SESSION_ROWS` fit).
+// Review fix (issue #223): the original uv values here (0.45, 0.35, 0.25, 0.05) were picked to
+// match `resolveSessionRow`'s own (wrong) even-split assumption, not the actual rendered
+// position of the title and each row, so this test could not have caught the bug it
+// introduced — every drawn row resolved to the session listed one slot below it, and a click
+// on the "Sessions" title resolved to the first row instead of nothing.
+//
+// Issue #223 vs #244: the kanban board lives inside `combinedBoard`'s shared canvas (its own
+// region, index 2 — statement, docs, kanban, `buildMissionRoom`'s own call), not a dedicated
+// 512x256 canvas of its own, so a hit's `uv.y` is in the shared canvas's full UV space, not a
+// region-local [0, 1]. `kanbanRegion` below (the same 3 specs `buildMissionRoom` passes to
+// `combinedBoard`, only `width`/`height` affect a region's own bounds) gives this test the real
+// region bounds to convert a region-local canvas-Y pixel position into that full UV space,
+// instead of assuming the region is the whole canvas.
+const kanbanRegion = combinedBoard([
+  { width: 3.6, height: 1.6, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 2.4, height: 1.6, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 3.6, height: 1.8, position: new THREE.Vector3(), rotationY: 0 },
+]).regionOf(2);
+const SECTION_TOP_PX = kanbanRegion.h / 2; // this region, 2 equal sections
+const uvForCanvasY = (y: number) => kanbanRegion.vBottom + (1 - y / kanbanRegion.h) * (kanbanRegion.vTop - kanbanRegion.vBottom);
+
+test('issue #223: the sessions board shares the kanban mesh (no extra draw call) and its `resolve` reaches the clicked session', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const kanbanLikeTarget = missionRoom.issuesBoardPickTarget(); // a different mesh, for the identity check below
+  const target = missionRoom.sessionsBoardPickTarget();
+  assert.equal(target.id, 'sessions-board:a');
+  assert.notEqual(target.object, kanbanLikeTarget.object, 'the sessions pick target is not the issues board');
+  assert.ok(target.resolve, 'resolves a row, rather than selecting the board mesh itself');
+
+  missionRoom.updateSessions([
+    { id: 'agent-1', name: 'Amelia', extras: { stuck: true } },
+    { id: 'agent-2', name: 'Quinn', extras: {} },
+  ]);
+  const hitAt = (v: number) => ({ uv: new THREE.Vector2(0.5, v) }) as THREE.Intersection;
+  // The top half of the board is the kanban section: never a session, whatever v is.
+  assert.equal(target.resolve!(hitAt(0.9)), null);
+  // The "Sessions" title text itself, drawn at `top + 30` (`canvasBoardSections`' draw()).
+  assert.equal(target.resolve!(hitAt(uvForCanvasY(SECTION_TOP_PX + 30))), null);
+  // Row 0 (blocked ranks first, drawn at `top + 60`) and row 1 (`top + 79`).
+  assert.equal(target.resolve!(hitAt(uvForCanvasY(SECTION_TOP_PX + 60))), 'agent-1');
+  assert.equal(target.resolve!(hitAt(uvForCanvasY(SECTION_TOP_PX + 79))), 'agent-2');
+  // Past the last drawn row (`top + 98`, a 3rd row that was never provided): no stale selection.
+  assert.equal(target.resolve!(hitAt(uvForCanvasY(SECTION_TOP_PX + 98))), null);
+});
+
+test('issue #223: no live sessions resolves to no selection anywhere on the board', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.updateSessions([]);
+  const target = missionRoom.sessionsBoardPickTarget();
+  const vs = [0.9, uvForCanvasY(SECTION_TOP_PX + 30), uvForCanvasY(SECTION_TOP_PX + 60), uvForCanvasY(SECTION_TOP_PX + 79), uvForCanvasY(SECTION_TOP_PX + 98)];
+  for (const v of vs) {
+    assert.equal(target.resolve!({ uv: new THREE.Vector2(0.5, v) } as THREE.Intersection), null, `v=${v}`);
+  }
+});
+
+// Review fix: `BuildingLayout.update()` calls `updateSessions()` every animation frame, not
+// only on the slower agent poll — redrawing (and re-uploading the texture) on every one of
+// those calls regardless of whether the sessions actually changed broke the render-on-change
+// rule every other board redraw in this file follows. `THREE.Texture.version` only increments
+// when `needsUpdate` is set to `true`, so it stands in for "did a redraw actually happen".
+test('issue #223: the sessions board redraws only when the sessions actually change, not on every tick', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const texture = (missionRoom.sessionsBoardPickTarget().object as THREE.Mesh & { material: THREE.MeshBasicMaterial }).material.map!;
+
+  missionRoom.updateSessions([{ id: 'agent-1', name: 'Amelia', extras: {} }]);
+  const versionAfterFirstDraw = texture.version;
+
+  // Same session, same state, called again (as a per-frame poll would): no new redraw.
+  missionRoom.updateSessions([{ id: 'agent-1', name: 'Amelia', extras: {} }]);
+  assert.equal(texture.version, versionAfterFirstDraw, 'an unchanged sessions list must not redraw');
+
+  // The same session's state actually changes: this must redraw.
+  missionRoom.updateSessions([{ id: 'agent-1', name: 'Amelia', extras: { stuck: true } }]);
+  assert.equal(texture.version, versionAfterFirstDraw + 1, 'a changed sessions list must redraw');
+});
+
 // --- Issue #123 review (blocking defect 1): RoomFrame used a fixed ROOM_SIZE depth
 // regardless of door orientation, and the war room's own rect kept WAR_ROOM_WIDTH on the
 // wrong axis once the corridor fix moved the door to the east/west wall — together, these put
