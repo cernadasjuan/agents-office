@@ -93,7 +93,12 @@ function buildHexFloor(room: HexRoomGeometry, color: number): THREE.Mesh {
   for (let i = 0; i < 6; i++) {
     const a = room.corners[i];
     const b = room.corners[(i + 1) % 6];
-    positions.push(room.center.x, 0, room.center.z, a.x, 0, a.z, b.x, 0, b.z);
+    // Review (#242): center -> b -> a, not center -> a -> b. `corners` is ordered by
+    // increasing angle, which winds a center -> a -> b fan clockwise seen from above (+Y) —
+    // its face normal points down, invisible to `FrontSide` `getToonMaterial()` from a
+    // downward view or raycast. Swapping a/b flips the winding to counter-clockwise from
+    // above, normal up, matching every rect room's floor.
+    positions.push(room.center.x, 0, room.center.z, b.x, 0, b.z, a.x, 0, a.z);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -204,7 +209,10 @@ export function buildHexOffice(): BuiltHexOffice {
   const wallMaterial = getToonMaterial(HEX_WALL_COLOR);
   const walls = new THREE.Group();
   walls.name = 'hex-walls';
-  markStatic(walls, { zone: 'hex-walls', castShadow: false });
+  // overviewLower (review, #242): without it this zone has no cutaway height, so these
+  // walls stay full height in isometric overview and occlude the Hub furniture behind them —
+  // the same `overviewLower: WALL_HEIGHT` every rect room's walls already carry.
+  markStatic(walls, { zone: 'hex-walls', castShadow: false, overviewLower: HEX_WALL_HEIGHT });
   for (const wall of [...buildHexWalls(layout.hub, wallMaterial), ...buildHexWalls(layout.office, wallMaterial)]) walls.add(wall);
   group.add(walls);
 
