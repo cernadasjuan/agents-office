@@ -121,11 +121,15 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // `origin/main` (ceilings plus the mission furniture package). Issue #159's tombstone
   // engraving adds one more on top of that merge: a single instanced draw call for the whole
   // scene's engraved names (`TombstoneNameBatch`), however many tombstones exist, landing it
-  // at 403. Pinned here at 406, 403 plus 3: real headroom above the number this fixture
-  // actually and repeatably measures, not a number nobody reproduces. Each PR gets up to 5
-  // more against the 403 baseline before it must recover headroom elsewhere, not just add to
-  // the margin left by the last one.
-  assert.ok(after.total <= 406, `worst case ${after.total} exceeds the pinned baseline (403) + 3`);
+  // at 403. Issue #209 then recovers 3: every mission wing's war room lost its sofa and low
+  // table (2 fewer static pieces), and gained a guaranteed base desk and debug station in a
+  // room this fixture happens to build with none live yet (2 more, net -3 after the merge,
+  // not 2 for 2 — the pieces were never a 1:1 draw-call cost, the merge already folded them
+  // into the room's shared batch), landing it at 400. Pinned here at 403, 400 plus 3: real
+  // headroom above the number this fixture actually and repeatably measures, not a number
+  // nobody reproduces. Each PR gets up to 5 more against the 400 baseline before it must
+  // recover headroom elsewhere, not just add to the margin left by the last one.
+  assert.ok(after.total <= 403, `worst case ${after.total} exceeds the pinned baseline (400) + 3`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -147,9 +151,10 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // added to this fixture; see the baseline comment above. 402 became 403 with issue #159's
   // tombstone engraving: one instanced draw call for the whole scene's engraved names, not
   // one per tombstone (`TombstoneNameBatch`), so the full MAX_TOMBSTONES cap across all 9
-  // mission rooms this fixture builds still only costs +1. Still exactly one value across
-  // all 8 runs.
-  assert.deepEqual([...totals], [403], `expected every one of 8 runs to measure 403, got ${[...totals]}`);
+  // mission rooms this fixture builds still only costs +1. Issue #209's war-room base work
+  // set (sofa and low table removed, a base desk and debug station guaranteed) drops it to
+  // 400; see the baseline comment above. Still exactly one value across all 8 runs.
+  assert.deepEqual([...totals], [400], `expected every one of 8 runs to measure 400, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

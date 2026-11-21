@@ -491,17 +491,43 @@ test('"all floors" never migrates: it keeps reading the legacy key directly, sam
 
 // --- Issue #126: war-room furniture routes agent activity, in-room first ---
 
-test('AC1/AC2/AC3: researching, planning and idle agents go to their own room\'s bookshelf, whiteboard and sofa', () => {
+test('AC1/AC2: researching and planning agents go to their own room\'s bookshelf and whiteboard', () => {
   const { layout, agent } = setup();
   layout.syncWorldRooms([missionRoom()]);
   const researching = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
   assert.match(researching.key, /^mission0_furniture_\w+_\d+$/);
   const planning = layout.seatFor(agent('p', 'planning', { room: 'room-1' }), null)!;
   assert.match(planning.key, /^mission0_furniture_\w+_\d+$/);
+  // Two different pieces, not the same one shared by coincidence
+  assert.notEqual(researching.key, planning.key);
+});
+
+// --- Issue #209: an idle mission agent relaxes in the main room's lounge, not its own war room ---
+
+test('issue #209: an idle mission agent goes to the main room\'s lounge, not its own war room', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
   const idle = layout.seatFor(agent('i', 'idle', { room: 'room-1' }), null)!;
-  assert.match(idle.key, /^mission0_furniture_\w+_\d+$/);
-  // Three different pieces, not the same one shared by coincidence
-  assert.equal(new Set([researching.key, planning.key, idle.key]).size, 3);
+  assert.doesNotMatch(idle.key, /^mission0_/, 'not the war room');
+  // The hall itself already carries idle capacity (the coffee corner and the sofas, the main
+  // room's own lounge/cafeteria, `Office.ts`); a dedicated `lounge` room only opens once that
+  // hall capacity runs out (`idle agents beyond the hall seats get a lounge room`, above).
+  assert.equal(idle.key.includes('coffee') || idle.key.includes('sofa'), true, 'a main-room idle station');
+});
+
+test('issue #209: an idle mission agent leaves its war room seat behind when it goes idle', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const a = agent('a', 'researching', { room: 'room-1' });
+  const working = layout.seatFor(a, null)!;
+  assert.match(working.key, /^mission0_furniture_/, 'the war room\'s own bookshelf while researching');
+
+  a.activity = 'idle';
+  layout.seatFor(a, 'researching');
+  const moves = tick(4000);
+  const move = moves.find((m) => m.agentId === 'a');
+  assert.ok(move, 'the agent moves once it goes idle');
+  assert.doesNotMatch(move!.seat.key, /^mission0_/, 'off to the lounge, not left in the war room');
 });
 
 test('AC5: a researching mission agent never goes to the library-knowledge shelves', () => {
@@ -561,17 +587,23 @@ test('every desk-cap overflow stands, until the standing ring itself is full', (
 test('a desk-like agent moves onto a grown desk once one exists, not forever stuck on the generic ring', () => {
   const { layout, agent, tick } = setup();
   layout.syncWorldRooms([missionRoom()]);
+  // Issue #209: the base work set's own desk is there from the start, so the first
+  // implementing agent claims it immediately; growth is only visible from the second on.
   const a = agent('a', 'implementing', { room: 'room-1' });
-  const first = layout.seatFor(a, null)!;
-  assert.match(first.key, /^mission0_seat_/, 'no desk exists yet: the generic ring');
+  const firstA = layout.seatFor(a, null)!;
+  assert.match(firstA.key, /mission0_furniture_implementing_\d+/, 'the base work set\'s own desk, already there');
 
-  tick(0); // grows one desk, now that an implementing agent is counted in the room
+  const b = agent('b', 'implementing', { room: 'room-1' });
+  const firstB = layout.seatFor(b, null)!;
+  assert.match(firstB.key, /^mission0_seat_/, 'no second desk exists yet: the generic ring');
+
+  tick(0); // grows a second desk, now that two implementing agents are counted in the room
   // Same activity, same room target string: only an activity-aware re-check (not the
   // brand-new-agent path above) can notice the freshly grown desk is now free.
-  layout.seatFor(a, 'implementing');
+  layout.seatFor(b, 'implementing');
   const moves = tick(4000); // past the dwell time
-  const move = moves.find((m) => m.agentId === 'a');
-  assert.ok(move, 'the agent is moved once the dwell time passes');
+  const move = moves.find((m) => m.agentId === 'b');
+  assert.ok(move, 'agent b is moved once the dwell time passes');
   assert.match(move!.seat.key, /mission0_furniture_/, 'onto the grown desk, not left on the generic ring');
 });
 
@@ -586,8 +618,8 @@ test('growing a desk never makes the whiteboard read as falsely taken (a researc
   const researcher = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
   assert.match(researcher.key, /^mission0_furniture_researching_\d+$/, 'the bookshelf, a must-have, before any growth');
 
-  // An implementing agent grows the desk grid (0 -> 1), shifting the whiteboard, bookshelf
-  // and idle spots one index later in `furnishWarRoom`'s plan array.
+  // An implementing agent grows the desk grid past the base set's own desk, shifting the
+  // whiteboard and bookshelf one index later in `furnishWarRoom`'s plan array.
   const implementer = agent('i', 'implementing', { room: 'room-1' });
   layout.seatFor(implementer, null);
   tick(0);
@@ -601,8 +633,6 @@ test('growing a desk never makes the whiteboard read as falsely taken (a researc
 test('growing a debug station never makes the bookshelf read as falsely taken', () => {
   const { layout, agent, tick } = setup();
   layout.syncWorldRooms([missionRoom()]);
-  const idler = layout.seatFor(agent('x', 'idle', { room: 'room-1' }), null)!;
-  assert.match(idler.key, /^mission0_furniture_idle_\d+$/, 'a sofa seat, a must-have, before any growth');
 
   const debugger_ = agent('b', 'debugging', { room: 'room-1' });
   layout.seatFor(debugger_, null);
@@ -646,7 +676,9 @@ test('a war room\'s furniture grows with the agents actually seated in it (issue
     warRoom.traverse((o) => { if (o.userData.piece === name) n++; });
     return n;
   };
-  assert.equal(pieceCount('desk') + pieceCount('debugStation'), 0, 'no one works there yet');
+  // Issue #209: the base work set is there before anyone works here.
+  assert.equal(pieceCount('desk'), 1, 'the base work set\'s one workstation');
+  assert.equal(pieceCount('debugStation'), 1, 'the base work set\'s one debug station');
 
   layout.seatFor(agent('a', 'implementing', { room: 'room-1' }), null);
   layout.seatFor(agent('b', 'implementing', { room: 'room-1' }), null);

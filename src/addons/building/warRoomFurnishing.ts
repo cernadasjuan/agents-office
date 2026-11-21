@@ -13,6 +13,13 @@ const BOOKSHELF_COLORS = Colors.books.slice(0, 2);
  * count and never shrink back. Placement is seeded by the mission id, so a
  * reload gives the same room, with a small jitter so it reads as lived-in, not
  * symmetric. No piece is built here: everything comes from `src/furniture/`.
+ *
+ * Issue #209: a war room is a work space only, never a rest stop. The must-haves
+ * are one workstation (desk), one debug station, one whiteboard and one small
+ * bookshelf, present even with zero live agents (the base work set); more desks
+ * and debug stations still grow with the peak count, on top of that base, and
+ * never shrink. There is no sofa and no coffee table here any more: an idle
+ * mission agent now goes to the main room's lounge instead (`BuildingLayout.ts`).
  */
 
 export interface WarRoomCounts {
@@ -125,20 +132,26 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
   const pieces: Placement[] = [];
   const stations: SpotPlan[] = [];
 
-  // --- Desk grid: debug stations fill first, so a room with a debugger shows it even at low headcount ---
+  // --- Desk grid: debug stations fill first, so a room with a debugger shows it even at low
+  // headcount. Issue #209: the base work set keeps at least one of each, even in a fresh room
+  // with no agents yet; the peak counts (which only ever grow) take over past that floor. ---
   const slots = DESK_SLOTS.filter((slot) => clearsDoor(slot.a, doorAlong));
-  const deskSlotCount = Math.min(counts.deskLike + counts.debugging, MAX_DESK_SLOTS, slots.length);
+  const baseDebugging = Math.max(counts.debugging, 1);
+  const baseDeskLike = Math.max(counts.deskLike, 1);
+  const deskSlotCount = Math.min(baseDeskLike + baseDebugging, MAX_DESK_SLOTS, slots.length);
   for (let i = 0; i < deskSlotCount; i++) {
     const { a, d } = slots[i];
     const ja = jitter(rand, a, JITTER_POS);
     const jd = jitter(rand, d, JITTER_POS);
     const turn = jitter(rand, 0, JITTER_ROT);
-    const isDebug = i < counts.debugging;
+    const isDebug = i < baseDebugging;
     pieces.push({ piece: isDebug ? PIECES.debugStation() : PIECES.desk(), a: ja, d: jd, turn });
     stations.push({ type: isDebug ? 'debugging' : 'implementing', a: ja, d: jd - 0.9, look: [ja, jd, 1.2], posture: 'seated' });
   }
 
-  // --- Must-haves: a clock, plants, a sofa, a bookshelf, a whiteboard ---
+  // --- Must-haves: a clock, plants, a bookshelf, a whiteboard. Issue #209: no sofa, no low
+  // table — a war room is a work space, not a place to relax; an idle mission agent goes to
+  // the main room's lounge instead (`BuildingLayout.ts`'s routing). ---
   const nearWall = WAR_ROOM_WIDTH / 2 - 0.1; // just inside the side walls (a = ±9)
   pieces.push({ piece: PIECES.clock(), a: jitter(rand, -1.6, 0.1), d: jitter(rand, ROOM_SIZE - 0.15, 0.05), y: 2.3 });
   const whiteboardA = jitter(rand, -2.4, 0.08);
@@ -159,23 +172,6 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
   // Issue #126: a researching agent stands at the mission's own shelf, not the library
   stations.push({ type: 'researching', a: bookshelfA, d: bookshelfD - 0.9, look: [bookshelfA, bookshelfD, 1.2], posture: 'standing' });
 
-  // Pushed back from the desk grid's row depth, so a debug station's chair in the back row
-  // never reaches the sofa (rulebook §4, the same clearance every room's furniture keeps).
-  const sofaA = jitter(rand, nearWall - 0.7, 0.1);
-  const sofaD = jitter(rand, 6.2, 0.3);
-  pieces.push({ piece: PIECES.sofa(), a: sofaA, d: sofaD, turn: -Math.PI / 2 });
-  // Issue #126: an idle agent sits here instead of a trip to the lounge; 2 seats, the sofa's
-  // own width. The sofa's turn (issue #126 review round 2) swaps which axis is which: turned
-  // -90 deg, the sofa's 2 m width (where the 2 seats spread out) now runs along `d`, and its
-  // 0.8 m depth (the small offset off center, onto the cushion and off the backrest) runs
-  // along `a`, not the other way. A first pass spread the seats along `a` and offset them
-  // along `d`, which put an idle agent 0.6 m off the sofa's front edge, not on it.
-  stations.push({ type: 'idle', a: sofaA - 0.3, d: sofaD - 0.5, look: [sofaA - 1.3, sofaD - 0.5, 1.0], posture: 'seated' });
-  stations.push({ type: 'idle', a: sofaA - 0.3, d: sofaD + 0.5, look: [sofaA - 1.3, sofaD + 0.5, 1.0], posture: 'seated' });
-
-  // The low table sits further from the sofa than a coffee table normally would: both carry
-  // their own jitter, and the room has no room to spare between two independently-jittered pieces.
-  pieces.push({ piece: PIECES.lowTable(), a: jitter(rand, nearWall - 2.0, 0.1), d: jitter(rand, 6.2, 0.3) });
   const plantCount = roomTier === 'small' ? 3 : roomTier === 'medium' ? 4 : 5;
   // Every spot is at a >= 0 or dead center: the whole -a wall carries the ended-session
   // tombstone strip (`missionRooms.ts`), which can grow the full depth of the room, and
