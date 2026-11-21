@@ -65,6 +65,10 @@ export function buildHexDebugMesh(slots: HexSlot[]): THREE.Mesh {
   // Clear of the rect-room building entirely (rule 3, degrade gracefully / no visual change):
   // far enough along x that it never overlaps the existing hall and rooms.
   mesh.position.set(200, 0.02, 0);
+  // `userData.floor` is how `overviewBounds()` (OverviewCamera.ts) decides what the isometric
+  // camera's pan/zoom can reach. Without it the overlay sits outside the default viewport even
+  // at max zoom-out, defeating the one thing a debug overlay is for (looking at it).
+  mesh.userData.floor = true;
   return mesh;
 }
 
