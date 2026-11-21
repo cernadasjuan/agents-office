@@ -126,11 +126,19 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // eye shape, 1 for the mouth (every agent in this fixture starts idle, so all 40 share
   // the one 'neutral' bucket), and the rest for however many of the 3 non-'none' hair
   // kinds (cap, spiky, bun) this fixture's 40 seeded names land on — landing it at 409.
-  // Pinned here at 412, 409 plus 3: real headroom above the number this fixture actually
-  // and repeatably measures, not a number nobody reproduces. Each PR gets a deliberate,
-  // reviewed addition against the 409 baseline before it must recover headroom elsewhere,
-  // not just add to the margin left by the last one.
-  assert.ok(after.total <= 412, `worst case ${after.total} exceeds the pinned baseline (409) + 3`);
+  // The skills equipment catalog v1 (issue #167) adds 13 more: one bucket per hand-item
+  // kind this round's `HAND_MAP` maps (`plugins/skills/items.ts` — wrench, clipboard,
+  // gavel, loupe, stamp, easel-chart, open-book, magnifier, the unmapped-skill toolbox
+  // fallback, 9 total; jira and klever-mr share the one clipboard bucket, tinted apart,
+  // never a second one), plus 2 buckets each for the 2 face items (glasses, headphones
+  // — each built from 2 distinct primitive shapes). This fixture's `skillsFor` sequence
+  // (`tests/real-size-office.ts`) deliberately exercises every one of them, not a subset
+  // that would undercount the real worst case — landing it at 422. Pinned here at 425,
+  // 422 plus 3: real headroom above the number this fixture actually and repeatably
+  // measures, not a number nobody reproduces. Each PR gets a deliberate, reviewed
+  // addition against the 422 baseline before it must recover headroom elsewhere, not
+  // just add to the margin left by the last one.
+  assert.ok(after.total <= 425, `worst case ${after.total} exceeds the pinned baseline (422) + 3`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -153,10 +161,11 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // tombstone engraving: one instanced draw call for the whole scene's engraved names, not
   // one per tombstone (`TombstoneNameBatch`), so the full MAX_TOMBSTONES cap across all 9
   // mission rooms this fixture builds still only costs +1. 403 became 409 with the Hero look
-  // (issue #165 round 2): see the baseline comment above. Still exactly one value across
-  // all 8 runs — the fixture's own seeded names (`tests/real-size-office.ts`) never change
-  // which hair style or face state an agent lands on between runs.
-  assert.deepEqual([...totals], [409], `expected every one of 8 runs to measure 409, got ${[...totals]}`);
+  // (issue #165 round 2), then 422 with the skills equipment catalog v1 (issue #167): see
+  // the baseline comment above. Still exactly one value across all 8 runs — the fixture's
+  // own seeded names (`tests/real-size-office.ts`) never change which hair style, face
+  // state or equipped item an agent lands on between runs.
+  assert.deepEqual([...totals], [422], `expected every one of 8 runs to measure 422, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

@@ -5,6 +5,7 @@ import { BuildingLayout } from '../src/addons/building/BuildingLayout.js';
 import { MAX_TOMBSTONES } from '../src/addons/building/missionRooms.js';
 import { AgentManager } from '../src/agents/AgentManager.js';
 import { bmadHats } from '../plugins/bmad/client.js';
+import { skillsEquipment } from '../plugins/skills/client.js';
 import { GithubOfficeExtension } from '../plugins/github/client.js';
 import { setFreeCameraLook } from '../src/scene/FreeCamera.js';
 import { overviewBounds } from '../src/scene/OverviewCamera.js';
@@ -49,6 +50,36 @@ function issuesFor(i: number): Array<{ number: number; title: string }> | undefi
 }
 
 /**
+ * Issue #167 v1 (skills equipment): a sequence that cycles through every hand-item
+ * kind this catalog maps (one per `HAND_MAP` entry, plus the unmapped-skill toolbox
+ * fallback), and both face items (`glasses`, from 2+ skills; `headphones`, from a
+ * dedicated skill) — so the budget fixture's worst case actually pins the real
+ * bucket count this feature spends, not an undercount from a fixture that never
+ * wears any of it. Every 6th agent carries no skills at all, the same "not every
+ * agent wears one" shape `badgesFor` already follows.
+ */
+const SKILL_SEQUENCES: string[][] = [
+  ['git'],
+  ['jira'],
+  ['klever-mr'],
+  ['crit:crit'],
+  ['code-review'],
+  ['bibliotheque-librarian'],
+  ['dataviz'],
+  ['research'],
+  ['investigate'],
+  ['totally-unmapped-skill'],
+  ['git', 'jira'],
+  ['klever-test'],
+  ['git', 'klever-test'],
+];
+
+function skillsFor(i: number): string[] | undefined {
+  if (i % 6 === 5) return undefined;
+  return SKILL_SEQUENCES[i % SKILL_SEQUENCES.length];
+}
+
+/**
  * Build the office at the real size without a browser. The caller sets up a
  * jsdom `document` with a canvas stub first (toon gradients, signs, boards, cards).
  */
@@ -80,7 +111,7 @@ export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManag
   for (let i = 0; i < REAL_SIZE.agents; i++) {
     manager.addAgent({
       id: `a${i}`, name: `agent ${i}`, activity: 'implementing',
-      extras: { group: { id: `g${i % 11}`, label: `ws${i % 11}` }, badges: badgesFor(i), issues: issuesFor(i) },
+      extras: { group: { id: `g${i % 11}`, label: `ws${i % 11}` }, badges: badgesFor(i), issues: issuesFor(i), skills: skillsFor(i) },
     });
   }
   // Worst case for war-room furniture: push every open mission room past its desk cap
@@ -99,6 +130,7 @@ export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManag
   const github = new GithubOfficeExtension();
   github.start(scene);
   bmadHats.agentsChanged?.(manager.getAgents());
+  skillsEquipment.agentsChanged?.(manager.getAgents());
   github.agentsChanged(manager.getAgents());
   return { scene, manager, layout, github };
 }
