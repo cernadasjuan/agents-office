@@ -89,27 +89,58 @@ function hitRotationY(door: Door): number {
  *
  * `MAX_SECTIONS_SHOWN`/`MAX_ENTRY_LINES` are this shared room's own physical ceiling, separate
  * from the server's data cap (`bibliotheque.ts`'s `MAX_SECTIONS`/`MAX_ENTRIES`, 100 each):
- * three wall slots and four lines of vertical space each is what the room's furnishing plan
- * actually has, not a number chosen to match the server. A library past this (today: the real
- * Klever bibliothèque already has 14 top-level sections, each able to carry up to 100 files)
- * cannot seat every file as its own physical shelf in one shared room — the "more" signs below
- * keep the rest reachable (a card, one click away) rather than silently dropped.
+ * three wall slots, each with two lines of vertical space actually wide enough apart to read
+ * (review, FAIL round 2 — see `ENTRY_LINE_HEIGHT` below for why two, not four), is what the
+ * room's furnishing plan actually has, not a number chosen to match the server. A library past
+ * this (today: the real Klever bibliothèque already has 14 top-level sections, each able to
+ * carry up to 100 files) cannot seat every file as its own physical shelf in one shared room —
+ * the "more" signs below keep the rest reachable (a card, one click away) rather than silently
+ * dropped.
  */
 const SIGN_DEPTH = 11.5;
 const SIGN_Y = 1.9;
 const SIGN_ALONGS = [-1.3, 0, 1.3];
 const MAX_SECTIONS_SHOWN = SIGN_ALONGS.length;
-const MAX_ENTRY_LINES = 4;
 /**
- * Review (issue #221 FAIL round): the section label and its first entry visually merged at a
- * normal isometric zoom. A CSS2D label never shrinks with distance (it is a fixed-size DOM
- * element wherever it projects to), but the screen-space *gap* between two labels' world
- * positions does shrink with distance, the same as anything else under perspective — 0.24
- * world units between entries (0.5 between the plaque and the first entry) was simply too
- * tight once that shrink was accounted for at a normal viewing distance. Both are wider now.
+ * Review (issue #221 FAIL round 2): the room's own floor-to-shelf budget (`SIGN_Y` down to the
+ * floor, 1.9 world units) does not hold 4 individually-spaced lines wide enough apart to clear
+ * a real label's own fixed screen height at the default isometric zoom, no matter the gap
+ * chosen — a CSS2D label never shrinks with distance, so widening the world-space gap keeps
+ * costing floor budget with no ceiling on how much a label needs. Two lines, spaced wide
+ * enough to actually clear (see `ENTRY_LINE_HEIGHT` below), fit inside that same budget with a
+ * safe margin above the floor; the "more" sign already covers whatever a third or fourth line
+ * used to show (today: most bibliothèque sections already carry more than two files, so the
+ * "more" sign was already doing most of the work here).
  */
-const ENTRY_LINE_HEIGHT = 0.44;
-const PLAQUE_GAP = 0.7;
+const MAX_ENTRY_LINES = 2;
+/**
+ * Review (issue #221 FAIL round 2): widening 0.24 -> 0.44 world units (the first fix round)
+ * still left the section label and its first entry touching, because a CSS2D label's own
+ * screen height is fixed in pixels regardless of distance — only the gap *between* two labels'
+ * world positions shrinks under perspective, so the fix has to budget the gap in pixels, not
+ * just make it "a bit more". The isometric camera sits at a fixed elevation angle
+ * (`IsometricCamera.ts`'s own `ISO_ELEVATION`), so a pure world-Y gap only ever projects to
+ * `gap / unitsPerPixel * cos(ISO_ELEVATION)` screen pixels, not the naive `gap / unitsPerPixel`
+ * (confirmed empirically: a first attempt at this same fix assumed the naive formula and the
+ * actual projected gap came out ~18% short of what it predicted — `cos(ISO_ELEVATION) ≈
+ * 0.8165` accounts for exactly that gap). `unitsPerPixel = 2 * halfHeight / viewportHeight`
+ * (`IsometricCamera.ts`'s own formula, isometric being orthographic) at this office's own
+ * starting zoom (`halfHeight = 20`) on an 800px-tall viewport — the same zoom and window size
+ * the FAIL round's own overlap screenshot was taken at (`agents-office` ticket folder,
+ * `qa-237-r2-01-labels-all.png` showed the overlap this fixes; `qa-237-r3-*.png` confirms the
+ * fix). `LABEL_HEIGHT_PX` is the chip's own real rendered height at that zoom
+ * (`entryElement`/`plaqueElement`'s own CSS below: an 11-12px font, no vertical padding, tight
+ * line-height — shrunk in this same round so the gap this budgets for was actually reachable
+ * within the room's own floor-to-shelf budget below), confirmed with that same screenshot.
+ */
+const LABEL_HEIGHT_PX = 13;
+const LABEL_MARGIN_PX = 2;
+const ISO_ELEVATION_COS = Math.cos(Math.atan(1 / Math.SQRT2));
+const DEFAULT_ISOMETRIC_HALF_HEIGHT = 20;
+const MEASURED_VIEWPORT_HEIGHT = 800;
+const UNITS_PER_PIXEL = (2 * DEFAULT_ISOMETRIC_HALF_HEIGHT) / MEASURED_VIEWPORT_HEIGHT;
+const ENTRY_LINE_HEIGHT = ((LABEL_HEIGHT_PX + LABEL_MARGIN_PX) * UNITS_PER_PIXEL) / ISO_ELEVATION_COS;
+const PLAQUE_GAP = ENTRY_LINE_HEIGHT;
 /**
  * Round 7 feedback (#214, reconciled here since that PR and this one touch the same file):
  * these labels used to fade in and out depending on where the mouse pointed (`hoverOnly:
@@ -122,9 +153,14 @@ const LIBRARY_SIGN_MAX_DISTANCE = 20;
 function plaqueElement(section: WorldLibrarySection): HTMLDivElement {
   const element = document.createElement('div');
   element.textContent = section.name;
+  // Review (issue #221 FAIL round 2): tighter padding and line-height, a notch smaller font —
+  // the room's own floor-to-shelf budget only has so much vertical space, and a label's own
+  // rendered height is what the gap between labels has to clear (see `ENTRY_LINE_HEIGHT`'s own
+  // doc comment). Still comfortably legible (11-12px is this office's own normal label size
+  // elsewhere, e.g. `plaqueElement`'s sibling room-label text), just not padded as generously.
   Object.assign(element.style, {
-    background: 'rgba(90, 74, 58, 0.9)', color: '#f5f0e8', padding: '2px 8px', borderRadius: '4px',
-    font: '600 13px system-ui, sans-serif', whiteSpace: 'nowrap', pointerEvents: 'none',
+    background: 'rgba(90, 74, 58, 0.9)', color: '#f5f0e8', padding: '0px 7px', borderRadius: '4px',
+    font: '600 12px system-ui, sans-serif', lineHeight: '1.1', whiteSpace: 'nowrap', pointerEvents: 'none',
   });
   return element;
 }
@@ -133,8 +169,8 @@ function entryElement(entry: WorldLibraryEntry): HTMLDivElement {
   const element = document.createElement('div');
   element.textContent = entry.archived ? `${entry.title} (archived)` : entry.title;
   Object.assign(element.style, {
-    background: 'rgba(247, 243, 234, 0.95)', color: '#2a2a3e', padding: '2px 8px', borderRadius: '4px',
-    font: '12px system-ui, sans-serif', whiteSpace: 'nowrap', pointerEvents: 'none', textAlign: 'left',
+    background: 'rgba(247, 243, 234, 0.95)', color: '#2a2a3e', padding: '0px 7px', borderRadius: '4px',
+    font: '11px system-ui, sans-serif', lineHeight: '1.1', whiteSpace: 'nowrap', pointerEvents: 'none', textAlign: 'left',
     opacity: entry.archived ? '0.65' : '1',
   });
   return element;
@@ -147,8 +183,8 @@ function entryElement(entry: WorldLibraryEntry): HTMLDivElement {
 function moreElement(lines: string[]): HTMLDivElement {
   const element = document.createElement('div');
   Object.assign(element.style, {
-    background: 'rgba(247, 243, 234, 0.95)', color: '#2a2a3e', padding: '2px 8px', borderRadius: '4px',
-    font: '12px system-ui, sans-serif', whiteSpace: 'nowrap', pointerEvents: 'none', textAlign: 'left', opacity: '0.75',
+    background: 'rgba(247, 243, 234, 0.95)', color: '#2a2a3e', padding: '0px 7px', borderRadius: '4px',
+    font: '11px system-ui, sans-serif', lineHeight: '1.1', whiteSpace: 'nowrap', pointerEvents: 'none', textAlign: 'left', opacity: '0.75',
   });
   for (const line of lines) {
     const row = document.createElement('div');
@@ -228,14 +264,25 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
       ? matched.filter((candidate) => candidate.libraryId === lastLibraryId).length
         - sections.filter((candidate) => candidate.libraryId === lastLibraryId).length
       : 0;
-    const signature = `${roomIndex}:${JSON.stringify(sections)}:${hiddenSections}`;
+    // Review (issue #221 FAIL round 2): scoping `hiddenSections` to the last shown slot's own
+    // library (the round 1 fix) closed the "wrong index" bug, but opened a new one — a library
+    // that gets zero shown slots at all (every slot already belongs to an earlier library) now
+    // mounts no sign whatsoever, because the *last shown* library's own hidden count can be
+    // zero even while a whole other library sits unshown right behind it. `shownLibraryIds`
+    // catches that: any library present in `matched` but absent from `sections` entirely.
+    const shownLibraryIds = new Set(sections.map((candidate) => candidate.libraryId));
+    const unshownLibraryId = this.slot ? matched.find((candidate) => !shownLibraryIds.has(candidate.libraryId))?.libraryId : undefined;
+    const signature = `${roomIndex}:${JSON.stringify(sections)}:${hiddenSections}:${unshownLibraryId ?? ''}`;
     if (signature === this.signature) return;
     this.signature = signature;
     this.unmountAll();
-    sections.forEach((matchedSection, index) => this.mount(matchedSection, index, index === sections.length - 1 ? hiddenSections : 0));
+    sections.forEach((matchedSection, index) => {
+      const isLast = index === sections.length - 1;
+      this.mount(matchedSection, index, isLast ? hiddenSections : 0, isLast ? unshownLibraryId : undefined);
+    });
   }
 
-  private mount(matched: MatchedSection, index: number, hiddenSections: number): void {
+  private mount(matched: MatchedSection, index: number, hiddenSections: number, unshownLibraryId: string | undefined): void {
     const along = SIGN_ALONGS[index];
     if (along === undefined || !this.scene || !this.slot) return;
     const { rect, door } = this.slot;
@@ -286,10 +333,19 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     // carries more sections than the three wall slots seat. Either reason, or both, still
     // mounts one sign — never silent, always one click from everything the cap actually holds.
     const hiddenEntries = section.truncated === true || section.entries.length > shown.length;
-    if (hiddenEntries || hiddenSections > 0) {
+    // Review (issue #221 FAIL round 2): a whole other library that got zero shown slots at all
+    // is a third reason for this same sign — otherwise it would be completely unreachable, no
+    // sign, no pick target, nothing. Only surfaced when this library's own `hiddenSections` is
+    // zero: when this library has its own overflow too, its own index already wins the one
+    // click target this sign can carry (established behavior, see the FAIL-round-1 test on the
+    // wrong-library-index bug) — a second, different library stays unreachable through this
+    // particular sign in that narrower compound case, same as before this round.
+    const crossLibraryOverflow = hiddenSections === 0 ? unshownLibraryId : undefined;
+    if (hiddenEntries || hiddenSections > 0 || crossLibraryOverflow !== undefined) {
       const lines: string[] = [];
       if (hiddenEntries) lines.push('…more on this shelf');
       if (hiddenSections > 0) lines.push(`+${hiddenSections} more section${hiddenSections === 1 ? '' : 's'} in the library`);
+      if (crossLibraryOverflow !== undefined) lines.push('+1 more library, not shown here');
       const position = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y - shown.length * ENTRY_LINE_HEIGHT);
       const object = new CSS2DObject(moreElement(lines));
       object.position.set(...position);
@@ -302,7 +358,10 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
       // this very section (`src/ui/LibraryCard.ts`'s own index-to-section navigation), so
       // nothing here is actually a dead end either way. `hiddenSections` is already scoped to
       // this section's own library (`worldChanged`), so the index it opens always matches.
-      addHit(hiddenSections > 0 ? libraryIndexId(libraryId) : sectionId, position, ENTRY_HIT_GEOMETRY);
+      const targetId = hiddenSections > 0 ? libraryIndexId(libraryId)
+        : crossLibraryOverflow !== undefined ? libraryIndexId(crossLibraryOverflow)
+        : sectionId;
+      addHit(targetId, position, ENTRY_HIT_GEOMETRY);
     }
   }
 

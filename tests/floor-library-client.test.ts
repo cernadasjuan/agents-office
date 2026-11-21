@@ -11,6 +11,7 @@ const { ALL_FLOORS } = await import('../src/floors/FloorRegistry.js');
 const { setFocusedFloor } = await import('../src/floors/floorState.js');
 const { countDrawCalls } = await import('../src/scene/RenderBudget.js');
 const { libraryEntryId, libraryIndexId, librarySectionId } = await import('../src/ui/LibraryCard.js');
+const { IsometricController } = await import('../src/scene/IsometricCamera.js');
 
 setFocusedFloor(ALL_FLOORS);
 after(() => {
@@ -94,7 +95,7 @@ test('on "all floors" with more than one library configured, every one\'s sectio
   assert.deepEqual(plaqueTexts, ['vendors', 'skills']);
 });
 
-test('a focused floor with a matching library mounts one plaque and one line per shown entry, capped at 3 sections and 4 entries, with "more" signs that never hide the rest (issue #221 AC1)', () => {
+test('a focused floor with a matching library mounts one plaque and one line per shown entry, capped at 3 sections and 2 entries (FAIL round 2: fewer, wider-spaced lines so the shelf clears the room\'s own floor budget), with "more" signs that never hide the rest (issue #221 AC1)', () => {
   setFocusedFloor('pm-floor');
   const scene = sceneWithLibraryRoom();
   const extension = new FloorLibraryOfficeExtension();
@@ -113,7 +114,7 @@ test('a focused floor with a matching library mounts one plaque and one line per
 
   const lines = signs.filter((sign) => sign.userData.shelfRole === 'entry' || sign.userData.shelfRole === 'more')
     .map((sign) => (sign as THREE.Object3D & { element: HTMLElement }).element.textContent);
-  // vendors: both its entries fit under the 4-line cap, nothing truncated, not the last slot —
+  // vendors: both its entries fit under the 2-line cap, nothing truncated, not the last slot —
   // no "more" sign for it at all.
   assert.deepEqual(lines.slice(0, 2), ['Placer.ai', 'Old vendor (archived)']);
   // domain: the server's own `truncated` flag (more rows in its own INDEX.md than the entries
@@ -244,4 +245,72 @@ test('issue #221 FAIL round: in "all floors" with two libraries, the "+N more" s
 
   const moreSignId = extension.pickTargets().find((target) => target.id.startsWith('lib-index:'))?.id;
   assert.equal(moreSignId, libraryIndexId('lib-a'), 'the overflow is library A\'s own 4th section, so the sign must open A\'s index, never B\'s — B never even got a slot to overflow from');
+});
+
+test('issue #221 FAIL round 2: a library that gets zero shown sections at all (every slot already belongs to an earlier library) still gets its own reachable "+N more" sign', () => {
+  setFocusedFloor(ALL_FLOORS);
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  // Library A exactly fills all 3 wall slots on its own, with nothing of its own left over —
+  // review (round 2): scoping the "+N more" count to the last shown slot's own library (the
+  // round 1 fix) made this exact case mount no "more" sign at all, because A's own hidden-count
+  // is zero. Library B is configured too, but never gets a slot — before this fix, B would be
+  // completely unreachable with no sign of any kind.
+  const libraryA = library('floor-a', [
+    { name: 'vendors', entries: [{ title: 'Placer.ai' }] },
+    { name: 'domain', entries: [{ title: 'Proximity' }] },
+    { name: 'surfaces', entries: [{ title: 'Registry' }] },
+  ], 'lib-a');
+  const libraryB = library('floor-b', [{ name: 'skills', entries: [{ title: 'write-a-skill' }] }], 'lib-b');
+  extension.worldChanged(world([libraryA, libraryB]));
+
+  const indexTargets = extension.pickTargets().filter((target) => target.id.startsWith('lib-index:'));
+  assert.ok(indexTargets.some((target) => target.id === libraryIndexId('lib-b')),
+    'library B never got a shelf slot, but its own index must still be one click away, never silently dropped');
+});
+
+test('issue #221 FAIL round 2: the section label and its shown entry lines never overlap at the default isometric zoom', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  const sections: WorldLibrary['sections'] = [
+    { name: 'vendors', entries: [{ title: 'Placer.ai' }, { title: 'Old vendor', archived: true }], truncated: true },
+  ];
+  extension.worldChanged(world([library('pm-floor', sections)]));
+  const signs = shelfSigns(scene);
+  assert.equal(signs.length, 4, 'one plaque, two entry lines (the cap), one "more" sign for the truncated row');
+
+  // The room's own real door side (west, per `findLibraryRoomIndex`/`slotFor`'s own first-ring
+  // assignment for a freshly built office) looking along +X: build the same orthographic
+  // camera this office's own isometric view starts at (`IsometricCamera.ts`'s own starting
+  // `halfHeight = 20`), on the same 800px-tall viewport the spacing constants were measured
+  // against (`plugins/floor-library/client.ts`'s own `MEASURED_VIEWPORT_HEIGHT`).
+  const viewportWidth = 1280;
+  const viewportHeight = 800;
+  const isometric = new IsometricController();
+  isometric.halfHeight = 20;
+  isometric.target.set(26.5, 1.9, 12);
+  const camera = new THREE.OrthographicCamera();
+  isometric.applyTo(camera, viewportWidth / viewportHeight, 60);
+  camera.updateMatrixWorld();
+
+  const projectY = (position: THREE.Vector3): number => {
+    const ndc = position.clone().project(camera);
+    return ((1 - ndc.y) / 2) * viewportHeight;
+  };
+  // The same rendered chip height this office's own spacing constants were derived from
+  // (`LABEL_HEIGHT_PX` in `plugins/floor-library/client.ts`, measured with a real headless
+  // browser screenshot — `qa-237-r3-*.png` in the ticket's screenshots folder).
+  const LABEL_HEIGHT_PX = 13;
+  const byRole = (role: string) => signs.filter((sign) => sign.userData.shelfRole === role);
+  const plaqueY = projectY(byRole('plaque')[0]!.position);
+  const entryYs = byRole('entry').map((sign) => projectY(sign.position));
+  const moreY = projectY(byRole('more')[0]!.position);
+  const order = [plaqueY, ...entryYs, moreY];
+  for (let i = 0; i < order.length - 1; i++) {
+    const gap = order[i + 1] - order[i];
+    assert.ok(gap >= LABEL_HEIGHT_PX, `row ${i} to ${i + 1}: only ${gap.toFixed(1)}px apart, less than the chip's own ${LABEL_HEIGHT_PX}px height`);
+  }
 });
