@@ -240,6 +240,23 @@ export function buildHexOffice(): BuiltHexOffice {
   accents.add(kitchen);
   group.add(accents);
 
+  // Issue #242 review (root cause of the "very dark" finding): the scene's only real light
+  // sources are 3 fixed ceiling spotlights over the rect hall (`SceneSetup.ts`'s
+  // `addLighting`), each with `distance: 20` — nowhere near this structure's `HEX_OFFSET`.
+  // Ambient and hemisphere light alone render a `MeshToonMaterial` quite dark. A real ceiling
+  // lamp (`CeilingLamp.ts`) would fix it too, but its fixture mesh costs its own draw calls
+  // per instance (no shared zone) — unaffordable at 2 points of headroom. A bare point light,
+  // no fixture mesh, `castShadow: false`, costs nothing in `countDrawCalls` (lights only count
+  // when they cast a shadow) and fixes the actual cause directly.
+  const hubLight = new THREE.PointLight(0xfff5e6, 18, 25, 1);
+  hubLight.position.set(layout.hub.center.x, HEX_WALL_HEIGHT - 0.5, layout.hub.center.z);
+  hubLight.castShadow = false;
+  group.add(hubLight);
+  const officeLight = new THREE.PointLight(0xfff5e6, 14, 20, 1);
+  officeLight.position.set(layout.office.center.x, HEX_WALL_HEIGHT - 0.5, layout.office.center.z);
+  officeLight.castShadow = false;
+  group.add(officeLight);
+
   return {
     group,
     layout,

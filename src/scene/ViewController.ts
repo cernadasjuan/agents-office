@@ -182,16 +182,30 @@ export class ViewController {
    */
   private applyStartRoom(room: RoomView): void {
     if (this.currentMode === 'isometric') {
-      this.isometric.target.copy(room.bounds.getCenter(new THREE.Vector3()));
+      const target = room.bounds.getCenter(new THREE.Vector3());
+      this.isometric.target.copy(target);
+      // Issue #242 review: a room can sit outside the default overview bounds (the hex
+      // structure, deliberately clear of the rect building). Without this, the very next
+      // `retrack()` (fired by the first agent poll's `sceneChanged()`, moments after this
+      // framing) would clamp `target` straight back to the rect building, undoing the flight.
+      this.isometric.pinTarget(target);
       this.isometric.halfHeight = THREE.MathUtils.clamp(
         framedHalfHeight(room.bounds, this.aspect()),
         this.isometric.minHalfHeight,
         this.isometric.maxHalfHeight,
       );
-      // PR #200 review round: a start parameter is a flight from the view's own default
-      // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
-      // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
       this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
+      // Issue #242 review: `applyStartRoom` only ever runs once, at page load (a mid-session
+      // room jump is a double-click, which always switches to first person — never back
+      // through here). A fresh page load has no prior camera position to flight from, so this
+      // is a cut, the same as entering the isometric view itself ("Entering the isometric view
+      // cuts, it never flies" below) — and it must be: the room can be far enough outside the
+      // default overview bounds (the hex structure) that the ordinary flight-ease rate, scaled
+      // by the small default framing's own half-height, would take many real seconds to arrive
+      // (confirmed: a live screenshot of `#room=hub` 4 seconds after load still showed the
+      // camera a fifth of the way there). `this.isometricFollowRates` above still matters for
+      // any later goal edit this same tick (a resize, a bounds retrack) that should still ease.
+      this.liveIsometric = this.isometric.state();
       this.applyIsometric();
     } else {
       this.applyPose(room.standing);
@@ -454,6 +468,7 @@ export class ViewController {
       // PR #200 review round: a drag is direct manipulation, not a flight — responsive even
       // mid-correction, even right after a flight-type change (a selection, a start parameter).
       this.isometricFollowRates = DIRECT_FOLLOW_RATES;
+      this.isometric.clearPin();
       const dx = point.x - this.dragPoint.x;
       const dy = point.y - this.dragPoint.y;
       this.isometric.drag(dx, dy, canvas.clientHeight || 1);
@@ -502,6 +517,7 @@ export class ViewController {
       this.flight = null;
       // PR #200 review round: the wheel is direct manipulation, not a flight.
       this.isometricFollowRates = DIRECT_FOLLOW_RATES;
+      this.isometric.clearPin();
       // Zoom toward the cursor (issue #87, AC1), not toward the room center: the point
       // under the pointer stays under it. Falls back to a plain zoom while the canvas has
       // no on-screen size yet (e.g. a test or a hidden tab), when NDC is undefined.
@@ -679,6 +695,7 @@ export class ViewController {
     if (right === 0 && forward === 0) return;
     // PR #200 review round: WASD is direct manipulation, not a flight.
     this.isometricFollowRates = DIRECT_FOLLOW_RATES;
+    this.isometric.clearPin();
     const fast = this.panKeys.has('ShiftLeft') || this.panKeys.has('ShiftRight') ? FAST_MULTIPLIER : 1;
     const step = this.zoomDistance * PAN_SPEED_PER_DISTANCE * fast * delta;
     this.isometric.pan(right * step, forward * step);
