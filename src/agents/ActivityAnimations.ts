@@ -134,18 +134,35 @@ export function animateWalking(j: Joints, elapsed: number, dt: number): void {
   j.neck.position.y = approachY(j.neck.position.y, 1.6 + bounce, dt, 15);
 }
 
+/**
+ * `raiseHand` is the true "Gabriel, I need you" signal: it owns the right arm, whatever the
+ * activity pose does with it. `orchestrating` (issue #168) is the calm alternative for an
+ * agent that finished its own turn but still has a subagent of its own running: it owns both
+ * arms instead, for a hands-on-hips pose, and never fires together with `raiseHand` — a true
+ * call for you always wins when, somehow, both are set.
+ */
 export function animateActivity(
-  joints: Joints, activity: Activity, elapsed: number, delta: number, posture?: Posture, raiseHand = false,
+  joints: Joints, activity: Activity, elapsed: number, delta: number, posture?: Posture, raiseHand = false, orchestrating = false,
 ): void {
   postureOverride = posture;
   relaxUndrivenSideAxes(joints, activity, delta);
   // A raised hand owns the right arm: the activity pose must not pull it back down.
   const rightArm = raiseHand ? [joints.rightUpperArm.rotation.clone(), joints.rightForearm.rotation.clone()] : null;
+  // Hands on hips owns both arms, the same way, but only when there is no true call for you.
+  const hips = !raiseHand && orchestrating
+    ? [joints.leftUpperArm.rotation.clone(), joints.leftForearm.rotation.clone(), joints.rightUpperArm.rotation.clone(), joints.rightForearm.rotation.clone()]
+    : null;
   animateActivityPose(joints, activity, elapsed, delta);
   if (rightArm) {
     joints.rightUpperArm.rotation.copy(rightArm[0]);
     joints.rightForearm.rotation.copy(rightArm[1]);
     animateRaisedHand(joints, elapsed, delta);
+  } else if (hips) {
+    joints.leftUpperArm.rotation.copy(hips[0]);
+    joints.leftForearm.rotation.copy(hips[1]);
+    joints.rightUpperArm.rotation.copy(hips[2]);
+    joints.rightForearm.rotation.copy(hips[3]);
+    animateHandsOnHips(joints, delta);
   }
 }
 
@@ -154,6 +171,16 @@ function animateRaisedHand(j: Joints, t: number, dt: number): void {
   j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -2.9, dt);
   j.rightUpperArm.rotation.z = approach(j.rightUpperArm.rotation.z, -0.25 + Math.sin(t * 5) * 0.15, dt);
   j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -0.2, dt);
+}
+
+// --- HANDS ON HIPS: an orchestrator whose own subagents are busy, not asking for Gabriel (#168) ---
+function animateHandsOnHips(j: Joints, dt: number): void {
+  j.leftUpperArm.rotation.x = approach(j.leftUpperArm.rotation.x, -0.3, dt);
+  j.leftUpperArm.rotation.z = approach(j.leftUpperArm.rotation.z, 0.9, dt);
+  j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -1.9, dt);
+  j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -0.3, dt);
+  j.rightUpperArm.rotation.z = approach(j.rightUpperArm.rotation.z, -0.9, dt);
+  j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -1.9, dt);
 }
 
 function animateActivityPose(joints: Joints, activity: Activity, elapsed: number, delta: number): void {

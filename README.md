@@ -109,7 +109,7 @@ The session status comes first. The transcript tells what kind of work the agent
 
 | Session status | Activity |
 |---|---|
-| waiting (for a permission or an answer) | Waiting for you (meeting table) |
+| waiting (for a permission or an answer) | In a meeting (meeting table); reads "Waiting for you" wherever attention shows, see below |
 | idle | Taking a break (coffee machine) |
 | busy, and the newest message is text | Planning (whiteboard): the agent is thinking |
 | busy with a tool call, or no status in the file | From the newest tool call, below |
@@ -121,9 +121,15 @@ The session status comes first. The transcript tells what kind of work the agent
 | Edit or Write on `.md`, `.rst`, `.txt`, README or `docs/` | Writing docs (review desk) |
 | Edit, Write, NotebookEdit on other files, other MCP tools | Implementing (desk) |
 | EnterPlanMode, ExitPlanMode, TaskCreate, TaskUpdate | Planning (whiteboard) |
-| AskUserQuestion | Waiting for you (meeting table) |
+| AskUserQuestion | In a meeting (meeting table) |
 | Bash, see below | depends on the programs it runs |
 | Text only, no tool call | Taking a break (coffee machine) |
+
+"In a meeting" is the `meeting` activity's own label: a pose about what the agent is doing right
+now, not about whether Gabriel is needed. It is a different signal from "Waiting for you" / "Your
+turn" (see Attention below), which always wins when it applies, on the card, the panel row and
+the floating label alike. Before this, both read "Waiting for you," which made two different
+animations (a one-armed wave versus a two-armed gesture) look like the same state (issue #169).
 
 Shell commands are split into simple commands (`&&`, `;`, `|`). The first rule that matches any of them wins:
 
@@ -148,8 +154,9 @@ If a Codex home exists (`CODEX_HOME`, else `~/.codex`), the app also shows Codex
 
 ### Who needs you
 
-- **Blocked:** a session that waits for your permission or answer raises its right hand, shows an amber marker over its head, and its label reads "Waiting for you · 12 min".
-- **Your turn:** a session that finished its turn shows "Your turn · 5 min" in its label, with no marker.
+- **Blocked:** a session that waits for your permission or answer raises its right hand, shows an amber marker over its head, and reads "Waiting for you · 12 min" in its card, its panel row and its floating label alike.
+- **Your turn:** a session that finished its turn reads "Your turn · 5 min" the same way everywhere, with no marker, *unless* it is still orchestrating its own subagent — see below.
+- **Orchestrating:** a session that finished its own turn but still has a subagent of its own running never raises a hand and shows no marker: it is not blocked on you. It stands with hands on hips instead. Its text still reads "Your turn · N min"; only the pose and the signal differ.
 - **Tab title:** `(2) +5 · Agents Office` means 2 blocked and 5 waiting for your next prompt.
 
 Only a fresh wait calls for you. Each wait falls in an age band:
@@ -193,7 +200,7 @@ The panel tells you how fresh its data is:
 - After 2 failed polls in a row (no answer, an HTTP error or bad JSON), the footer turns amber and adds "retrying". After 5, it turns red and says "Server not reachable". The scene keeps the last known agents. The next good answer clears the warning.
 - A subagent at rest gave its final answer, so its label reads "Done", not "Taking a break". A main session at rest keeps "Taking a break".
 
-The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, the attention bands, the "Done" label, the "Stuck?" mark, the rooms (building layout only) and the keys. Tombstones, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it.
+The **?** button in the panel header, or the **?** key, opens a legend. It explains the beacon, the raised hand, hands on hips, the attention bands, the "Done" label, the "Stuck?" mark, the rooms (building layout only) and the keys. Tombstones, issue cards and hats appear in the legend only while their plugin is active. Esc or the close button closes it. The beacon's meaning is also reachable without opening the legend. The selected agent's card shows the same explanation on its own line whenever its beacon is on. Hovering a figure while its beacon is on shows a small tooltip near the cursor with the same text.
 
 ### Location: stations
 
@@ -418,7 +425,7 @@ AGENTS_OFFICE_PLUGINS=jira pnpm dev
 - **Click a figure** to select it (in the overview, or in first person before you engage the camera). A click on a row in the triage list also selects it. The camera flies to the selected agent and a ring in its color marks it on the floor
 - **N** selects the next agent in the triage queue (the fresh or aging attention bands, in the same order as the panel's needs-you/your-turn groups), cycling back to the first past the end. A cold start, or a current selection that left the queue, goes to the first agent in the queue
 - **Esc** clears the selection (in first person it first releases the camera). A click that misses every figure clears it too, the same as Esc (a drag release never counts as that click; a click while the first-person camera is engaged looks around instead, per issue #133)
-- **Agent card:** a selection opens a card left of the triage panel. It shows the name, a short stable id next to it, the activity, the attention band and wait, the herdr workspace, the provider (a small logo mark next to the "Codex"/"Claude Code" text, a rounded square for Claude Code and a hexagon for Codex), a "Persona / Skills" row (every persona badge, then every skill the agent used this session — without the `skills` plugin the row falls back to personas only), the subagents (a click selects one) and up to 10 linked issues, newest first, or "No linked issues". An issue reads `<repo>#N` when the server knows its repository. With the github plugin, such an issue of a configured repository is a link to GitHub. An issue number alone never links. With the `peek` plugin, the card also shows Recent, Assets and Equipment (see the peek plugin). The card updates in place on each poll. A click on another agent changes the card content. Esc or the close button closes it. The camera puts the selected figure in the free area left of the card. The floating label over the agent's figure shows the same short id on its own line, hidden in compact labels
+- **Agent card:** a selection opens a card left of the triage panel. It shows the name, a short stable id next to it, the activity (attention-overridden the same way as the panel row and the floating label — "Waiting for you" or "Your turn", never a raw activity like "Taking a break", while attention is set), the attention band and wait, the herdr workspace, the provider (a small logo mark next to the "Codex"/"Claude Code" text, a rounded square for Claude Code and a hexagon for Codex), a "Persona / Skills" row (every persona badge, then every skill the agent used this session — without the `skills` plugin the row falls back to personas only), the subagents (a click selects one) and up to 10 linked issues, newest first, or "No linked issues". An issue reads `<repo>#N` when the server knows its repository. With the github plugin, such an issue of a configured repository is a link to GitHub. An issue number alone never links. With the `peek` plugin, the card also shows Recent, Assets and Equipment (see the peek plugin). The card updates in place on each poll. A click on another agent changes the card content. Esc or the close button closes it. The camera puts the selected figure in the free area left of the card. The floating label over the agent's figure shows the same short id on its own line, hidden in compact labels
 - **F** recenters the camera on the selected agent (or flies to the first agent in the queue when none is selected) and highlights the card's "Focus in herdr" button for about 1.5 s, without sending the request: a click on the button still does that, per the decision on issue #85 (AC2/AC3)
 - **V** to switch the labels between `smart` (the default) and `all` full labels. `#labels=all` in the URL starts with all labels
 - **/** gives the triage panel's filter field the focus, opening the panel first if it is collapsed. Typing hides rows whose name and activity do not match, case-insensitively; an empty filter shows every row again. Shift+/ (`?`) still opens the legend, not the filter

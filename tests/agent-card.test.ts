@@ -122,6 +122,40 @@ test('issue #166: without the skills plugin, the row falls back to personas only
   assert.equal(items.every((li) => !li.classList.contains('skill')), true);
 });
 
+test('an idle agent with a your-turn wait shows "Your turn" in the header, not "Taking a break" (issue #168)', (t) => {
+  const { card, selection, text } = makeCard(t);
+  const idleYourTurn: AgentInfo = { id: 'idle-1', name: 'idle-1', activity: 'idle', extras: { attention: 'your-turn', waitMinutes: 5 } };
+  card.render([idleYourTurn]);
+  selection.select('idle-1');
+  assert.equal(text('.inspector-activity'), 'Your turn', 'the override wins over the raw idle activity, the same as the panel row and the label');
+  assert.equal(text('.inspector-wait'), 'Your turn · 5 min');
+});
+
+// --- Issue #170 review: labels have pointer-events none, so a hover title there never shows.
+// The card's status line is the always-reachable fallback. ---
+
+test('a fresh block shows the beacon hint in the card; an aging block does not (issue #170 review)', (t) => {
+  const { card, selection, root, text } = makeCard(t);
+  const fresh: AgentInfo = { id: 'fresh-1', name: 'fresh-1', activity: 'implementing', extras: { attention: 'waiting', waitMinutes: 4 } };
+  const aging: AgentInfo = { id: 'aging-1', name: 'aging-1', activity: 'implementing', extras: { attention: 'waiting', waitMinutes: 120 } };
+  card.render([fresh, aging]);
+
+  selection.select('fresh-1');
+  assert.ok((text('.inspector-beacon-hint') ?? '').length > 0, 'the beacon is on: the hint explains it without opening the legend');
+  assert.equal(root().querySelector<HTMLElement>('.inspector-beacon-hint')!.hidden, false);
+
+  selection.select('aging-1');
+  assert.equal(root().querySelector<HTMLElement>('.inspector-beacon-hint')!.hidden, true, 'no beacon at this age: no hint either');
+});
+
+test('an orchestrating your-turn never shows the beacon hint, even with a fresh wait (issue #168, #170 review)', (t) => {
+  const { card, selection, root } = makeCard(t);
+  const orchestrating: AgentInfo = { id: 'orc-1', name: 'orc-1', activity: 'idle', extras: { attention: 'your-turn', waitMinutes: 2, orchestrating: true } };
+  card.render([orchestrating]);
+  selection.select('orc-1');
+  assert.equal(root().querySelector<HTMLElement>('.inspector-beacon-hint')!.hidden, true, 'orchestrating never calls for you: no beacon, no hint');
+});
+
 test('the subagents list selects a subagent, and a subagent card links back to its parent', (t) => {
   const { card, selection, root, text } = makeCard(t);
   card.render([main, sub]);

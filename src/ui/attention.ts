@@ -17,7 +17,15 @@ export const STUCK_AFTER_MINUTES = 60;
 
 export type AttentionBand = 'fresh' | 'aging' | 'cold';
 
-export type Wait = Pick<AgentExtras, 'attention' | 'waitMinutes'> | undefined;
+/**
+ * The beacon and raised hand's meaning, reachable without opening the legend (issue #170): a
+ * hover title on the figure's own floating label, shown only while the beacon itself shows
+ * (`callsForYou`). Kept in sync with the Legend's own "Beacon" entry (`src/ui/Legend.ts`); that
+ * entry stays the source of truth and is unchanged by this.
+ */
+export const BEACON_HINT = `Beacon and raised hand: this agent calls for you. The wait is shorter than ${ATTENTION_BANDS.freshUnderMinutes} min.`;
+
+export type Wait = Pick<AgentExtras, 'attention' | 'waitMinutes' | 'orchestrating'> | undefined;
 
 /** The band of a wait, or undefined without attention or without a wait time. */
 export function attentionBand(wait: Wait): AttentionBand | undefined {
@@ -26,8 +34,15 @@ export function attentionBand(wait: Wait): AttentionBand | undefined {
   return wait.waitMinutes < ATTENTION_BANDS.coldFromMinutes ? 'aging' : 'cold';
 }
 
-/** Beacon and raised hand: a fresh wait. Without a wait time, a block only (the old behavior). */
+/**
+ * Beacon and raised hand: a fresh wait. Without a wait time, a block only (the old behavior).
+ * An orchestrator (issue #168, `your-turn` with its own subagent still running) never calls for
+ * you this way, however fresh its own wait looks: it is not blocked on you, so it gets the calm
+ * hands-on-hips pose instead (`src/agents/ActivityAnimations.ts`), not the raised hand or the
+ * beacon.
+ */
 export function callsForYou(wait: Wait): boolean {
+  if (wait?.attention === 'your-turn' && wait.orchestrating) return false;
   const band = attentionBand(wait);
   return band === undefined ? wait?.attention === 'waiting' : band === 'fresh';
 }

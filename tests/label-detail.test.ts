@@ -198,7 +198,7 @@ function agent(id: string, x: number, attention?: 'waiting' | 'your-turn', stuck
   };
 }
 
-function controllerSetup(options: { hash?: string; viewMode?: 'first-person' | 'overview'; zoom?: number } = {}) {
+function controllerSetup(options: { hash?: string; viewMode?: 'first-person' | 'overview'; zoom?: number; onHoverHint?: (hint: string | null, point: { x: number; y: number } | null) => void } = {}) {
   const document = dom.window.document;
   const canvas = document.createElement('canvas');
   document.body.appendChild(canvas);
@@ -218,6 +218,7 @@ function controllerSetup(options: { hash?: string; viewMode?: 'first-person' | '
     selected: () => state.selected,
     hash: options.hash,
     indicator,
+    onHoverHint: options.onHoverHint,
   });
   const compact = () => agents.filter((a) => a.figure.label.element.classList.contains('compact')).map((a) => a.info.id);
   const press = (code: string, target?: Element) => {
@@ -248,6 +249,79 @@ test('controller: the selected and the hovered agents become full', () => {
   canvas.dispatchEvent(new dom.window.MouseEvent('pointerleave'));
   controller.refresh();
   assert.deepEqual(compact(), ['mine'], 'the pointer left: the hover ends');
+});
+
+// --- The beacon hint on hover (issue #170 review): labels have pointer-events none, so a
+// title attribute there never shows. This reuses the same hover detection as label declutter. ---
+
+test('hovering an agent that calls for you reports the beacon hint and the cursor position', () => {
+  const calls: Array<[string | null, { x: number; y: number } | null]> = [];
+  const { controller, canvas, state } = controllerSetup({ onHoverHint: (hint, point) => calls.push([hint, point]) });
+  state.picked = 'blocked';
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 42, clientY: 24 }));
+  controller.refresh();
+  const [hint, point] = calls[calls.length - 1];
+  assert.ok(hint && hint.length > 0, 'the agent calls for you (a block, no wait time keeps the old behavior): a hint is reported');
+  assert.deepEqual(point, { x: 42, y: 24 });
+});
+
+test('hovering an agent that does not call for you reports no hint', () => {
+  const calls: Array<[string | null, { x: number; y: number } | null]> = [];
+  const { controller, canvas, state } = controllerSetup({ onHoverHint: (hint, point) => calls.push([hint, point]) });
+  state.picked = 'near';
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 5, clientY: 5 }));
+  controller.refresh();
+  assert.deepEqual(calls[calls.length - 1], [null, null]);
+});
+
+test('pointer lock clears the tooltip at once, and a frozen-coordinate move while locked never brings it back (review fix)', () => {
+  const calls: Array<[string | null, { x: number; y: number } | null]> = [];
+  const { controller, canvas, state } = controllerSetup({ onHoverHint: (hint, point) => calls.push([hint, point]) });
+  try {
+    // Hover a calls-for-you agent before any lock: the hint shows, as the earlier test proves.
+    state.picked = 'blocked';
+    canvas.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 42, clientY: 24 }));
+    controller.refresh();
+    assert.ok(calls[calls.length - 1][0], 'the hint shows before any lock, same as the unlocked case above');
+
+    // The lock engages with no further pointer event at all: the change handler alone, not a
+    // later refresh, must clear it at once.
+    Object.defineProperty(canvas.ownerDocument, 'pointerLockElement', { value: canvas, configurable: true });
+    canvas.ownerDocument.dispatchEvent(new dom.window.Event('pointerlockchange'));
+    assert.deepEqual(calls[calls.length - 1], [null, null], 'the lock handler itself hides the tooltip, before any refresh runs');
+
+    // A refresh afterward must not resurrect it either.
+    controller.refresh();
+    assert.deepEqual(calls[calls.length - 1], [null, null]);
+
+    // A locked pointer keeps firing pointermove with the same frozen pre-lock coordinates in a
+    // real browser (the look deltas travel in movementX/movementY instead): this must never
+    // revive the stale cursor position.
+    canvas.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 42, clientY: 24 }));
+    controller.refresh();
+    assert.deepEqual(calls[calls.length - 1], [null, null], 'a locked pointermove at the old coordinates never brings the tooltip back');
+  } finally {
+    Object.defineProperty(canvas.ownerDocument, 'pointerLockElement', { value: null, configurable: true });
+  }
+});
+
+test('the beacon tooltip still works in #labels=all mode (review fix): the hover hint is not smart-only', () => {
+  const calls: Array<[string | null, { x: number; y: number } | null]> = [];
+  const { controller, canvas, state } = controllerSetup({ hash: '#labels=all', onHoverHint: (hint, point) => calls.push([hint, point]) });
+  assert.equal(controller.mode, 'all');
+  state.picked = 'blocked';
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 7, clientY: 9 }));
+  controller.refresh();
+  const [hint, point] = calls[calls.length - 1];
+  assert.ok(hint && hint.length > 0, 'the hint still reaches the cursor in all-labels mode, even though declutter stays smart-only');
+  assert.deepEqual(point, { x: 7, y: 9 });
+});
+
+test('without a hover, no hint is reported even while an agent calls for you elsewhere', () => {
+  const calls: Array<[string | null, { x: number; y: number } | null]> = [];
+  const { controller } = controllerSetup({ onHoverHint: (hint, point) => calls.push([hint, point]) });
+  controller.update(0);
+  assert.deepEqual(calls[calls.length - 1], [null, null]);
 });
 
 test('controller, overview: far zoom compacts all but the waiting agent, close zoom shows all full', () => {
@@ -427,4 +501,45 @@ test('declutter: an agent behind the camera is never a candidate, so it cannot w
   controller.update(0);
   controller.refresh();
   assert.deepEqual(hiddenIds(agents), ['behind-camera'], 'never drawn on screen anyway, so its own label hides; "plain" is never hidden by it');
+});
+
+// --- Review fix round (issue #168, from the #152 review comment) ---
+
+test('declutter: a point closer than the near plane is never a candidate either, the same as one behind the camera (review fix)', () => {
+  const { controller, agents, camera } = declutterSetup();
+  const nearPlane = (camera as THREE.PerspectiveCamera).near;
+  // Ahead of the camera (it looks toward -z from z=30) but closer than the near plane: the
+  // renderer clips it there too, and the projection math right at that plane is unreliable.
+  const tooClose = agent('too-close', 0, 'waiting', false, 1);
+  tooClose.figure.group.position.set(0, 0, 30 - nearPlane / 2);
+  agents.push(agent('plain', 0), tooClose);
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['too-close'], 'never drawn on screen anyway, so its own label hides; "plain" is never hidden by it');
+});
+
+test('declutter: every label\'s class write happens before any getBoundingClientRect read, so one refresh forces one layout pass, not one per agent (review fix)', () => {
+  const { controller, agents } = declutterSetup({ zoom: zoomedOut });
+  agents.push(agent('a', 0), agent('b', 4));
+  const order: string[] = [];
+  for (const a of agents) {
+    const el = a.figure.label.element;
+    const originalToggle = el.classList.toggle.bind(el.classList);
+    el.classList.toggle = ((...args: Parameters<typeof originalToggle>) => {
+      order.push(`write:${a.info.id}`);
+      return originalToggle(...args);
+    }) as typeof el.classList.toggle;
+    const originalRect = el.getBoundingClientRect.bind(el);
+    el.getBoundingClientRect = () => {
+      order.push(`read:${a.info.id}`);
+      return originalRect();
+    };
+  }
+  controller.update(0);
+  controller.refresh();
+  const firstRead = order.findIndex((entry) => entry.startsWith('read:'));
+  const lastWrite = order.reduce((last, entry, index) => (entry.startsWith('write:') ? index : last), -1);
+  assert.ok(order.some((entry) => entry.startsWith('write:')), `at least one write happened: ${order.join(', ')}`);
+  assert.ok(order.some((entry) => entry.startsWith('read:')), `at least one read happened: ${order.join(', ')}`);
+  assert.ok(lastWrite < firstRead, `every write finishes before any read: ${order.join(', ')}`);
 });
