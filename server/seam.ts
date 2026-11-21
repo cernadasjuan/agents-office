@@ -70,8 +70,12 @@ export interface Enricher {
  * A session's story (issue #160), read from the archived `intent-tree.md` the
  * session plugin writes at close (never the live ledger). `personas` is checked
  * again below against `SESSION_PERSONAS`, a closed set: a reader free-texting
- * something else never leaves the server. `issues` arrives as raw
- * `"owner/repo#N"` strings; the projection turns each into a link or drops it.
+ * something else never leaves the server. `issues` arrives already resolved
+ * (review round 2: a real archived record's `tickets_referenced` is often a bare
+ * `repo#N`, with no owner; `plugins/missions/sessionStoryReader.ts` is the one
+ * place that knows the configured repo/owner list needed to resolve that, so it
+ * hands over a display label and an optional link, never a raw ref string for
+ * this module to interpret) — `label` always shows, `url` only when resolved.
  */
 export interface SessionStoryInput {
   intent?: string;
@@ -79,7 +83,7 @@ export interface SessionStoryInput {
   counts?: { done?: number; open?: number; abandoned?: number };
   doneList?: string[];
   handoffs?: string[];
-  issues?: string[];
+  issues?: Array<{ label?: string; url?: string }>;
 }
 
 /**
@@ -258,34 +262,16 @@ function repoShortName(value: unknown): string | undefined {
   return REPO_SHORT.test(short) && short !== '.' && short !== '..' ? short : undefined;
 }
 
-/** A full `owner/repo#N` reference (the session plugin's own convention, `gh_issues_referenced`). */
-const SESSION_ISSUE_REF = /^([A-Za-z0-9_.-]{1,64})\/([A-Za-z0-9_.-]{1,100})#(\d{1,7})$/;
-const DOT_SEGMENT = new Set(['.', '..']);
-
-/**
- * One session-story issue reference, with the link built from the validated repo and number.
- * Review round 1 (Codex): a `.` or `..` owner or repo segment is rejected (the character class
- * alone would let it through, same as every other `owner/repo` pattern in this file), and issue
- * 0 is rejected too (GitHub issue numbers start at 1).
- */
-function sessionIssue(ref: unknown): { repo: string; number: number; url: string } | undefined {
-  if (typeof ref !== 'string') return undefined;
-  const match = SESSION_ISSUE_REF.exec(ref);
-  if (!match) return undefined;
-  const [, owner, repo, numberText] = match;
-  if (DOT_SEGMENT.has(owner) || DOT_SEGMENT.has(repo)) return undefined;
-  const number = Number(numberText);
-  if (number < 1) return undefined;
-  return { repo: `${owner}/${repo}`, number, url: `https://github.com/${owner}/${repo}/issues/${number}` };
-}
-
 /**
  * Path-like text redacted before it reaches a free-text story field (issue #160's own AC:
  * "No path ... appears anywhere on the card", review round 1 — `displayText` alone only strips
  * control characters and truncates). Catches a `file://` URL, a `~/...` home path, a POSIX
- * absolute path of two or more segments, and a Windows drive path.
+ * path of two or more segments, a single-segment absolute path (review round 2: `/tmp`, `/etc`
+ * alone, with nothing after, were not caught by the two-or-more-segment rule), a relative path
+ * (`./x`, `../x`) and a Windows drive path. The lookbehind keeps a bare `/` or `.` mid-sentence
+ * (a fraction, an ellipsis) from being mistaken for the start of a path.
  */
-const PATH_LIKE = /file:\/\/\S+|~\/\S+|\/(?:[\w.-]+\/)+[\w.-]+|[A-Za-z]:[\\/]\S*/g;
+const PATH_LIKE = /file:\/\/\S+|~\/\S+|(?<=^|\s)\.{1,2}\/\S+|\/(?:[\w.-]+\/)+[\w.-]+|(?<=^|\s)\/[\w.-]+|[A-Za-z]:[\\/]\S*/g;
 
 function redactPaths(value: unknown): string {
   return typeof value === 'string' ? value.replace(PATH_LIKE, '[path]') : '';
@@ -327,8 +313,18 @@ function projectStory(input: SessionStoryInput | undefined) {
   const handoffs = Array.isArray(input.handoffs)
     ? input.handoffs.map((file) => displayText(file, 80).split(/[/\\]/).pop() ?? '').filter(Boolean).slice(0, STORY_MAX_HANDOFFS)
     : [];
+  // A resolved issue carries a link; an unresolved one (review round 2: a bare `repo#N` whose
+  // owner could not be resolved, or a Jira-style key) is still a real reference and still
+  // shows, just as plain text — never dropped into "no issue yet" when a ref actually exists.
   const issues = (Array.isArray(input.issues) ? input.issues : [])
-    .map(sessionIssue).filter((issue): issue is NonNullable<ReturnType<typeof sessionIssue>> => issue !== undefined).slice(0, STORY_MAX_ISSUES);
+    .map((issue) => {
+      const label = displayText(issue?.label, 40);
+      if (!label) return undefined;
+      const url = httpsUrl(issue?.url);
+      return { label, ...(url ? { url } : {}) };
+    })
+    .filter((issue): issue is { label: string; url?: string } => issue !== undefined)
+    .slice(0, STORY_MAX_ISSUES);
   if (!intent && personas.length === 0 && !counts && doneList.length === 0 && handoffs.length === 0 && issues.length === 0) return undefined;
   return {
     ...(intent ? { intent } : {}),

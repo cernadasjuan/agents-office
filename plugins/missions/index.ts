@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
 import type { Enricher, Observation, OfficePlugin, RoomInput, WorldProvider } from '../../server/seam.js';
-import { readSessionStory, SESSION_SLUG } from './sessionStoryReader.js';
+import { EMPTY_GITHUB_CONFIG, parseGithubConfig, readSessionStory, SESSION_SLUG, type GithubConfig } from './sessionStoryReader.js';
 
 /**
  * Mission war rooms. Reads mission records (`<root>/missions/<slug>/mission.yaml`)
@@ -171,7 +171,7 @@ export function missionsInToolCalls(chunk: string, known: Set<string>): string[]
 
 interface ScanState { size: number; offset: number; latest: string | null }
 
-export function missionsPlugin(roots: string[], now: () => number = Date.now): OfficePlugin {
+export function missionsPlugin(roots: string[], now: () => number = Date.now, githubConfig: GithubConfig = EMPTY_GITHUB_CONFIG): OfficePlugin {
   let cached: { at: number; missions: MissionSummary[] } | null = null;
   const scans = new Map<string, ScanState>();
 
@@ -239,7 +239,7 @@ export function missionsPlugin(roots: string[], now: () => number = Date.now): O
     return {
       id: sleeper.id,
       ...(sleeper.endedAt ? { endedAt: sleeper.endedAt } : {}),
-      ...(slug ? { name: slug, story: readSessionStory(roots, slug) ?? undefined } : {}),
+      ...(slug ? { name: slug, story: readSessionStory(roots, slug, Date.now, githubConfig) ?? undefined } : {}),
     };
   };
 
@@ -262,4 +262,8 @@ export function missionsPlugin(roots: string[], now: () => number = Date.now): O
   return { name: 'missions', enrichers: [enricher], world: [world] };
 }
 
-export default missionsPlugin(parseRoots(process.env.AGENTS_OFFICE_MISSION_ROOTS));
+export default missionsPlugin(
+  parseRoots(process.env.AGENTS_OFFICE_MISSION_ROOTS),
+  Date.now,
+  parseGithubConfig(process.env.AGENTS_OFFICE_GITHUB_REPOS, process.env.AGENTS_OFFICE_GITHUB_OWNERS),
+);

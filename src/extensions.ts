@@ -4,14 +4,16 @@ import type * as THREE from 'three';
 
 /** A session's story (issue #160): the tombstone card's data, read from the session's own
  * archived record. Absent entirely means no record was found for this tombstone; an empty
- * `issues` list on an otherwise-present story means the session named none yet. */
+ * `issues` list on an otherwise-present story means the session named none yet. An issue
+ * entry with no `url` (review round 2: a real archived record's bare `repo#N` ref, or a
+ * Jira-style key) still shows on the card, as plain text instead of a link. */
 export interface WorldSessionStory {
   intent?: string;
   personas?: string[];
   counts?: { done: number; open: number; abandoned: number };
   doneList?: string[];
   handoffs?: string[];
-  issues?: Array<{ repo: string; number: number; url: string }>;
+  issues?: Array<{ label: string; url?: string }>;
 }
 
 export interface WorldRoom {

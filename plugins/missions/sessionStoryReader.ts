@@ -30,6 +30,81 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
 }
 
+/**
+ * Which GitHub repos and owners this office is configured to know about (review round 2):
+ * a real archived record's `tickets_referenced` is often a bare `repo#N`, with no owner at
+ * all, and the reader is the one place with enough context (this config) to resolve it.
+ */
+export interface GithubConfig {
+  /** `AGENTS_OFFICE_GITHUB_REPOS`: `owner/repo` pairs, comma-separated. */
+  repos: Array<{ owner: string; repo: string }>;
+  /** `AGENTS_OFFICE_GITHUB_OWNERS`: default owners, comma-separated. Used only when exactly one is configured. */
+  owners: string[];
+}
+
+export const EMPTY_GITHUB_CONFIG: GithubConfig = { repos: [], owners: [] };
+
+const OWNER_REPO_PAIR = /^([A-Za-z0-9_.-]{1,64})\/([A-Za-z0-9_.-]{1,100})$/;
+const OWNER_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+
+/** Parses `AGENTS_OFFICE_GITHUB_REPOS` and `AGENTS_OFFICE_GITHUB_OWNERS`. Malformed entries are dropped. */
+export function parseGithubConfig(repos: string | undefined, owners: string | undefined): GithubConfig {
+  const repoList = (repos ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
+    .flatMap((entry) => {
+      const match = OWNER_REPO_PAIR.exec(entry);
+      return match ? [{ owner: match[1], repo: match[2] }] : [];
+    });
+  const ownerList = (owners ?? '').split(',').map((entry) => entry.trim()).filter((entry) => OWNER_NAME.test(entry));
+  return { repos: repoList, owners: ownerList };
+}
+
+function resolveOwner(repo: string, config: GithubConfig): string | undefined {
+  const matches = [...new Set(config.repos.filter((entry) => entry.repo === repo).map((entry) => entry.owner))];
+  if (matches.length === 1) return matches[0];
+  return config.owners.length === 1 ? config.owners[0] : undefined;
+}
+
+const FULL_ISSUE_REF = /^([A-Za-z0-9_.-]{1,64})\/([A-Za-z0-9_.-]{1,100})#(\d{1,7})$/;
+const BARE_ISSUE_REF = /^([A-Za-z0-9_.-]{1,100})#(\d{1,7})$/;
+/** A Jira-style key (`PREFIX-123`): never a GitHub issue, shown as plain text, same shape the Jira plugin already links. */
+const JIRA_KEY = /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/;
+const DOT_SEGMENT = new Set(['.', '..']);
+
+export interface ResolvedIssueRef {
+  label: string;
+  url?: string;
+}
+
+/**
+ * One issue reference, in any of three shapes a real archived record uses: a full
+ * `owner/repo#N` (`gh_issues_referenced`'s own convention), a bare `repo#N`
+ * (`tickets_referenced`'s real shape — review round 2: no owner at all), or a Jira-style key.
+ * A bare ref resolves to a link only when `config` names exactly one owner for that repo, or
+ * exactly one default owner overall; otherwise it still shows, as plain text, never dropped.
+ */
+export function resolveIssueRef(ref: string, config: GithubConfig): ResolvedIssueRef | undefined {
+  const value = ref.trim();
+  const full = FULL_ISSUE_REF.exec(value);
+  if (full) {
+    const [, owner, repo, numberText] = full;
+    if (DOT_SEGMENT.has(owner) || DOT_SEGMENT.has(repo)) return undefined;
+    const number = Number(numberText);
+    if (number < 1) return undefined;
+    return { label: `${owner}/${repo}#${number}`, url: `https://github.com/${owner}/${repo}/issues/${number}` };
+  }
+  const bare = BARE_ISSUE_REF.exec(value);
+  if (bare) {
+    const [, repo, numberText] = bare;
+    if (DOT_SEGMENT.has(repo)) return undefined;
+    const number = Number(numberText);
+    if (number < 1) return undefined;
+    const owner = resolveOwner(repo, config);
+    const label = `${repo}#${number}`;
+    return owner ? { label, url: `https://github.com/${owner}/${repo}/issues/${number}` } : { label };
+  }
+  return JIRA_KEY.test(value) ? { label: value } : undefined;
+}
+
 // A box-drawing run (the tree's connectors) or plain whitespace, stripped from a line's start
 // so `◉`-marked lines are found regardless of their nesting depth in the Intent Tree.
 const LEADING_TREE_CHARS = /^[\s│├└┌┐┘─╰╭]+/;
@@ -59,7 +134,7 @@ export function extractPersonas(body: string): string[] {
 const FRONTMATTER = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
 /** Parse one `intent-tree.md` file's contents. `null` when it is not a valid record (S6). */
-export function parseIntentTree(raw: string): SessionStoryInput | null {
+export function parseIntentTree(raw: string, config: GithubConfig = EMPTY_GITHUB_CONFIG): SessionStoryInput | null {
   const match = FRONTMATTER.exec(raw);
   if (!match) return null;
   let front: unknown;
@@ -81,13 +156,21 @@ export function parseIntentTree(raw: string): SessionStoryInput | null {
         abandoned: Number((rawCounts as Record<string, unknown>).abandoned) || 0,
       }
     : undefined;
+  // Review round 2: a real archived record's own issue refs live in `tickets_referenced`
+  // (bare `repo#N`, or a Jira key), not `gh_issues_referenced` (that field exists per the
+  // session plugin's own schema comment, but is rarely populated in practice). Read both,
+  // de-duplicated by the raw ref text, `gh_issues_referenced` first since it is already fully
+  // qualified.
+  const refs = [...new Set([...stringList(record.gh_issues_referenced), ...stringList(record.tickets_referenced)])].slice(0, MAX_ISSUES * 2);
+  const issues = refs.map((ref) => resolveIssueRef(ref, config))
+    .filter((issue): issue is ResolvedIssueRef => issue !== undefined).slice(0, MAX_ISSUES);
   return {
     intent,
     personas: extractPersonas(body),
     ...(counts ? { counts } : {}),
     doneList: extractDoneList(body),
     handoffs: stringList(record.handoffs_generated).slice(0, MAX_HANDOFFS),
-    issues: stringList(record.gh_issues_referenced).slice(0, MAX_ISSUES),
+    issues,
   };
 }
 
@@ -135,7 +218,12 @@ export function resetSessionStoryCache(): void {
 }
 
 /** A session's story, or null when no archived record exists or it does not parse. Cached per slug. */
-export function readSessionStory(roots: string[], slug: string, now: () => number = Date.now): SessionStoryInput | null {
+export function readSessionStory(
+  roots: string[],
+  slug: string,
+  now: () => number = Date.now,
+  config: GithubConfig = EMPTY_GITHUB_CONFIG,
+): SessionStoryInput | null {
   const key = `${roots.join('|')}::${slug}`;
   const cached = cache.get(key);
   if (cached && now() - cached.at < STORY_CACHE_MS) return cached.story;
@@ -143,7 +231,7 @@ export function readSessionStory(roots: string[], slug: string, now: () => numbe
   let story: SessionStoryInput | null = null;
   if (file) {
     try {
-      story = parseIntentTree(fs.readFileSync(file, 'utf-8'));
+      story = parseIntentTree(fs.readFileSync(file, 'utf-8'), config);
     } catch {
       story = null;
     }

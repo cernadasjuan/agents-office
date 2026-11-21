@@ -97,9 +97,16 @@ test('AC: a tombstone engraves its session name as a texture decal, not a CSS2D 
 test('AC: no floating sign of any kind remains on a tombstone', () => {
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', endedAt: '2026-11-18', name: 'tidy-otter' }]));
-  let sign: THREE.Object3D | undefined;
-  missionRoom.group.traverse((o) => { if (o !== missionRoom.group && (o as { element?: HTMLElement }).element?.textContent?.includes('Ended')) sign = o; });
-  assert.equal(sign, undefined);
+  // The only CSS2D-style elements left in the room are its title, lock and past-sessions
+  // signs (none of which ever names a session) — not a broad "no 'Ended' text" check, which
+  // would trivially pass now that nothing produces that text at all, tombstone or otherwise.
+  const elements: string[] = [];
+  missionRoom.group.traverse((o) => {
+    const text = (o as { element?: HTMLElement }).element?.textContent;
+    if (text) elements.push(text);
+  });
+  assert.ok(elements.length > 0, 'the room still has its own legitimate signs');
+  assert.ok(elements.every((text) => !text.includes('tidy-otter') && !text.includes('Ended')), `a stray sign named the session: ${elements}`);
 });
 
 test('AC: a tombstone with no known session name shows a plain placeholder, not a blank', () => {

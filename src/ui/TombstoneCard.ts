@@ -174,14 +174,20 @@ export class TombstoneCard {
     return this.text(this.root.ownerDocument, 'li', label);
   }
 
+  // Review round 2: a real archived record's bare `repo#N` ref (no resolvable owner) or a
+  // Jira-style key still shows here as plain text — only a resolved `url` becomes a link.
   private issueItem(issue: NonNullable<WorldSessionStory['issues']>[number]): HTMLElement {
     const doc = this.root.ownerDocument;
     const item = doc.createElement('li');
+    if (!issue.url) {
+      item.textContent = issue.label;
+      return item;
+    }
     const link = doc.createElement('a');
     link.href = issue.url;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
-    link.textContent = `${issue.repo}#${issue.number}`;
+    link.textContent = issue.label;
     item.appendChild(link);
     return item;
   }
