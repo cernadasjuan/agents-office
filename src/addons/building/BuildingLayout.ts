@@ -320,6 +320,7 @@ export class BuildingLayout implements LayoutStrategy {
     let grew = false;
     for (const [id, room] of this.missionRooms) {
       const before = room.peakCounts;
+      const previousKeys = new Set(room.stations.keys());
       room.updateCounts(counts.get(id) ?? { deskLike: 0, debugging: 0 });
       if (room.peakCounts.deskLike !== before.deskLike || room.peakCounts.debugging !== before.debugging) grew = true;
       // `updateCounts` rebuilds the room's own furniture stations (its `stations` map,
@@ -327,8 +328,13 @@ export class BuildingLayout implements LayoutStrategy {
       // first construction (`syncWorldRooms`), before any growth happened — so a grown desk
       // or debug station was never actually reachable (issue #126 review round 2: the very
       // first implementing agent in a fresh war room sat at the generic ring, not a desk).
-      // Growth never removes a key, only adds one or changes what an existing one is; a key
-      // already in this table keeps its own occupied flag, not the freshly built one's false.
+      // A key still present after a rebuild keeps its own occupied flag, not the freshly
+      // built one's false. A key a rebuild dropped (the must-haves' own furniture keys are
+      // now keyed by station type and an ordinal within that type, issue #126 review round
+      // 3: the desk grid's slots sit first in the plan, so growing one shifts every
+      // must-have's array position, but never its type or ordinal) is removed here too, so
+      // no stale entry for a piece that no longer exists stays routable.
+      for (const key of previousKeys) if (!room.stations.has(key)) this.stations.delete(key);
       for (const [key, station] of room.stations) {
         const existing = this.stations.get(key);
         this.stations.set(key, existing ? { ...station, occupied: existing.occupied } : station);

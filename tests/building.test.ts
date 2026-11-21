@@ -346,11 +346,11 @@ test('AC1/AC2/AC3: researching, planning and idle agents go to their own room\'s
   const { layout, agent } = setup();
   layout.syncWorldRooms([missionRoom()]);
   const researching = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
-  assert.match(researching.key, /^mission0_furniture_\d+$/);
+  assert.match(researching.key, /^mission0_furniture_\w+_\d+$/);
   const planning = layout.seatFor(agent('p', 'planning', { room: 'room-1' }), null)!;
-  assert.match(planning.key, /^mission0_furniture_\d+$/);
+  assert.match(planning.key, /^mission0_furniture_\w+_\d+$/);
   const idle = layout.seatFor(agent('i', 'idle', { room: 'room-1' }), null)!;
-  assert.match(idle.key, /^mission0_furniture_\d+$/);
+  assert.match(idle.key, /^mission0_furniture_\w+_\d+$/);
   // Three different pieces, not the same one shared by coincidence
   assert.equal(new Set([researching.key, planning.key, idle.key]).size, 3);
 });
@@ -426,12 +426,51 @@ test('a desk-like agent moves onto a grown desk once one exists, not forever stu
   assert.match(move!.seat.key, /mission0_furniture_/, 'onto the grown desk, not left on the generic ring');
 });
 
+// --- Issue #126 review round 3: growing one furniture station must never carry its
+// `occupied` flag onto a different one, just because growth shifted the array position
+// (the desk grid's slots sit first in the plan, so adding one shifts every must-have
+// after it by one index) ---
+
+test('growing a desk never makes the whiteboard read as falsely taken (a researcher keeps the bookshelf, a planner still gets the real whiteboard)', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const researcher = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
+  assert.match(researcher.key, /^mission0_furniture_researching_\d+$/, 'the bookshelf, a must-have, before any growth');
+
+  // An implementing agent grows the desk grid (0 -> 1), shifting the whiteboard, bookshelf
+  // and idle spots one index later in `furnishWarRoom`'s plan array.
+  const implementer = agent('i', 'implementing', { room: 'room-1' });
+  layout.seatFor(implementer, null);
+  tick(0);
+  layout.seatFor(implementer, 'implementing');
+  tick(4000);
+
+  const planner = layout.seatFor(agent('p', 'planning', { room: 'room-1' }), null)!;
+  assert.match(planner.key, /^mission0_furniture_planning_\d+$/, 'the real whiteboard, not the generic ring');
+});
+
+test('growing a debug station never makes the bookshelf read as falsely taken', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const idler = layout.seatFor(agent('x', 'idle', { room: 'room-1' }), null)!;
+  assert.match(idler.key, /^mission0_furniture_idle_\d+$/, 'a sofa seat, a must-have, before any growth');
+
+  const debugger_ = agent('b', 'debugging', { room: 'room-1' });
+  layout.seatFor(debugger_, null);
+  tick(0);
+  layout.seatFor(debugger_, 'debugging');
+  tick(4000);
+
+  const researcher = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
+  assert.match(researcher.key, /^mission0_furniture_researching_\d+$/, 'the real bookshelf, not the generic ring');
+});
+
 test('an activity change inside the same war room re-runs claimInRoom, not swallowed as "same target"', () => {
   const { layout, agent, tick } = setup();
   layout.syncWorldRooms([missionRoom()]);
   const a = agent('a', 'researching', { room: 'room-1' });
   const first = layout.seatFor(a, null)!;
-  assert.match(first.key, /^mission0_furniture_\d+$/, 'the room\'s own bookshelf (a must-have, no growth needed)');
+  assert.match(first.key, /^mission0_furniture_\w+_\d+$/, 'the room\'s own bookshelf (a must-have, no growth needed)');
 
   a.activity = 'planning';
   const immediate = layout.seatFor(a, 'researching');

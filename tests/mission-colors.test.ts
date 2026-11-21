@@ -91,6 +91,22 @@ test('a figure joining a mission after it already exists still takes that missio
   assert.notEqual(figure.joints.leftHand.userData.tint, undefined, 'picks up a hand tint too, not plain skin anymore');
 });
 
+test('a figure moving from one mission to another with the same body color still gets the new hand color (review round 3)', () => {
+  // `mission-tint-5` and `mission-tint-7` hash to palette pairs that share the first
+  // (body) color and differ only on the second (hand): a guard that compares only the
+  // body color would wrongly treat the second as a no-op.
+  const scene = new THREE.Scene();
+  const manager = managerWithLayout(scene);
+  const figure = manager.addAgent({ id: 'a', name: 'a', activity: 'implementing', extras: { room: 'mission-tint-5' } });
+  const bodyBefore = figure.accentColor.clone();
+  const tintBefore = figure.joints.leftHand.userData.tint?.clone();
+  assert.ok(tintBefore, 'has a hand tint from the first mission');
+
+  manager.setExtras('a', { room: 'mission-tint-7' });
+  assert.ok(figure.accentColor.equals(bodyBefore), 'the two missions share the same body color');
+  assert.ok(!figure.joints.leftHand.userData.tint.equals(tintBefore), 'the hand color still changed, even though the body one did not');
+});
+
 test('a mission hand color costs no extra draw call: one hand bucket for every mission in the room', () => {
   const scene = new THREE.Scene();
   const manager = managerWithLayout(scene);

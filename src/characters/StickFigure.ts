@@ -19,6 +19,7 @@ export class StickFigure {
   label: CSS2DObject;
   name: string;
   accentColor: THREE.Color;
+  private secondColor: THREE.Color | undefined;
   activity: Activity = 'idle';
   private targetActivity: Activity = 'idle';
   private transitionProgress = 1;
@@ -40,6 +41,7 @@ export class StickFigure {
   constructor(name: string, accentColor: THREE.Color, secondColor?: THREE.Color) {
     this.name = name;
     this.accentColor = accentColor.clone();
+    this.secondColor = secondColor?.clone();
     this.joints = buildSkeleton(accentColor, secondColor);
     this.label = createLabel(name, ACTIVITY_LABELS.idle);
     this.label.element.style.setProperty('--agent-color', `#${this.accentColor.getHexString()}`);
@@ -71,10 +73,15 @@ export class StickFigure {
    * construction) otherwise keeps its original color forever. Swaps the torso's cached
    * material (never a new one, the same `getToonMaterial` cache every other figure's
    * color already draws from) and the hands' per-instance tint; a no-op if unchanged.
+   * Checks both colors (issue #125 review round 3): two missions can share a body color
+   * and differ only on the hand one, so comparing the body color alone missed that the
+   * hands still needed to change.
    */
   setAccentColor(accentColor: THREE.Color, secondColor?: THREE.Color): void {
-    if (this.accentColor.equals(accentColor)) return;
+    const secondUnchanged = secondColor ? this.secondColor?.equals(secondColor) === true : this.secondColor === undefined;
+    if (this.accentColor.equals(accentColor) && secondUnchanged) return;
     this.accentColor = accentColor.clone();
+    this.secondColor = secondColor?.clone();
     this.joints.torso.material = getToonMaterial(accentColor);
     if (secondColor) {
       const tint = handTintFor(secondColor);

@@ -177,7 +177,13 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   // piece `furnishWarRoom` plans; it rebuilds only when the peak live count actually grows.
   const furniture = new THREE.Group();
   group.add(furniture);
-  const furnitureKey = (n: number) => `mission${index}_furniture_${n}`;
+  // A stable identity per piece (its station type and its ordinal among stations of that
+  // same type), not the array position `furnishWarRoom` happens to place it at (issue #125/
+  // #126 review round 3): the desk grid's slots come first in that array, so growing one
+  // desk shifts every must-have after it by one index. Keying by array position carried an
+  // existing occupant's `occupied` flag onto a now-different piece (a researcher's flag
+  // landing on the whiteboard), so a planner found the real whiteboard falsely taken.
+  const furnitureKey = (type: string, ordinal: number) => `mission${index}_furniture_${type}_${ordinal}`;
   let peakCounts: WarRoomCounts = initialCounts ? { ...initialCounts } : { deskLike: 0, debugging: 0 };
   let furnitureStationKeys: string[] = [];
 
@@ -191,8 +197,11 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
       object.userData.piece = placement.piece.name;
       place(furniture, object, frame.point(placement.a, placement.d, placement.y ?? 0), frame.faceDoor + (placement.turn ?? 0));
     });
-    plan.stations.forEach((spot, n) => {
-      const key = furnitureKey(n);
+    const ordinalByType = new Map<string, number>();
+    plan.stations.forEach((spot) => {
+      const ordinal = ordinalByType.get(spot.type) ?? 0;
+      ordinalByType.set(spot.type, ordinal + 1);
+      const key = furnitureKey(spot.type, ordinal);
       // Room-scoped, issue #126: `room:<id>:<activity>` so BuildingLayout can route an agent to
       // this room's own piece without ever matching another war room's same-named station.
       stations.set(key, station(`room:${room.id}:${spot.type}`, frame.point(spot.a, spot.d), frame.point(...spot.look), spot.posture));
