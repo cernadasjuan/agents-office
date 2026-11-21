@@ -138,5 +138,12 @@ export function createBmadEnricher(): Enricher {
   };
 }
 
-const plugin: OfficePlugin = { name: 'bmad', enrichers: [createBmadEnricher()] };
+/**
+ * Issue #253 review: `plugins/library/index.ts`'s own enricher reads `display.badges` set
+ * here, on the same `Observation` in the same poll — a negative priority (`server/seam.ts`'s
+ * `OfficePlugin.enricherPriority`, `vitePlugin.ts`'s own `orderByEnricherPriority`) guarantees
+ * this runs before any default-priority dependent, regardless of what order
+ * `AGENTS_OFFICE_PLUGINS` happens to list them in.
+ */
+const plugin: OfficePlugin = { name: 'bmad', enrichers: [createBmadEnricher()], enricherPriority: -10 };
 export default plugin;

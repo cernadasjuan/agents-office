@@ -66,6 +66,25 @@ function shelfPoint(rect: Rect, door: Door, a: number, d: number, y: number): [n
 }
 
 /**
+ * Where the door itself actually sits along its own wall, in `shelfPoint`'s own `a` coordinate
+ * (relative to the wall's own center) — issue #253 review: the NPC's own placement assumed
+ * `door.at` was always the wall's own center (true only for the office's own first ring-0
+ * slot, `door.at: 0`); the library's own usual slot (ring 0, index 1, `door.at: 9.5` on a wall
+ * that only runs `z` in `[6, 18]`) sits 2.5 units off that center, not 0. `door.at` is an
+ * absolute world coordinate (an x for a north/south door, a z for an east/west one); this
+ * reprojects it onto the same `(-nz, nx)` unit "along" axis `shelfPoint` itself uses, the same
+ * relationship `src/addons/building/rooms.ts`'s own `RoomFrame.doorAlong` has to its own
+ * `point()`, duplicated here rather than imported for the same self-containment reason
+ * `shelfPoint`'s own doc comment already gives.
+ */
+function doorAlong(rect: Rect, door: Door): number {
+  const [nx, nz] = INWARD_BY_SIDE[door.side];
+  const doorWallX = (rect.minX + rect.maxX) / 2 - (nx * ROOM_SIZE) / 2;
+  const doorWallZ = (rect.minZ + rect.maxZ) / 2 - (nz * ROOM_SIZE) / 2;
+  return nx !== 0 ? (door.at - doorWallZ) * nx : (door.at - doorWallX) * -nz;
+}
+
+/**
  * Review (issue #221 FAIL round): a hit-test box's own long axis (local X, `ENTRY_HIT_GEOMETRY`/
  * `SECTION_HIT_GEOMETRY`'s 1.0/1.2 dimension) is built to run along the shelf row — the "a"
  * axis `shelfPoint` reads above — but that axis is world Z for a west/east door room and world
@@ -233,13 +252,15 @@ const NPC_HIT_GEOMETRY = new THREE.BoxGeometry(0.7, 1.7, 0.5);
 
 /**
  * The librarian NPC (issue #248, Gabriel's own words: "doesn't do much... you can interact
- * with him, maybe he shows you the catalog"). Near the door, clear of the shelf signs
- * (`a` in `[-1.3, 0, 1.3]`, `d = SIGN_DEPTH`) and the room's own furnishing (`furnishing.ts`'s
- * `furnishLibrary`, off-center at `a = +/-2.2` and `+/-3.9`): `a = 4.8` sits just past that
- * outer shelf column, close to the door (`d = 2`) so Gabriel sees him on the way in, not
- * tucked against the far wall with the shelves themselves.
+ * with him, maybe he shows you the catalog"). Near the door (AC1) so Gabriel sees him on the
+ * way in, not tucked against the far wall with the shelves themselves — issue #253 review: a
+ * fixed `a = 4.8` assumed the door sat at the wall's own center, which only holds for the
+ * office's own first ring-0 slot. `NPC_OFFSET_FROM_DOOR` is instead a lateral nudge from
+ * wherever the door itself actually is (`doorAlong`), clear of the doorway's own
+ * `DOOR_WIDTH / 2` gap (1.2) so the NPC never stands in the opening itself, same `d = 2` depth
+ * as before (the same row the shelf grid itself starts at).
  */
-const NPC_A = 4.8;
+const NPC_OFFSET_FROM_DOOR = 2;
 const NPC_D = 2;
 const NPC_COLOR = 0x5a4a3a;
 
@@ -421,8 +442,9 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     this.npcLibraryId = libraryId;
     if (this.npc) return; // already mounted; its position never needs to move once placed
     const { rect, door } = this.slot!;
-    const position = shelfPoint(rect, door, NPC_A, NPC_D, 0);
-    const lookAt = shelfPoint(rect, door, NPC_A, NPC_D + 4, 0);
+    const npcA = doorAlong(rect, door) + NPC_OFFSET_FROM_DOOR;
+    const position = shelfPoint(rect, door, npcA, NPC_D, 0);
+    const lookAt = shelfPoint(rect, door, npcA, NPC_D + 4, 0);
     const npc = new StickFigure('Prospero', new THREE.Color(NPC_COLOR));
     npc.teleportTo(new THREE.Vector3(...position), new THREE.Vector3(...lookAt));
     this.scene!.add(npc.group);

@@ -27,9 +27,17 @@ after(() => {
 const LIBRARY_ROOM_NAME = 'room-1-library';
 
 function sceneWithLibraryRoom(): THREE.Scene {
+  return sceneWithLibraryRoomAt(1);
+}
+
+/** A scene whose library room rented a specific slot index (`RoomPlanner.ts`'s own
+ * `slotFor`) — issue #253 review: the NPC's own placement must hold for a slot whose door is
+ * off the wall's own center (index 1, the library's usual slot), not only one where it happens
+ * to be centered (index 0). */
+function sceneWithLibraryRoomAt(index: number): THREE.Scene {
   const scene = new THREE.Scene();
   const room = new THREE.Group();
-  room.name = LIBRARY_ROOM_NAME;
+  room.name = `room-${index}-library`;
   scene.add(room);
   return scene;
 }
@@ -273,6 +281,30 @@ test('the librarian NPC mounts once a library room and a library both exist, cli
   const npcTarget = targets[targets.length - 1]!;
   assert.equal(npcTarget.id, libraryIndexId('pm-lib'));
   assert.notEqual(npcTarget.object, npcGroup, 'the NPC\'s own pick target is its own hit box, not the figure root the figure batch already manages');
+});
+
+test('issue #253 review: the librarian NPC stands near the door at the library\'s own usual slot (index 1), whose door is well off the wall\'s own center', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoomAt(1); // slotFor(1): door { side: 'west', at: 9.5 } on a wall spanning z in [6, 18] — door.at is 2.5 off that wall's own center (12), not 0
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
+  const npc = extension.npcFigures()[0]!;
+  // The door itself sits at world z = 11.5 (slotFor(1)'s own rect/door math); the NPC must be
+  // close to that, not at the old fixed-`a` position (z = 16.8 — a 5.3-unit miss toward the
+  // far end of the wall, the bug this review round fixed).
+  assert.ok(Math.abs(npc.position.z - 11.5) < 3, `NPC lands near the door, not the old fixed wall-center offset (got z=${npc.position.z})`);
+  assert.ok(Math.abs(npc.position.z - 16.8) > 2, `NPC must not still land at the old (buggy) position (got z=${npc.position.z})`);
+});
+
+test('issue #253 review: the librarian NPC also stands near the door at a slot where the door happens to be centered (index 0)', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoomAt(0); // slotFor(0): door { side: 'west', at: 0 } on a wall spanning z in [-6, 6] — centered, door.at === the wall's own center
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
+  const npc = extension.npcFigures()[0]!;
+  assert.ok(Math.abs(npc.position.z - 2) < 3, `NPC lands near the (centered) door here too (got z=${npc.position.z})`);
 });
 
 test('the librarian NPC never mounts without the library room (graceful degradation), and unmounts if the library disappears', () => {

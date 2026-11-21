@@ -95,6 +95,20 @@ function isExactPath(req: IncomingMessage): boolean {
   return pathname === '' || pathname === '/';
 }
 
+/**
+ * Issue #253 review: `plugins.flatMap((plugin) => plugin.enrichers ?? [])` ran every plugin's
+ * enrichers in registration order alone — fine until one plugin's own enricher reads a field
+ * another plugin's own enricher sets on the very same `Observation` (`library`'s own `display
+ * .badges` read, set by `bmad`), which then silently depended on `AGENTS_OFFICE_PLUGINS`
+ * happening to list them in the right order. A stable sort by `enricherPriority` (default 0,
+ * `OfficePlugin`'s own doc comment) keeps every plugin's own relative order unless one
+ * explicitly opts into running earlier or later, so a reordered env var can no longer break a
+ * dependent plugin with no error anywhere.
+ */
+export function orderByEnricherPriority(plugins: OfficePlugin[]): OfficePlugin[] {
+  return [...plugins].sort((a, b) => (a.enricherPriority ?? 0) - (b.enricherPriority ?? 0));
+}
+
 export function agentDetectorPlugin(options: AgentDetectorOptions | (() => DetectedAgent[]) = {}): Plugin {
   const settings: AgentDetectorOptions = typeof options === 'function' ? { detect: options } : options;
   // IDs are stable during this server run, without publishing raw session IDs.
@@ -110,7 +124,7 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
     // Codex is built in but runs like a plugin source: its failure drops only its own agents.
     sources: [...(settings.codexHome === null ? [] : [codexSource(settings.codexHome)]),
       ...plugins.flatMap((plugin) => plugin.sources ?? [])],
-    enrichers: [floorEnricher(floorResolver), attentionEnricher(), stuckEnricher(), ...plugins.flatMap((plugin) => plugin.enrichers ?? [])],
+    enrichers: [floorEnricher(floorResolver), attentionEnricher(), stuckEnricher(), ...orderByEnricherPriority(plugins).flatMap((plugin) => plugin.enrichers ?? [])],
     world: plugins.flatMap((plugin) => plugin.world ?? []),
   });
 

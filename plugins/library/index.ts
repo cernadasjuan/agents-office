@@ -24,6 +24,12 @@ export function parseLibrarianTypes(list: string | undefined): string[] {
  * disagree about who is a librarian. The agent-type match stays as a second, narrower path
  * (AGENTS_OFFICE_LIBRARIAN_TYPES): a subagent whose own persona never ran a `bmad.py agent`
  * call but whose type is still configured as a librarian type still counts.
+ *
+ * Issue #253 review: `display.badges` is set by `plugins/bmad`'s own enricher, on the same
+ * `Observation` this one reads — order-dependent in the same poll. `plugins/bmad/index.ts`'s
+ * plugin object sets a negative `enricherPriority` for exactly this reason (`server/seam.ts`'s
+ * own doc comment), so this plugin never has to assume, or care, where `AGENTS_OFFICE_PLUGINS`
+ * happened to list the two.
  */
 export function libraryPlugin(types: string[]): OfficePlugin {
   const librarianTypes = new Set(types);
