@@ -4,14 +4,19 @@ import type { ManagedAgent } from '../../src/agents/AgentManager.js';
 import { handItemFor, faceItemFor, buildHandItem, buildFaceItem, type HandItem, type FaceKind } from './items.js';
 
 /**
- * Skills plugin, browser part (issue #167 v1, equipment catalog): equips the newest-used
- * skill's item in the right hand, and an independent, recency-free face item (glasses or
- * headphones). The head stays the persona hat's slot (`plugins/bmad/client.ts`) — a skill
- * item never competes for head space.
+ * Skills plugin, browser part (issue #167, equipment catalog): equips the one true
+ * newest-introduced item in the right hand, across both `extras.skills` (a named `Skill`
+ * tool call) and `extras.tools` (round 2: a fixed allow-list of raw built-in tool calls,
+ * `lastEquipSource` says which list had it), plus an independent, recency-free face item
+ * (glasses or headphones). The head stays the persona hat's slot (`plugins/bmad/client.ts`)
+ * — a skill or tool item never competes for head space.
  */
 
-const HAND_GROUP = 'skills-hand-item';
-const FACE_GROUP = 'skills-face-item';
+/** A `userData` marker, not `.name` (review: `.name` stays the item's own kind, from
+ * `plugins/skills/items.ts`'s `group(kind, ...)`, so a test or an inspector can tell
+ * which kind is actually worn without sniffing geometry dimensions). */
+const HAND_ITEM_MARKER = 'skillsHandItem';
+const FACE_ITEM_MARKER = 'skillsFaceItem';
 /** Held low and slightly forward, roughly where a closed hand would hold a small tool. */
 const HAND_OFFSET: [number, number, number] = [0, -0.01, 0.03];
 /** At the same depth as the eyes (StickFigureParts.ts's `FACE_DEPTH`), just above them. */
@@ -37,6 +42,11 @@ function skillsOf(managed: ManagedAgent): string[] {
   return Array.isArray(skills) ? skills.filter((skill): skill is string => typeof skill === 'string') : [];
 }
 
+function toolsOf(managed: ManagedAgent): string[] {
+  const tools = managed.info.extras?.tools;
+  return Array.isArray(tools) ? tools.filter((tool): tool is string => typeof tool === 'string') : [];
+}
+
 function removeHand(entry: Worn): void {
   entry.handGroup?.removeFromParent();
   entry.handGroup = null;
@@ -55,7 +65,8 @@ export const skillsEquipment: OfficeExtension = {
     for (const managed of agents) {
       present.add(managed.info.id);
       const skills = skillsOf(managed);
-      const hand = handItemFor(skills);
+      const tools = toolsOf(managed);
+      const hand = handItemFor(skills, tools, managed.info.extras?.lastEquipSource);
       const face = faceItemFor(skills);
       const handKey = handKeyOf(hand);
       const faceKey = face ?? '';
@@ -76,7 +87,7 @@ export const skillsEquipment: OfficeExtension = {
         if (hand) {
           entry.handGroup = buildHandItem(hand);
           entry.handGroup.position.set(...HAND_OFFSET);
-          entry.handGroup.name = HAND_GROUP;
+          entry.handGroup.userData[HAND_ITEM_MARKER] = true;
           managed.figure.joints.rightHand.add(entry.handGroup);
         }
         entry.handKey = handKey;
@@ -87,7 +98,7 @@ export const skillsEquipment: OfficeExtension = {
         if (face) {
           entry.faceGroup = buildFaceItem(face as FaceKind);
           entry.faceGroup.position.set(...FACE_OFFSET);
-          entry.faceGroup.name = FACE_GROUP;
+          entry.faceGroup.userData[FACE_ITEM_MARKER] = true;
           managed.figure.joints.head.add(entry.faceGroup);
         }
         entry.faceKey = faceKey;

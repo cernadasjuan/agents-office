@@ -80,6 +80,27 @@ function skillsFor(i: number): string[] | undefined {
 }
 
 /**
+ * Round 2 (issue #167): the raw built-in tool allow-list (`plugins/skills/index.ts`'s
+ * `TOOL_ALLOWLIST`), cycled the same way `SKILL_SEQUENCES` is, so this fixture's worst
+ * case also pins the 3 new buckets this round actually spends (`terminal-screen`,
+ * `pencil`, `globe` — `magnifier` and `open-book` are reused from the skills side, no
+ * new bucket). `lastEquipSourceFor` alternates which list actually wins the hand slot
+ * (`handItemFor`'s own tie-break otherwise always prefers `skills` when both are
+ * present), so both the tool-triggered and the skill-triggered items are exercised,
+ * not just whichever the default preference always picks.
+ */
+const TOOL_SEQUENCES: string[][] = [['Bash'], ['Grep'], ['Glob'], ['Read'], ['Edit'], ['Write'], ['WebSearch'], ['WebFetch'], ['Task']];
+
+function toolsFor(i: number): string[] {
+  return TOOL_SEQUENCES[i % TOOL_SEQUENCES.length];
+}
+
+function lastEquipSourceFor(i: number): 'skill' | 'tool' | undefined {
+  if (!skillsFor(i)) return 'tool';
+  return i % 2 === 0 ? 'tool' : 'skill';
+}
+
+/**
  * Build the office at the real size without a browser. The caller sets up a
  * jsdom `document` with a canvas stub first (toon gradients, signs, boards, cards).
  */
@@ -111,7 +132,10 @@ export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManag
   for (let i = 0; i < REAL_SIZE.agents; i++) {
     manager.addAgent({
       id: `a${i}`, name: `agent ${i}`, activity: 'implementing',
-      extras: { group: { id: `g${i % 11}`, label: `ws${i % 11}` }, badges: badgesFor(i), issues: issuesFor(i), skills: skillsFor(i) },
+      extras: {
+        group: { id: `g${i % 11}`, label: `ws${i % 11}` }, badges: badgesFor(i), issues: issuesFor(i),
+        skills: skillsFor(i), tools: toolsFor(i), lastEquipSource: lastEquipSourceFor(i),
+      },
     });
   }
   // Worst case for war-room furniture: push every open mission room past its desk cap

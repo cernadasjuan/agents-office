@@ -27,8 +27,13 @@ export interface DisplayExtras {
   groupKey?: string;
   groupLabel?: string;
   badges?: string[];
-  /** Skills used at least once this session, newest first (issue #166). Plain tokens only, the same as `badges`. */
+  /** Skills used at least once this session, newest-introduced last (issue #166). Plain tokens only, the same as `badges`. */
   skills?: string[];
+  /** A fixed allow-list of built-in tool calls (issue #167 round 2), newest-introduced last, the same convention as `skills`. */
+  tools?: string[];
+  /** Which of `skills` or `tools` had the more recently introduced entry (issue #167 round 2): the
+   * equipment catalog's hand item needs one true "newest" across both lists. */
+  lastEquipSource?: 'skill' | 'tool';
   /**
    * `repo` is the short repository name (after the slash). The projection keeps it only as a plain token.
    * `color` is the card border color, a 6-hex label color. The projection keeps it only as `rrggbb`.
@@ -246,6 +251,10 @@ const ACTIVITIES = new Set(['idle', 'planning', 'implementing', 'researching', '
 const BADGE = /^[a-z0-9-]{1,32}$/;
 /** A skill name (issue #166): same token shape `plugins/peek` already validates skill names against, a plugin's own namespace prefix (`crit:crit-cli`) included. */
 const SKILL = /^[A-Za-z0-9:_.-]{1,64}$/;
+/** The same fixed allow-list `plugins/skills/index.ts` tracks (issue #167 round 2): a raw
+ * built-in tool name reaches the client only if it is exactly one of these, whatever an
+ * enricher's own output claims. */
+const TOOL_ALLOWLIST = new Set(['Bash', 'Grep', 'Glob', 'Read', 'Edit', 'Write', 'WebSearch', 'WebFetch', 'Task']);
 
 export function displayText(value: unknown, maxLength: number): string {
   return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
@@ -465,6 +474,10 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
     const skills = Array.isArray(extras.skills)
       ? extras.skills.filter((s): s is string => typeof s === 'string' && SKILL.test(s)).slice(0, 8)
       : [];
+    const tools = Array.isArray(extras.tools)
+      ? extras.tools.filter((t): t is string => typeof t === 'string' && TOOL_ALLOWLIST.has(t)).slice(0, TOOL_ALLOWLIST.size)
+      : [];
+    const lastEquipSource = extras.lastEquipSource === 'skill' || extras.lastEquipSource === 'tool' ? extras.lastEquipSource : undefined;
     const issues = issueList(extras.issues, 5);
     const waitMinutes = wholeNumber(extras.waitMinutes, 100_000);
     const actions = actionList(extras.actions, enabledActions);
@@ -481,6 +494,8 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
       ...(extras.groupKey ? { group: { id: publicId(`group:${extras.groupKey}`), label: displayText(extras.groupLabel, 40) } } : {}),
       ...(badges.length > 0 ? { badges } : {}),
       ...(skills.length > 0 ? { skills } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
+      ...(lastEquipSource ? { lastEquipSource } : {}),
       ...(issues ? { issues } : {}),
       ...(extras.roomKey ? { room: publicId(`room:${extras.roomKey}`) } : {}),
       ...(actions ? { actions } : {}),

@@ -137,11 +137,23 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // #167 addendum, `src/furniture/ToolCrib.ts`, a small static counter in the hall) adds
   // 2 more merged draw calls (one per material it uses, `StaticMerge.ts`'s one-mesh-per-
   // material rule — the counter and its legs share one, every tool prop on it shares the
-  // other) — landing it at 424. Pinned here at 427, 424 plus 3: real headroom above the
-  // number this fixture actually and repeatably measures, not a number nobody reproduces.
-  // Each PR gets a deliberate, reviewed addition against the 424 baseline before it must
-  // recover headroom elsewhere, not just add to the margin left by the last one.
-  assert.ok(after.total <= 427, `worst case ${after.total} exceeds the pinned baseline (424) + 3`);
+  // other) — landing it at 424. Round 2 (issue #167 review) extends the server enricher
+  // to also track a fixed allow-list of raw built-in tool calls (`plugins/skills/index.ts`'s
+  // `TOOL_ALLOWLIST`) and keys 3 more catalog items on it (`terminal-screen` for `Bash`,
+  // `pencil` for `Edit`/`Write`, `globe` for `WebSearch`/`WebFetch` — `Grep`/`Glob` reuse
+  // the existing `magnifier` bucket and `Read` reuses the existing `open-book` one, tinted
+  // apart from `research`'s the same way `jira`/`klever-mr` already share `clipboard`, so
+  // neither spends a new bucket). `tests/real-size-office.ts`'s `toolsFor` cycles the full
+  // allow-list and `lastEquipSourceFor` alternates which list wins the hand slot, so this
+  // fixture's worst case actually exercises the new items, not just whichever the default
+  // skills-win preference always picks — landing it at 426. Pinned here at 429, 426 plus 3:
+  // real headroom above the number this fixture actually and repeatably measures, not a
+  // number nobody reproduces. Each PR gets a deliberate, reviewed addition against the 426
+  // baseline before it must recover headroom elsewhere, not just add to the margin left by
+  // the last one. 4 points of headroom remain against the 430 cap — the next addition must
+  // trim an existing item kind rather than ask for more budget (Gabriel: raise the cap only
+  // after measuring his own laptop).
+  assert.ok(after.total <= 429, `worst case ${after.total} exceeds the pinned baseline (426) + 3`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -165,11 +177,12 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // one per tombstone (`TombstoneNameBatch`), so the full MAX_TOMBSTONES cap across all 9
   // mission rooms this fixture builds still only costs +1. 403 became 409 with the Hero look
   // (issue #165 round 2), then 422 with the skills equipment catalog v1, then 424 with
-  // the tool crib (issue #167, both parts): see the baseline comment above. Still exactly
-  // one value across all 8 runs — the fixture's own seeded names
-  // (`tests/real-size-office.ts`) never change which hair style, face state or equipped
-  // item an agent lands on between runs, and the tool crib is one fixed static piece.
-  assert.deepEqual([...totals], [424], `expected every one of 8 runs to measure 424, got ${[...totals]}`);
+  // the tool crib, then 426 with the raw-tool allow-list review round (issue #167, all
+  // parts): see the baseline comment above. Still exactly one value across all 8 runs —
+  // the fixture's own seeded names (`tests/real-size-office.ts`) never change which hair
+  // style, face state or equipped item an agent lands on between runs, and the tool crib
+  // is one fixed static piece.
+  assert.deepEqual([...totals], [426], `expected every one of 8 runs to measure 426, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

@@ -14,18 +14,18 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { activeExtensions, setWorld, EMPTY_WORLD } = await import('../src/extensions.js');
 const { skillsEquipment } = await import('../plugins/skills/client.js');
-const { handItemFor, faceItemFor } = await import('../plugins/skills/items.js');
+const { handItemFor, faceItemFor, buildHandItem } = await import('../plugins/skills/items.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
 });
 
 function handOn(managed: ManagedAgent): THREE.Object3D | undefined {
-  return managed.figure.joints.rightHand.getObjectByName('skills-hand-item');
+  return managed.figure.joints.rightHand.children.find((child) => child.userData.skillsHandItem);
 }
 
 function faceOn(managed: ManagedAgent): THREE.Object3D | undefined {
-  return managed.figure.joints.head.getObjectByName('skills-face-item');
+  return managed.figure.joints.head.children.find((child) => child.userData.skillsFaceItem);
 }
 
 function setup() {
@@ -59,11 +59,7 @@ test('the newest (last) skill decides the hand item, not the first one used', ()
   skillsEquipment.agentsChanged!(manager.getAgents());
   const hand = handOn(managed)!;
   assert.ok(hand, 'expected a hand item');
-  let sawClipboardGeometry = false;
-  hand.traverse((object) => {
-    if (object instanceof THREE.Mesh) sawClipboardGeometry = sawClipboardGeometry || object.geometry.type === 'BoxGeometry';
-  });
-  assert.ok(sawClipboardGeometry, 'jira (the newest skill) should equip the clipboard, not git\'s wrench');
+  assert.equal(hand.name, 'clipboard', 'jira (the newest skill) should equip the clipboard, not git\'s wrench');
 });
 
 test('an unmapped skill still equips an item: the hashed toolbox, never nothing', () => {
@@ -124,4 +120,61 @@ test('two skills mapped to the same kind (jira and klever-mr, both clipboards) s
   assert.equal(kleverMr.kind, 'clipboard');
   assert.equal(jira.tint, undefined, 'the base clipboard carries no tint');
   assert.ok(kleverMr.tint, 'the klever-mr clipboard is tinted apart from the base one');
+});
+
+// --- Round 2 (issue #167): raw built-in tool items, keyed on extras.tools ---
+
+test('a raw tool call equips the matching item: Bash the terminal screen, Grep/Glob and Read reusing magnifier/open-book', () => {
+  assert.equal(handItemFor([], ['Bash'])!.kind, 'terminal-screen');
+  assert.equal(handItemFor([], ['Grep'])!.kind, 'magnifier');
+  assert.equal(handItemFor([], ['Glob'])!.kind, 'magnifier');
+  assert.equal(handItemFor([], ['Edit'])!.kind, 'pencil');
+  assert.equal(handItemFor([], ['Write'])!.kind, 'pencil');
+  assert.equal(handItemFor([], ['Read'])!.kind, 'open-book');
+  assert.equal(handItemFor([], ['WebSearch'])!.kind, 'globe');
+  assert.equal(handItemFor([], ['WebFetch'])!.kind, 'globe');
+});
+
+test('Read (a tool) and research (a skill) share the open-book shape, tinted apart, the same pattern as jira/klever-mr', () => {
+  const read = handItemFor([], ['Read'])!;
+  const research = handItemFor(['research'])!;
+  assert.equal(read.kind, 'open-book');
+  assert.equal(research.kind, 'open-book');
+  assert.equal(read.tint, undefined, 'the tool-triggered book carries no tint');
+  assert.ok(research.tint, 'the skill-triggered book is tinted apart from the tool one');
+});
+
+test('with no lastEquipSource signal (an older server, or a fixture that never set it), skills win over tools when both are present', () => {
+  const item = handItemFor(['git'], ['Bash'])!;
+  assert.equal(item.kind, 'wrench', 'skills win by default so an old server never regresses');
+});
+
+test('lastEquipSource picks the true newest across both lists, even against the default preference', () => {
+  assert.equal(handItemFor(['git'], ['Bash'], 'tool')!.kind, 'terminal-screen', 'the tool call came later');
+  assert.equal(handItemFor(['git'], ['Bash'], 'skill')!.kind, 'wrench', 'the skill call came later');
+});
+
+test('with only tools and no skills, tools equip the hand even with no lastEquipSource signal', () => {
+  assert.equal(handItemFor([], ['Bash'])!.kind, 'terminal-screen');
+});
+
+test('an unmapped tool (Task) still equips the hashed toolbox, never nothing', () => {
+  const item = handItemFor([], ['Task'])!;
+  assert.equal(item.kind, 'toolbox');
+  assert.ok(item.tint);
+});
+
+test('a hand item is scaled up from its raw template (issue #167 review: v1 items read too small at crowd zoom)', () => {
+  const group = buildHandItem({ kind: 'wrench' });
+  assert.ok(group.scale.x > 1, `expected a scale-up, got ${group.scale.x}`);
+});
+
+test('the client reads extras.tools and extras.lastEquipSource to equip the right hand item', () => {
+  const { manager } = setup();
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle', extras: { skills: ['git'], tools: ['Bash'], lastEquipSource: 'tool' } });
+  const [managed] = manager.getAgents();
+  skillsEquipment.agentsChanged!(manager.getAgents());
+  const hand = handOn(managed)!;
+  assert.ok(hand);
+  assert.equal(hand.name, 'terminal-screen', 'Bash, the true newest entry per lastEquipSource, should equip the terminal screen, not git\'s wrench');
 });

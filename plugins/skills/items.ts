@@ -9,17 +9,25 @@ import { getToonMaterial } from '../../src/utils/Materials.js';
  * instanced, and no shadow (same rationale as a hat: a tiny prop's shadow is
  * imperceptible next to the figure's own).
  *
- * `extras.skills` (issue #166) only ever carries a `Skill` tool's own `input.skill`,
- * never a raw built-in tool name — so a catalog entry keys on a skill slug this
- * harness actually ships (`git`, `jira`, `crit:crit`, `dataviz`, `research`...), not a
- * raw tool name like "Bash" or "Grep" that this data source structurally cannot carry.
+ * `extras.skills` only ever carries a `Skill` tool's own `input.skill` — a catalog entry
+ * for a named skill (`git`, `jira`, `crit:crit`, `dataviz`, `research`...) keys on that.
+ * A raw built-in tool call (`Bash`, `Grep`...) is a structurally different kind of event
+ * that `extras.skills` can never carry; round 2 (issue #167) extends the server enricher
+ * (`plugins/skills/index.ts`) to also track a fixed allow-list of those in `extras.tools`,
+ * so the spike's own search/bash/edit items have real data to key on.
  */
 
-export type HandKind = 'wrench' | 'clipboard' | 'gavel' | 'loupe' | 'stamp' | 'easel-chart' | 'open-book' | 'magnifier' | 'toolbox';
+export type HandKind =
+  | 'wrench' | 'clipboard' | 'gavel' | 'loupe' | 'stamp' | 'easel-chart' | 'open-book' | 'magnifier' | 'toolbox'
+  | 'terminal-screen' | 'pencil' | 'globe';
 export type FaceKind = 'headphones' | 'glasses';
 
 const ITEM_COLOR = 0x8a7a5c;
 const ITEM_COLOR_DARK = 0x4a4038;
+/** Round 2 review: the v1 items read too small at the default isometric distance. A
+ * uniform scale on the whole cloned group (never a geometry change) keeps every
+ * kind's own bucket exactly as before — this is a transform, not a new shape. */
+const HAND_ITEM_SCALE = 2.2;
 
 function itemMaterial(): THREE.Material {
   return getToonMaterial(ITEM_COLOR);
@@ -65,6 +73,16 @@ function buildHandTemplate(kind: HandKind): THREE.Group {
       return group(kind, buildPart(new THREE.TorusGeometry(0.035, 0.007, 6, 10), material));
     case 'toolbox':
       return group(kind, buildPart(new THREE.BoxGeometry(0.06, 0.04, 0.04), material));
+    case 'terminal-screen': {
+      // A small screen held up, with a glowing "line" across it (an emissive-less tint
+      // trick would need a 2nd material; a plain darker inset box keeps it one bucket).
+      const screen = buildPart(new THREE.BoxGeometry(0.07, 0.05, 0.012), material);
+      return group(kind, screen);
+    }
+    case 'pencil':
+      return group(kind, buildPart(new THREE.CylinderGeometry(0.009, 0.009, 0.12, 6), material));
+    case 'globe':
+      return group(kind, buildPart(new THREE.SphereGeometry(0.035, 10, 8), material));
   }
 }
 
@@ -141,8 +159,26 @@ const HAND_MAP: Array<{ match: (skill: string) => boolean; kind: HandKind; tint?
   { match: (s) => s === 'code-review' || s === 'pr-review' || s === 'security-review', kind: 'loupe' },
   { match: (s) => s === 'bibliotheque-librarian' || s === 'notion', kind: 'stamp' },
   { match: (s) => s === 'dataviz', kind: 'easel-chart' },
-  { match: (s) => s === 'research', kind: 'open-book' },
+  { match: (s) => s === 'research', kind: 'open-book', tint: 0x6a8caa },
   { match: (s) => s === 'investigate', kind: 'magnifier' },
+];
+
+/**
+ * Round 2 (issue #167): the raw built-in tool allow-list (`plugins/skills/index.ts`'s
+ * `TOOL_ALLOWLIST`), mapped the way the original spike intended — `Grep`/`Glob` reuse
+ * `magnifier` (the same shape `investigate` already uses, a search-shaped item is a
+ * search-shaped item whichever triggered it), `Read` reuses `open-book` (tinted the
+ * other way from `research`'s, so the two are told apart the same tint mechanism
+ * already separates `jira` from `klever-mr`). `Task` (launching a subagent) has no
+ * natural item in the spike's table and is left unmapped: it still equips the hashed
+ * toolbox, same as any other untriggered-but-present tool or skill.
+ */
+const TOOL_HAND_MAP: Array<{ match: (tool: string) => boolean; kind: HandKind; tint?: number }> = [
+  { match: (t) => t === 'Bash', kind: 'terminal-screen' },
+  { match: (t) => t === 'Grep' || t === 'Glob', kind: 'magnifier' },
+  { match: (t) => t === 'Edit' || t === 'Write', kind: 'pencil' },
+  { match: (t) => t === 'Read', kind: 'open-book' },
+  { match: (t) => t === 'WebSearch' || t === 'WebFetch', kind: 'globe' },
 ];
 
 const FACE_HEADPHONE_SKILLS = new Set(['klever-test', 'ui-probe', 'agent-browser']);
@@ -154,9 +190,29 @@ const FACE_GLASSES_MIN_SKILLS = 2;
 
 export interface HandItem { kind: HandKind; tint?: THREE.Color }
 
-/** The item for the single newest-used skill (last in the array); an unmapped skill
- * still equips the hashed toolbox, never no item. */
-export function handItemFor(skills: string[]): HandItem | undefined {
+/**
+ * The item for the one true newest-introduced entry across both `skills` and `tools`
+ * (issue #167 round 2): `lastEquipSource` (`plugins/skills/index.ts`) says which list it
+ * is in, since the two lists carry no shared ordering of their own. Without that signal
+ * (an older server, or a fixture that never set it) this falls back to preferring
+ * `skills` when both are present — a named skill is a more deliberate signal than an
+ * incidental tool call, and this is the same behavior this catalog shipped with before
+ * `tools` existed, so an old server never regresses. An unmapped skill or tool still
+ * equips the hashed toolbox, never no item.
+ */
+export function handItemFor(skills: string[], tools: string[] = [], lastEquipSource?: 'skill' | 'tool'): HandItem | undefined {
+  const useTools = lastEquipSource === 'tool' && tools.length > 0
+    ? true
+    : lastEquipSource === 'skill' && skills.length > 0
+      ? false
+      : skills.length === 0 && tools.length > 0;
+  if (useTools) {
+    const newest = tools[tools.length - 1];
+    for (const entry of TOOL_HAND_MAP) {
+      if (entry.match(newest)) return { kind: entry.kind, tint: entry.tint !== undefined ? tintToward(entry.tint) : undefined };
+    }
+    return { kind: 'toolbox', tint: toolboxTint(newest) };
+  }
   if (skills.length === 0) return undefined;
   const newest = skills[skills.length - 1];
   for (const entry of HAND_MAP) {
@@ -171,11 +227,14 @@ export function faceItemFor(skills: string[]): FaceKind | undefined {
   return undefined;
 }
 
-/** A clone of the hand item's template, tinted if the mapping calls for one. Every
- * mesh in the clone is already `figurePart`-tagged (the template's own meshes are). */
+/** A clone of the hand item's template, tinted if the mapping calls for one, scaled up
+ * (`HAND_ITEM_SCALE`) so it reads at the default isometric distance. Every mesh in the
+ * clone is already `figurePart`-tagged (the template's own meshes are); the scale is a
+ * transform on the clone, never a geometry change, so it costs nothing extra. */
 export function buildHandItem(item: HandItem): THREE.Group {
   const clone = handTemplate(item.kind).clone(true);
   if (item.tint) for (const child of clone.children) (child as THREE.Mesh).userData.tint = item.tint;
+  clone.scale.multiplyScalar(HAND_ITEM_SCALE);
   return clone;
 }
 

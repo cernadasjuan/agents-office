@@ -273,6 +273,20 @@ test('a skills field in the answer reaches the new agent\'s extras (issue #166 r
   assert.deepEqual(addAgent.mock.calls[0].arguments[0].extras, { skills: ['write-a-skill', 'klever-mr'] });
 });
 
+test('tools and lastEquipSource fields in the answer reach the new agent\'s extras (issue #167 round 2: EXTRA_KEYS must carry them)', async () => {
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
+    { id: 'a', name: 'agent', activity: 'implementing', tools: ['Bash', 'Read'], lastEquipSource: 'tool' },
+  ])));
+  const addAgent = mock.fn();
+  const toolsManager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent: () => undefined } as unknown as AgentManager;
+  const poller = new AgentPoller(toolsManager) as unknown as { poll(): Promise<void> };
+
+  await poller.poll();
+
+  assert.equal(addAgent.mock.callCount(), 1);
+  assert.deepEqual(addAgent.mock.calls[0].arguments[0].extras, { tools: ['Bash', 'Read'], lastEquipSource: 'tool' });
+});
+
 test('an orchestrating field in the answer reaches the new agent\'s extras (issue #168 review: EXTRA_KEYS must carry it)', async () => {
   mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
     { id: 'a', name: 'agent', activity: 'idle', attention: 'your-turn', waitMinutes: 3, orchestrating: true },
@@ -300,7 +314,8 @@ test('every key projectAgents (server/seam.ts) can emit on a live agent is carri
     internal: {},
     display: {
       attention: 'your-turn', orchestrating: true, waitMinutes: 3, groupKey: 'g', groupLabel: 'Group',
-      badges: ['sally'], skills: ['write-a-skill'], issues: [{ number: 1, title: 'a' }], roomKey: 'r',
+      badges: ['sally'], skills: ['write-a-skill'], tools: ['Bash'], lastEquipSource: 'tool',
+      issues: [{ number: 1, title: 'a' }], roomKey: 'r',
       actions: ['focus'], role: 'librarian', stuck: true, floor: 'agents-office',
     },
   }], publicId, enabledActions);
