@@ -403,6 +403,13 @@ test('agents of a mission work in its war room, their helpers stand near them, a
 
 // --- Issue #223: the display wall's live-sessions list, through the real BuildingLayout ---
 
+// uv values ground-truthed against `canvasBoardSections`'s own `draw()` pixel layout
+// (`canvasBoardSections(3.6, 1.8)`: canvas 512x256, 2 equal 128 px sections, flipY texture;
+// title at `top + 30`, rows at `top + 60 + j * 19`), not an assumed even split — see the
+// review fix in `missionRooms.ts`'s `resolveSessionRow`.
+const SECTION_TOP_PX = 128;
+const uvForCanvasY = (y: number) => 1 - y / 256;
+
 test('the sessions board picks up a mission\'s own live agents on the next tick, by agent.extras.room', () => {
   const { layout, agent, tick } = setup();
   layout.syncWorldRooms([missionRoom()]);
@@ -412,10 +419,11 @@ test('the sessions board picks up a mission\'s own live agents on the next tick,
 
   const [target] = layout.sessionsBoardPickTargets();
   assert.ok(target, 'one war room, one sessions board target');
-  // Row 0 is "blocked" (ranked first); row 1 is "working" (the only other state present).
+  // Row 0 (drawn at `top + 60`) is "blocked" (ranked first); row 1 (`top + 79`) is "working"
+  // (the only other state present).
   const hitAt = (v: number) => target.resolve!({ uv: new THREE.Vector2(0.5, v) } as THREE.Intersection);
-  assert.equal(hitAt(0.35), 'blocked-one');
-  assert.equal(hitAt(0.25), 'working-one');
+  assert.equal(hitAt(uvForCanvasY(SECTION_TOP_PX + 60)), 'blocked-one');
+  assert.equal(hitAt(uvForCanvasY(SECTION_TOP_PX + 79)), 'working-one');
 });
 
 test('an idle session still shows on its mission\'s sessions board, even though it physically sits in the lounge', () => {
@@ -425,7 +433,7 @@ test('an idle session still shows on its mission\'s sessions board, even though 
   tick(0);
 
   const [target] = layout.sessionsBoardPickTargets();
-  assert.equal(target.resolve!({ uv: new THREE.Vector2(0.5, 0.35) } as THREE.Intersection), 'idler');
+  assert.equal(target.resolve!({ uv: new THREE.Vector2(0.5, uvForCanvasY(SECTION_TOP_PX + 60)) } as THREE.Intersection), 'idler');
 });
 
 // --- Issue #191: a floor shows only its own mission war rooms ---

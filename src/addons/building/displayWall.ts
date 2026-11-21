@@ -57,9 +57,20 @@ export function sessionRows(entries: SessionEntry[], max = MAX_SESSION_ROWS): Se
 
 const STATE_MARK: Record<SessionState, string> = { blocked: '■', waiting: '●', working: '○' };
 
+// A name long enough to leave the mark, spacing and the longest state word ("blocked") within
+// the board drawer's own 44-character line cap (`canvasBoardSections`'s `draw()`,
+// `missionRooms.ts`): review fix — truncating the whole formatted line there, as before, could
+// cut off the state word entirely for a long name, so a blocked session could read as nothing
+// more than its name.
+const MAX_SESSION_NAME_LEN = 28;
+
 /** One line per row, for the board's canvas `draw(title, lines)` (`missionRooms.ts`'s
  * `canvasBoard`). A mark first, so the state reads even at a glance, the same idea as the
  * issues board's own "✓"/"○" marks. */
 export function sessionLines(rows: SessionRow[]): string[] {
-  return rows.length > 0 ? rows.map((row) => `${STATE_MARK[row.state]} ${row.name} — ${row.state}`) : ['No live sessions'];
+  if (rows.length === 0) return ['No live sessions'];
+  return rows.map((row) => {
+    const name = row.name.length > MAX_SESSION_NAME_LEN ? `${row.name.slice(0, MAX_SESSION_NAME_LEN - 1)}…` : row.name;
+    return `${STATE_MARK[row.state]} ${name} — ${row.state}`;
+  });
 }

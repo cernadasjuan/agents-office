@@ -47,3 +47,15 @@ test('sessionLines: one marked line per row, a plain placeholder with none at al
   assert.deepEqual(sessionLines(rows), ['■ alpha — blocked', '○ beta — working']);
   assert.deepEqual(sessionLines([]), ['No live sessions']);
 });
+
+// Review fix: a 60-char name (the agent projection's own cap, `server/seam.ts`) used to blow
+// past the board drawer's 44-char line cap (`canvasBoardSections`'s `draw()`, `missionRooms.ts`)
+// and take the state word down with it — a blocked session with a long name painted only its
+// mark and a truncated name, never "blocked". `sessionLines` now truncates the name, not the
+// whole line, so the state word always survives.
+test('sessionLines: a long name is truncated so the state word always survives the board drawer\'s 44-char line cap', () => {
+  const longName = 'A'.repeat(60);
+  const [line] = sessionLines(sessionRows([{ id: 'a', name: longName, extras: { stuck: true } }]));
+  assert.ok(line.endsWith('— blocked'), `expected the state word to survive, got: ${line}`);
+  assert.ok(line.length <= 44, `expected the line to already fit the drawer's own cap, got ${line.length} chars`);
+});

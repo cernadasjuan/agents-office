@@ -10,7 +10,7 @@ import { ROOM_SIZE, type Door, type Rect, type RoomSlot, type Side } from './Roo
 import { buildCeiling, buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
 import { sceneOf, setTombstoneName, tombstoneNameBatchFor, tombstoneNameplate } from './tombstoneNames.js';
 import { furnishWarRoom, WAR_ROOM_WIDTH, type WarRoomCounts } from './warRoomFurnishing.js';
-import { MAX_SESSION_ROWS, sessionLines, sessionRows, type SessionEntry, type SessionRow } from './displayWall.js';
+import { sessionLines, sessionRows, type SessionEntry, type SessionRow } from './displayWall.js';
 
 /**
  * The mission wing: war rooms north of the hall, behind its back wall, two columns either
@@ -120,6 +120,16 @@ export function canvasBoard(width: number, height: number): { mesh: THREE.Mesh; 
   return { mesh, draw };
 }
 
+// A section's own row geometry (issue #223 review): the title sits at `top + SECTION_TITLE_Y`,
+// its first content line at `top + SECTION_FIRST_ROW_Y`, each one after it `SECTION_ROW_HEIGHT`
+// px further down. `resolveSessionRow` below reads these same three numbers (not a separate,
+// assumed-even split) so the row a click resolves to can never drift from the row actually
+// drawn there again. Tuned so a 128 px section (`canvasBoardSections(3.6, 1.8)`'s own section
+// height, the one caller) fits all `MAX_SESSION_ROWS` (4) rows, not just 3 of them.
+const SECTION_TITLE_Y = 30;
+const SECTION_FIRST_ROW_Y = 60;
+const SECTION_ROW_HEIGHT = 19;
+
 /**
  * A board split into equal horizontal sections, each its own title and lines (issue #223): the
  * kanban board also carries the live-sessions list, on the same mesh, so the display wall adds
@@ -140,6 +150,7 @@ export function canvasBoardSections(width: number, height: number): { mesh: THRE
     ctx.fillStyle = '#f7f3ea';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     const sectionHeight = canvas.height / sections.length;
+    const rowCapacity = Math.floor((sectionHeight - (SECTION_FIRST_ROW_Y - SECTION_ROW_HEIGHT / 2)) / SECTION_ROW_HEIGHT);
     sections.forEach((section, i) => {
       const top = i * sectionHeight;
       if (i > 0) {
@@ -151,9 +162,9 @@ export function canvasBoardSections(width: number, height: number): { mesh: THRE
       }
       ctx.fillStyle = '#2a2a3e';
       ctx.font = 'bold 26px system-ui, sans-serif';
-      ctx.fillText(section.title.slice(0, 34), 16, top + 30);
-      ctx.font = '19px system-ui, sans-serif';
-      section.lines.slice(0, Math.floor((sectionHeight - 44) / 24)).forEach((line, j) => ctx.fillText(line.slice(0, 44), 16, top + 60 + j * 24));
+      ctx.fillText(section.title.slice(0, 34), 16, top + SECTION_TITLE_Y);
+      ctx.font = '16px system-ui, sans-serif';
+      section.lines.slice(0, rowCapacity).forEach((line, j) => ctx.fillText(line.slice(0, 44), 16, top + SECTION_FIRST_ROW_Y + j * SECTION_ROW_HEIGHT));
     });
     texture.needsUpdate = true;
   };
@@ -306,6 +317,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   // repaints from the latest of each, never half-stale.
   let lastKanbanLines: string[] = [];
   let currentSessionRows: SessionRow[] = [];
+  let lastSessionsSignature = '';
   const redrawKanban = () => boards.kanban.draw([
     { title: 'Kanban', lines: lastKanbanLines },
     { title: 'Sessions', lines: sessionLines(currentSessionRows) },
@@ -317,12 +329,23 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   // top); a hit in the kanban half, in the section's own title band, or past the last row
   // actually drawn resolves to no selection (not the nearest row) — a stale row position must
   // never pretend to be the session that used to be there.
+  //
+  // Review fix: this must mirror `canvasBoardSections`'s own `draw()` pixel layout for this
+  // board (`canvasBoardSections(3.6, 1.8)`, two sections — canvas 512x256, each section
+  // 128 px tall: `SECTION_HEIGHT_PX` below), not an assumed even split across title +
+  // MAX_SESSION_ROWS slots. An even split drifts from the real layout: verified, the row
+  // drawn at the top of the list resolved one row too low, and a click on the "Sessions"
+  // title itself wrongly resolved to the first row. `SECTION_FIRST_ROW_Y`/`SECTION_ROW_HEIGHT`
+  // are the same two constants `draw()` itself paints rows at, so this can never drift again.
+  const SECTION_HEIGHT_PX = 128; // canvasBoardSections(3.6, 1.8), 2 sections: 256 / 2
   const resolveSessionRow = (hit: THREE.Intersection): string | null => {
     if (!hit.uv || hit.uv.y >= 0.5) return null;
-    const localV = hit.uv.y / 0.5;
-    const band = 1 / (MAX_SESSION_ROWS + 1);
-    if (localV > 1 - band) return null; // the "Sessions" section title
-    const rowIndex = Math.floor((1 - band - localV) / band);
+    // flipY texture: uv.y = 0.5 is this section's top edge (the kanban/sessions divider),
+    // uv.y = 0 is the canvas's bottom edge.
+    const yFromSectionTop = SECTION_HEIGHT_PX * (1 - hit.uv.y / 0.5);
+    const firstRowBoundary = SECTION_FIRST_ROW_Y - SECTION_ROW_HEIGHT / 2;
+    if (yFromSectionTop < firstRowBoundary) return null; // the "Sessions" section title
+    const rowIndex = Math.floor((yFromSectionTop - firstRowBoundary) / SECTION_ROW_HEIGHT);
     return currentSessionRows[rowIndex]?.id ?? null;
   };
 
@@ -413,7 +436,15 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
     tombstonePickTargets: () => [...tombstones].map(([id, { object }]) => ({ id, object })),
     issuesBoardPickTarget: () => ({ id: `issues:${room.id}`, object: boards.issues.mesh }),
     updateSessions(entries: SessionEntry[]) {
-      currentSessionRows = sessionRows(entries);
+      // Review fix: `BuildingLayout.update()` calls this every animation frame (through
+      // `growMissionFurniture`), not only on the 3 s agent poll the comment above assumed —
+      // redraw (and texture upload) only when the rows actually changed, the same render-on-
+      // change rule every other board redraw in this file already follows.
+      const rows = sessionRows(entries);
+      const signature = rows.map((row) => `${row.id}:${row.name}:${row.state}`).join('|');
+      if (signature === lastSessionsSignature) return;
+      lastSessionsSignature = signature;
+      currentSessionRows = rows;
       redrawKanban();
     },
     sessionsBoardPickTarget: () => ({ id: `sessions-board:${room.id}`, object: boards.kanban.mesh, resolve: resolveSessionRow }),
