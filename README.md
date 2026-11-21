@@ -270,6 +270,12 @@ AGENTS_OFFICE_PORTRAIT=/path/to/me.png pnpm dev:fork
 - The file must be a PNG, JPEG, WebP or GIF of at most 2 MB, and its first bytes must match its extension. SVG is never served. Any other file, a folder or a missing file gives the placeholder (the route answers 204).
 - Do not commit a personal picture to the repository.
 
+### Floors (issue #118, step one)
+
+Each session's floor is resolved from its own working directory, server-side: the short name of the git repository that holds it (a worktree resolves to its main repository), whitelisted the same way an issue card's `repo` is. A session with no resolvable repository lands on the shared `general` floor. The building layout opens on one focused floor at a time — a floor switch menu in the panel header (every floor with a tracked session right now, plus the focused one) lists them; choosing a different one remembers it and reloads the page focused there, the same "the page reloads" pattern **Shift+L** already uses for a layout switch. `#floor=<name>` in the URL opens directly on that floor; otherwise the last floor you visited, else general (a fresh page load has not polled any agent yet, so there is no "busiest floor" to pick from before the first poll answers — the switch menu surfaces it instead, one click away, once agents are known). An agent on an unfocused floor is not added to the scene at all: only the focused floor's rooms, agents and sessions render; every other floor's room list stays as saved state (its own `localStorage` key) until you switch to it. Today's single building migrates once, automatically, to the `agents-office` floor's own key, with no data lost and no dual-read path kept.
+
+This is step one of three (issue #118): a floor's own library, missions board and GitHub kanban (issue #191), and Gabriel's one personal office in a lobby layer above the floors with a cross-floor waiting queue (issue #192), are later steps — not built yet. Today the office (room 0) always builds the same way regardless of which floor is focused; it does not yet hold a dedicated lobby queue.
+
 ## Plugins
 
 Optional plugins add data from other tools. None run by default.

@@ -61,6 +61,16 @@ function isLibrarian(extras: LayoutAgent['extras']): boolean {
 }
 
 export const BUILDING_STORAGE_KEY = 'agents-office.building.rooms';
+/**
+ * Each floor keeps its own room-kind list under its own storage key (issue #118 floors
+ * design: `BUILDING_STORAGE_KEY` becomes `BUILDING_STORAGE_KEY:<floor>`). Without a floor
+ * name (`BuildingOptions.floor` unset, the shape every building-layout test used before
+ * floors shipped), the legacy bare key stays untouched: a feature appears only when its
+ * data exists (rule 3).
+ */
+export function floorStorageKey(floor?: string): string {
+  return floor ? `${BUILDING_STORAGE_KEY}:${floor}` : BUILDING_STORAGE_KEY;
+}
 /** A war room's peak desk/debug counts, by room id (issue #129 review round 2): without
  * this, a reload while the room happens to be empty resets its peak to zero in memory,
  * undoing the never-shrinks rule the furniture itself otherwise keeps. */
@@ -128,6 +138,8 @@ export interface BuildingOptions {
   storage?: Pick<Storage, 'getItem' | 'setItem'>;
   /** A real wall clock (epoch ms), for the missions board's elapsed/duration timer. Defaults to `Date.now`. */
   wallClock?: () => number;
+  /** The focused floor's name (issue #118): its own room-kind list lives at `floorStorageKey(floor)`. Unset keeps the legacy single-building key. */
+  floor?: string;
 }
 
 /**
@@ -147,6 +159,7 @@ export class BuildingLayout implements LayoutStrategy {
   private wallClock: () => number;
   private dwellMs: number;
   private storage: BuildingOptions['storage'];
+  private floor: string | undefined;
   private lastQueueRefresh = -Infinity;
   private lastMissionsBoardRefresh = -Infinity;
   private missionBoardEntries: MissionBoardEntry[] = [];
@@ -157,6 +170,7 @@ export class BuildingLayout implements LayoutStrategy {
     this.wallClock = options.wallClock ?? (() => Date.now());
     this.dwellMs = options.dwellMs ?? DEFAULT_DWELL_MS;
     this.storage = options.storage;
+    this.floor = options.floor;
     this.hideHallSideWalls();
     placeMissionsBoard(this.missionsBoard.mesh, this.scene);
     this.missionsBoard.draw([], this.wallClock());
@@ -671,7 +685,7 @@ export class BuildingLayout implements LayoutStrategy {
    */
   private rememberedRooms(): RoomKind[] {
     try {
-      const parsed: unknown = JSON.parse(this.storage?.getItem(BUILDING_STORAGE_KEY) ?? '[]');
+      const parsed: unknown = JSON.parse(this.storage?.getItem(floorStorageKey(this.floor)) ?? '[]');
       const kinds = Object.keys(ROOM_STATION_TYPE);
       if (!Array.isArray(parsed)) return [];
       return parsed
@@ -686,7 +700,7 @@ export class BuildingLayout implements LayoutStrategy {
 
   private saveRooms(): void {
     try {
-      this.storage?.setItem(BUILDING_STORAGE_KEY, JSON.stringify(this.rooms.map((room) => room.kind)));
+      this.storage?.setItem(floorStorageKey(this.floor), JSON.stringify(this.rooms.map((room) => room.kind)));
     } catch {
       // Storage full or blocked: the building still works for this page
     }

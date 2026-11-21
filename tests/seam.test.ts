@@ -80,6 +80,17 @@ test('an issue card keeps only a cleaned short repository token', () => {
   ]);
 });
 
+test('floor keeps only a cleaned short token, the same whitelist an issue card repo uses (issue #118)', () => {
+  const floorOf = (floor: unknown) => projectAgents([observation({ display: { floor: floor as string } })], publicId)[0].floor;
+
+  assert.equal(floorOf('agents-office'), 'agents-office');
+  assert.equal(floorOf('general'), 'general');
+  assert.equal(floorOf('<img src=x>'), undefined);
+  assert.equal(floorOf('..'), undefined);
+  assert.equal(floorOf('x'.repeat(41)), undefined);
+  assert.equal(floorOf(undefined), undefined);
+});
+
 test('an issue card keeps a label color only as a cleaned 6-hex token', () => {
   const cleaned = (color: unknown) => projectAgents([observation({ display: { issues: [
     { number: 1, title: 'a', color: color as string },

@@ -105,6 +105,15 @@
     }
     #ui-panel h2 { font-size: 14px; color: #fff; }
     .view-status { font-size: 11px; color: #a8b8ff; margin-top: 2px; }
+    .floor-switch-container { margin-top: 4px; }
+    .floor-switch {
+      font-size: 11px;
+      color: #e0e0ff;
+      background: rgba(30, 30, 60, 0.7);
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 4px;
+      padding: 2px 4px;
+    }
     .panel-buttons { display: flex; gap: 4px; }
     .panel-button {
       background: none;
@@ -391,6 +400,7 @@
       <div class="panel-title">
         <h2>Agents Office <span id="label-mode" class="label-mode"></span></h2>
         <div id="view-status" class="view-status"></div>
+        <div id="floor-switch-container" class="floor-switch-container" hidden></div>
       </div>
       <div class="panel-buttons">
         <button type="button" id="legend-button" class="panel-button">?</button>

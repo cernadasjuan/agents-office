@@ -41,6 +41,11 @@ export interface DisplayExtras {
   role?: string;
   /** Busy with no transcript write for STUCK_AFTER_MINUTES (src/ui/attention.ts). */
   stuck?: boolean;
+  /** The whitelisted short repo name the session's working directory resolved to, or the
+   * shared `'general'` floor (issue #118, `server/floor.ts`'s built-in enricher). Same token
+   * shape as `repo` on an issue card: the projection re-validates it, never trusts the
+   * enricher's own output blindly. */
+  floor?: string;
 }
 
 /** One agent as the server sees it. `internal` never leaves the server. */
@@ -414,6 +419,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
     const issues = issueList(extras.issues, 5);
     const waitMinutes = wholeNumber(extras.waitMinutes, 100_000);
     const actions = actionList(extras.actions, enabledActions);
+    const floor = repoShortName(extras.floor);
     return {
       id: publicId(agent.id),
       name: displayText(agent.name, 60),
@@ -431,6 +437,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
       ...(actions ? { actions } : {}),
       ...(typeof extras.role === 'string' && BADGE.test(extras.role) ? { role: extras.role } : {}),
       ...(extras.stuck === true ? { stuck: true as const } : {}),
+      ...(floor ? { floor } : {}),
     };
   });
 }
