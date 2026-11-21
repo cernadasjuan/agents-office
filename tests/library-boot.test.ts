@@ -70,7 +70,15 @@ test("roomStanding still faces the sparse section's own lone shelf, not a generi
   const placements = [shelfPlacement(0)];
   const standing = roomStanding(frame, placements);
   const roomCenter = frame.point(0, ROOM_SIZE / 2, 0.6);
-  assert.notEqual(standing.lookAt.x, roomCenter.x, 'still looks down the lone shelf\'s own column, not the room\'s generic middle');
+  // review round 4: `slotFor(0)`'s own door is on the room's west wall, so `frame.point`'s
+  // "along" (column) axis runs over world Z here, not X — comparing `.x` only ever captures
+  // the depth difference (`roomStanding`'s own `d`), which this fix never touched, so the
+  // assertion passed whether or not the column centering logic was actually broken. Project
+  // onto the frame's own `along` vector instead of assuming which world axis it happens to be,
+  // so this stays correct for a room whose door sits on any of its four walls.
+  const lookAtAlong = new THREE.Vector3().subVectors(standing.lookAt, frame.point(0, 0, 0)).dot(frame.along);
+  const roomCenterAlong = new THREE.Vector3().subVectors(roomCenter, frame.point(0, 0, 0)).dot(frame.along);
+  assert.notEqual(lookAtAlong, roomCenterAlong, 'still looks down the lone shelf\'s own column, not the room\'s generic middle');
 });
 
 test('issue #245 round 3 review: the standing position and look-at never land on the same depth (a degenerate, straight-down look direction)', () => {
@@ -95,7 +103,11 @@ test("issue #245 round 3 review: a rented section's own door is still a walk-thr
   const sections = sectionRoomLayouts([{ name: 'vendors', entries: [] }]); // section 0: ring 0, door on HALL's east side
   const colliders = buildEntranceHall(scene, sections.map((section) => section.slot));
   const { x } = moveWithCollision(0, 0, 1000, 0, colliders); // walking east, straight at the rented section's own door
-  assert.ok(x > 14, `blocked at the door's own gap instead of walking through it, stopped at x=${x}`);
+  // review round 4: a fully sealed hall (no door at all) still stops just short of the wall
+  // itself, at x=14.4 (`WALL_MARGIN` short of `HALL.maxX`'s own 15) — `x > 14` alone passes
+  // whether or not the door gap actually exists. Only a position past `HALL.maxX` proves the
+  // camera actually walked through an opening, not just up to the wall's own collision margin.
+  assert.ok(x > HALL.maxX, `blocked at the door's own gap instead of walking through it, stopped at x=${x}`);
 });
 
 test('issue #245 round 3 review: the same side stays solid everywhere except at the actual door gap', () => {
