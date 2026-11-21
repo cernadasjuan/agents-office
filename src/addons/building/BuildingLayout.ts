@@ -296,7 +296,12 @@ export class BuildingLayout implements LayoutStrategy {
         else if (byTitle.length > 1) console.debug(`roomView("${name}") matches more than one mission room by title; none resolved`);
       }
     }
-    return slot ? roomViewFromSlot(slot) : null;
+    if (slot) return roomViewFromSlot(slot);
+    // Issue #218 step 2/3 review: `#room=hub` / `#room=hex-office` frame the new hex rooms,
+    // the same way `#room=office` already frames the rect one. Checked last so none of the
+    // names above (`office` included: the rect room keeps that name, see `HexRooms.ts`) ever
+    // resolve differently than before.
+    return this.hexOffice.roomView(query);
   }
 
   /**

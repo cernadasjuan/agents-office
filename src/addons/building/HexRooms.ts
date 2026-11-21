@@ -6,14 +6,18 @@
  * colliders.
  *
  * Draw-call budget (issue #218 step 1's own render-budget note: main sat at 424/430 before
- * this PR, only 6 calls of headroom): every hex wall shares one material, the Hub and Office
- * floors use two (a deliberate two-tone distinction), the walkway deck and both ramps share
- * one, and the Hub's placeholder furniture (elevator, kitchen, play corner) shares one more —
- * 5 new draw calls total, regardless of room or furniture count, the same `markStatic` merge
- * story every other room in this fork already uses. None of this new geometry casts a shadow
- * (`castShadow: false` throughout): the structure sits far from the main building and its own
- * lights, and 6 calls of headroom has no room left for 3 shadow-map passes on top of 5 main
- * calls — a cost to revisit once more of the hex office exists. Real, per-piece furniture (the
+ * this PR, only 6 calls of headroom): every hex wall shares one material, both hex floors
+ * share one (review: a two-tone split was purely cosmetic and not worth a 5th call), the
+ * walkway deck and both ramps share one, and the Hub's placeholder furniture (elevator,
+ * kitchen, play corner) shares one more — 4 new draw calls total, regardless of room or
+ * furniture count, the same `markStatic` merge story every other room in this fork already
+ * uses. None of this new geometry casts a shadow (`castShadow: false` throughout): the
+ * structure sits far from the main building and its own lights, and 6 calls of headroom has
+ * no room for shadow-map passes on top of the main-pass cost. New pin: 428/430 — see the
+ * budget rule in issue #217: every later step that adds hex geometry pays for itself by
+ * deleting the rect-building code it replaces in the same PR (step 4 deletes the rect
+ * library's room path, step 5 deletes the mission corridor), so this budget never needs a cap
+ * raise before step 7 deletes the legacy rect system outright. Real, per-piece furniture (the
  * office desk, the queue station, the Hub's leftover desks) is explicitly deferred to the
  * plan's own step 7 ("ship the open-office leftover-desk furnishing"); this PR's AC only
  * needs the Hub reachable with an elevator and kitchen object present, not the full
@@ -36,12 +40,14 @@ import {
   WALKWAY_WIDTH,
 } from './HexRoomPlanner.js';
 import type { HexPoint } from './HexPlanner.js';
+import { FIGURE_EYE_HEIGHT } from '../../characters/StickFigureParts.js';
 
 /** A stone tone distinct from the rect building's own `Colors.wall`, so the two structures
  * read as separate at a glance in the isometric view. */
 const HEX_WALL_COLOR = 0xcbbfa6;
-const HUB_FLOOR_COLOR = 0x6f6456;
-const OFFICE_FLOOR_COLOR = 0x8a6f5a;
+/** One shared floor tone for the Hub and Office (review: a two-tone split cost a 5th draw
+ * call for a purely cosmetic distinction — not worth it against a 1-point budget margin). */
+const HEX_FLOOR_COLOR = 0x6f6456;
 /** The walkway deck and both ramps: a cooler, metal-grate tone (the "wire mesh bridge"). */
 const WALKWAY_COLOR = 0x5a6670;
 /** The Hub's placeholder furniture (elevator, kitchen counter, play corner): one shared
@@ -151,11 +157,40 @@ function buildKitchenCorner(): THREE.Group {
   return group;
 }
 
+/**
+ * Where the camera should go to show a hex room (issue #242 review: `#room=hub` /
+ * `#room=hex-office`, the same `RoomView` shape `BuildingLayout.roomView` already returns for
+ * a rect room). `hex-office`, not `office` (that name is already the rect office's own, and
+ * both rooms exist side by side until step 7 deletes the rect system — resolving `office` to
+ * the rect room keeps its existing behavior and tests unchanged). Standing a third of the way
+ * in from the open (stair) edge, facing the center, the same framing rule `roomViewFromSlot`
+ * uses for a rect room's door wall.
+ */
+function hexRoomView(room: HexRoomGeometry): { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } {
+  const xs = room.corners.map((c) => c.x);
+  const zs = room.corners.map((c) => c.z);
+  const bounds = new THREE.Box3(
+    new THREE.Vector3(Math.min(...xs), 0, Math.min(...zs)),
+    new THREE.Vector3(Math.max(...xs), HEX_WALL_HEIGHT, Math.max(...zs)),
+  );
+  const a = room.corners[room.openEdge];
+  const b = room.corners[(room.openEdge + 1) % 6];
+  const openMid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+  const toward = new THREE.Vector3(room.center.x - openMid.x, 0, room.center.z - openMid.z).normalize();
+  const position = new THREE.Vector3(openMid.x, 0, openMid.z).addScaledVector(toward, room.radius * 0.6);
+  position.y = FIGURE_EYE_HEIGHT;
+  const lookAt = position.clone().addScaledVector(toward, 4);
+  return { bounds, standing: { position, lookAt } };
+}
+
 export interface BuiltHexOffice {
   group: THREE.Group;
   layout: HexOfficeLayout;
   wallColliders: WallRect[];
   surfaceHeightAt(x: number, z: number): number | null;
+  /** `#room=hub` / `#room=hex-office` (issue #242 review). Unknown names return null, the
+   * same contract `BuildingLayout.roomView` already keeps for a rect room. */
+  roomView(name: string): { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null;
 }
 
 /** Builds the Hub and Office hex rooms and the walkway/stair between them, merged into one
@@ -176,8 +211,8 @@ export function buildHexOffice(): BuiltHexOffice {
   const floors = new THREE.Group();
   floors.name = 'hex-floors';
   markStatic(floors, { zone: 'hex-floors', castShadow: false });
-  floors.add(buildHexFloor(layout.hub, HUB_FLOOR_COLOR));
-  floors.add(buildHexFloor(layout.office, OFFICE_FLOOR_COLOR));
+  floors.add(buildHexFloor(layout.hub, HEX_FLOOR_COLOR));
+  floors.add(buildHexFloor(layout.office, HEX_FLOOR_COLOR));
   group.add(floors);
 
   const walkwayMaterial = getToonMaterial(WALKWAY_COLOR);
@@ -210,5 +245,11 @@ export function buildHexOffice(): BuiltHexOffice {
     layout,
     wallColliders: hexWallColliders(layout),
     surfaceHeightAt: (x: number, z: number) => hexSurfaceHeightAt(layout, x, z),
+    roomView: (name: string) => {
+      const query = name.trim().toLowerCase();
+      if (query === 'hub') return hexRoomView(layout.hub);
+      if (query === 'hex-office') return hexRoomView(layout.office);
+      return null;
+    },
   };
 }

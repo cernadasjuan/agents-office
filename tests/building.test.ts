@@ -767,6 +767,28 @@ test('roomView returns null for a kind that is not yet open and for any unknown 
   assert.equal(layout.roomView(''), null);
 });
 
+// --- roomView: the hex Hub and Office (issue #218 steps 2/3 review, #room=hub/#room=hex-office) ---
+
+test('roomView("hub") and roomView("hex-office") frame the new hex rooms, "office" still frames the rect one', () => {
+  const { layout } = setup();
+  const hub = layout.roomView('hub')!;
+  const hexOffice = layout.roomView('hex-office')!;
+  assert.ok(hub, 'the hub always exists');
+  assert.ok(hexOffice, 'the hex office always exists');
+  assert.ok(hub.bounds.max.y > hub.bounds.min.y, 'has floor-to-wall height');
+  assert.ok(hexOffice.bounds.max.y > hexOffice.bounds.min.y, 'has floor-to-wall height');
+  // The hex office and the rect office are two different rooms: #room=office must keep
+  // resolving to the rect room, unchanged by the hex structure's own existence.
+  const rectOffice = layout.roomView('office')!;
+  assert.notDeepEqual(rectOffice.bounds, hexOffice.bounds);
+});
+
+test('roomView("hub")/("hex-office") is case-insensitive and trims whitespace, like every other roomView name', () => {
+  const { layout } = setup();
+  assert.deepEqual(layout.roomView('HUB'), layout.roomView('hub'));
+  assert.deepEqual(layout.roomView('  Hex-Office  '), layout.roomView('hex-office'));
+});
+
 test('roomView matches a mission room by its slugified title or its public id — through the real projectWorld projection (review fix 2)', () => {
   const { layout } = setup();
   assert.equal(layout.roomView('media-plan-q1'), null, 'not open yet');
