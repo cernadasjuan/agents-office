@@ -135,6 +135,85 @@ test('a stuck field in the answer reaches the new agent\'s extras', async () => 
   assert.deepEqual(addAgent.mock.calls[0].arguments[0].extras, { stuck: true });
 });
 
+// --- Floor filtering (issue #118 AC4, lazy render) ---
+
+test('without a focus floor, every agent is added regardless of its floor (every layout that is not floor-aware)', async () => {
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
+    { id: 'a', name: 'agent', activity: 'implementing', floor: 'agents-office' },
+    { id: 'b', name: 'agent', activity: 'implementing', floor: 'widget-service' },
+  ])));
+  const addAgent = mock.fn();
+  const manager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent: () => undefined } as unknown as AgentManager;
+  const poller = new AgentPoller(manager) as unknown as { poll(): Promise<void> };
+
+  await poller.poll();
+
+  assert.equal(addAgent.mock.callCount(), 2);
+});
+
+test('with a focus floor, only an agent on that floor is added', async () => {
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
+    { id: 'a', name: 'agent', activity: 'implementing', floor: 'agents-office' },
+    { id: 'b', name: 'agent', activity: 'implementing', floor: 'widget-service' },
+  ])));
+  const addAgent = mock.fn();
+  const manager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent: () => undefined } as unknown as AgentManager;
+  const poller = new AgentPoller(manager, () => Date.now(), 'agents-office') as unknown as { poll(): Promise<void> };
+
+  await poller.poll();
+
+  assert.equal(addAgent.mock.callCount(), 1);
+  assert.equal(addAgent.mock.calls[0].arguments[0].id, 'a');
+});
+
+test('with a focus floor, an agent with no floor field is treated as general, not dropped and not shown everywhere', async () => {
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
+    { id: 'a', name: 'agent', activity: 'implementing' },
+  ])));
+  const addAgent = mock.fn();
+  const manager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent: () => undefined } as unknown as AgentManager;
+
+  const onGeneral = new AgentPoller(manager, () => Date.now(), 'general') as unknown as { poll(): Promise<void> };
+  await onGeneral.poll();
+  assert.equal(addAgent.mock.callCount(), 1);
+
+  addAgent.mock.resetCalls();
+  const onOtherFloor = new AgentPoller(manager, () => Date.now(), 'agents-office') as unknown as { poll(): Promise<void> };
+  await onOtherFloor.poll();
+  assert.equal(addAgent.mock.callCount(), 0);
+});
+
+test('an agent that leaves the focused floor is removed, even though it is still in the raw answer', async () => {
+  let floor = 'agents-office';
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([{ id: 'a', name: 'agent', activity: 'implementing', floor }])));
+  const addAgent = mock.fn();
+  const removeAgent = mock.fn();
+  const manager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent } as unknown as AgentManager;
+  const poller = new AgentPoller(manager, () => Date.now(), 'agents-office') as unknown as { poll(): Promise<void> };
+
+  await poller.poll();
+  assert.equal(addAgent.mock.callCount(), 1);
+
+  floor = 'widget-service';
+  await poller.poll();
+  assert.equal(removeAgent.mock.callCount(), 1);
+});
+
+test('onAgents (start) receives the raw, unfiltered answer even while a focus floor is set', async () => {
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
+    { id: 'a', name: 'agent', activity: 'implementing', floor: 'agents-office' },
+    { id: 'b', name: 'agent', activity: 'implementing', floor: 'widget-service' },
+  ])));
+  const manager = { getAgents: () => [], addAgent: () => undefined, setActivity: () => undefined, removeAgent: () => undefined } as unknown as AgentManager;
+  const poller = new AgentPoller(manager, () => Date.now(), 'agents-office') as unknown as { poll(): Promise<void> };
+  let received: Array<{ id: string }> = [];
+  Reflect.set(poller, 'onAgents', (agents: Array<{ id: string }>) => { received = agents; });
+
+  await poller.poll();
+
+  assert.deepEqual(received.map((a) => a.id), ['a', 'b']);
+});
+
 test('a skills field in the answer reaches the new agent\'s extras (issue #166 review: EXTRA_KEYS must carry it)', async () => {
   mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
     { id: 'a', name: 'agent', activity: 'implementing', skills: ['write-a-skill', 'klever-mr'] },
@@ -177,7 +256,7 @@ test('every key projectAgents (server/seam.ts) can emit on a live agent is carri
     display: {
       attention: 'your-turn', orchestrating: true, waitMinutes: 3, groupKey: 'g', groupLabel: 'Group',
       badges: ['sally'], skills: ['write-a-skill'], issues: [{ number: 1, title: 'a' }], roomKey: 'r',
-      actions: ['focus'], role: 'librarian', stuck: true,
+      actions: ['focus'], role: 'librarian', stuck: true, floor: 'agents-office',
     },
   }], publicId, enabledActions);
 

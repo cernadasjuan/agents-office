@@ -22,6 +22,13 @@ export interface AgentExtras {
   role?: string;
   /** Busy with no transcript write for STUCK_AFTER_MINUTES (src/ui/attention.ts). */
   stuck?: boolean;
+  /** The whitelisted floor a session's working directory resolved to: a repo name, that repo
+   * name qualified by its parent directory (`org/repo`, so two repos sharing a leaf folder
+   * name under different organizations resolve to two different floors), or the shared
+   * `'general'` floor (issue #118). Always present once the server's floor enricher has run;
+   * a session without it (an old server, or a source that skips enrichment) is treated as
+   * `'general'` by every floor-aware reader, never as a crash. */
+  floor?: string;
 }
 
 export interface AgentInfo {

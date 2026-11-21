@@ -15,7 +15,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   set: () => true,
 })) as never;
 const { createOffice } = await import('../src/scene/Office.js');
-const { BuildingLayout, BUILDING_STORAGE_KEY } = await import('../src/addons/building/BuildingLayout.js');
+const { BuildingLayout, BUILDING_STORAGE_KEY, floorStorageKey } = await import('../src/addons/building/BuildingLayout.js');
 const { missionSlot } = await import('../src/addons/building/missionRooms.js');
 const { projectWorld } = await import('../server/seam.js');
 
@@ -91,6 +91,41 @@ test('the building opens with the user office and the Library, and remembers its
   assert.deepEqual(layout.roomKinds, ['office', 'library']);
   assert.equal(storage.get(BUILDING_STORAGE_KEY), '["office","library"]');
   assert.ok(scene.getObjectByName('building-hall-walls'));
+});
+
+// --- Floors (issue #118): each floor keeps its own room-kind list under its own key ---
+
+test('floorStorageKey namespaces the legacy key by floor; without a floor it stays the legacy key', () => {
+  assert.equal(floorStorageKey('agents-office'), `${BUILDING_STORAGE_KEY}:agents-office`);
+  assert.equal(floorStorageKey(), BUILDING_STORAGE_KEY);
+});
+
+test('a building constructed with a floor option saves its room list under that floor\'s own key, never the legacy one', () => {
+  const storage = new Map<string, string>();
+  const scene = new THREE.Scene();
+  const layout = new BuildingLayout(scene, createOffice(scene), {
+    storage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => void storage.set(k, v) },
+    floor: 'widget-service',
+  });
+
+  assert.deepEqual(layout.roomKinds, ['office', 'library']);
+  assert.equal(storage.get(floorStorageKey('widget-service')), '["office","library"]');
+  assert.equal(storage.has(BUILDING_STORAGE_KEY), false, 'a floor-scoped building never touches the legacy single-building key');
+});
+
+test('two floors keep separate room lists in the same storage: growing one never touches the other', () => {
+  const storage = new Map<string, string>();
+  const backing = { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v) };
+  const sceneA = new THREE.Scene();
+  new BuildingLayout(sceneA, createOffice(sceneA), { storage: backing, floor: 'agents-office' });
+  const sceneB = new THREE.Scene();
+  const layoutB = new BuildingLayout(sceneB, createOffice(sceneB), { storage: backing, floor: 'widget-service' });
+  // Fill Widget Service's implementing seats until it rents a desks room, mirroring the
+  // existing "the building rents a desk room ..." test below (10 seats fill the hall desks).
+  for (let i = 0; i < 10; i++) layoutB.seatFor({ id: `agent-${i}`, activity: 'implementing' }, null);
+
+  assert.deepEqual(JSON.parse(storage.get(floorStorageKey('agents-office'))!), ['office', 'library']);
+  assert.ok(JSON.parse(storage.get(floorStorageKey('widget-service'))!).includes('desks'));
 });
 
 test('an agent keeps its home desk, makes a trip after the dwell time, and comes back to the same desk', () => {

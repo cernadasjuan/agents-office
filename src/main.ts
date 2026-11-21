@@ -19,6 +19,9 @@ import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
 import { FreshnessFooter } from './ui/freshness.js';
 import { Legend } from './ui/Legend.js';
 import { handleTriageKey } from './ui/TriageKeys.js';
+import { FloorSwitch } from './ui/FloorSwitch.js';
+import { ALL_FLOORS, defaultFloor, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
+import { focusedFloor, setFocusedFloor } from './floors/floorState.js';
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
@@ -34,6 +37,22 @@ import.meta.glob('../plugins/*/client.ts', { eager: true });
 // Layout: ?layout= in the URL, then the last choice, then the default. Shift+L, then a confirmation, cycles layouts.
 const layoutId = chooseLayoutId(window.location.search, window.localStorage);
 rememberLayoutId(layoutId, window.localStorage);
+
+// Floors (issue #118): meaningful only for the building layout (the flat activity layout is
+// one shared office, P8, no floors). The floor to focus: `#floor=` in the URL, the last
+// visited floor, else `ALL_FLOORS` (review: a fresh page load has not polled any agent yet,
+// so there is nothing to pick a "busiest floor" default from before the first poll answers;
+// showing everything, same as today, is the only safe default at that point — the
+// floor-switch menu lets the user narrow to one floor once agents are known).
+const chosenFloor = layoutId === 'building' ? (() => {
+  const floor = defaultFloor(window.localStorage, window.location.hash);
+  setFocusedFloor(floor);
+  rememberFloor(floor, window.localStorage);
+  return floor;
+})() : undefined;
+// `ALL_FLOORS` means no filter: `AgentPoller`/`BuildingLayout` only know about an actual
+// floor name or "unset", never the sentinel itself, so it is normalized away right here.
+const focusFloor = chosenFloor !== undefined && chosenFloor !== ALL_FLOORS ? chosenFloor : undefined;
 window.addEventListener('keydown', (event) => {
   if (!isLayoutSwitchKey(event) || document.pointerLockElement) return;
   const next = confirmLayoutSwitch(layoutId, (question) => window.confirm(question));
@@ -93,6 +112,21 @@ const panel = new AgentPanel(document.getElementById('agent-list')!, {
   demo: isDemoMode(window.location.search),
 });
 setupPanelCollapse(document.getElementById('ui-panel')!, document.getElementById('ui-panel-toggle')!, window.localStorage);
+
+// Floor switch (issue #118 AC3): only while the building layout is active. Choosing a
+// different floor remembers it and reloads the page (the same pattern Shift+L already uses
+// for a layout switch): a live teardown-and-rebuild of the whole building risks the render
+// budget and the static-merge zones far more than a reload the user already expects.
+const floorSwitchContainer = document.getElementById('floor-switch-container');
+const floorSwitch = chosenFloor !== undefined && floorSwitchContainer
+  ? new FloorSwitch(floorSwitchContainer, chosenFloor, {
+    onSelect: (floor) => {
+      rememberFloor(floor, window.localStorage);
+      reloadForFloorSwitch(window.location, floor);
+    },
+  })
+  : null;
+if (floorSwitchContainer) floorSwitchContainer.hidden = floorSwitch === null;
 onSelectionChange((agentId) => panel.setSelected(agentId));
 // Issue #162: selecting a queued agent in desk mode walks it to the front of the desk; any
 // other selection (or none) walks the previous talker, if any, back to its queue spot.
@@ -222,9 +256,12 @@ async function pollWorld(): Promise<void> {
 void pollWorld();
 window.setInterval(() => void pollWorld(), 10_000);
 
-// Start polling for real agents (an empty office when none are found)
-const poller = new AgentPoller(agentManager);
-poller.start(3000, buildUI, (health) => freshness.show(health));
+// Start polling for real agents (an empty office when none are found). `focusFloor` (issue
+// #118 AC4) filters to one floor's sessions when the building layout is active; `onAgents`
+// still sees the raw, unfiltered answer, so the floor-switch menu lists every floor with a
+// tracked session, not only the focused one.
+const poller = new AgentPoller(agentManager, undefined, focusFloor);
+poller.start(3000, buildUI, (health) => freshness.show(health), (agents) => floorSwitch?.render(agents));
 
 // --- Render loop ---
 // On demand, at most 30 fps, once a second when nothing moves. `?debug=1` exposes `window.__officeStats`.
