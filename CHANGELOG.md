@@ -26,6 +26,9 @@
 
 ### Changes
 
+- War rooms widen to fit 6-8 desks (up from 4): the door-wall extent grows (`WAR_ROOM_WIDTH`), the meeting table, tombstone strip and far wall keep their exact old placement (issue #193)
+- First person: room, hall and war-room walls stop the camera; doors stay open, and sliding along a wall feels natural instead of sticking (issue #194)
+
 - Use the session file status: waiting shows "Waiting for you" at the meeting table, idle shows a break, busy while thinking shows planning
 - Better tool mapping: AskUserQuestion, Skill, ToolSearch, MCP tools, and shell commands classified by the programs they run
 - Subagents stay visible during a long tool call (up to 10 minutes)

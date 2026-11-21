@@ -70,6 +70,7 @@ const view = new ViewController({
   roomView: (name) => layout.roomView?.(name) ?? null,
   deskView: () => layout.deskView?.() ?? null,
   roomAt: (x, z) => layout.roomAt?.(x, z) ?? null,
+  wallColliders: () => layout.wallColliders?.() ?? [],
   keys: window,
   hint: document.getElementById('pointer-hint'),
   hash: window.location.hash,
