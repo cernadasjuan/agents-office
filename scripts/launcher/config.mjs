@@ -14,6 +14,7 @@ export const KNOWN_KEYS = [
   'AGENTS_OFFICE_MISSION_ROOTS',
   'AGENTS_OFFICE_GITHUB_REPOS',
   'AGENTS_OFFICE_PORTRAIT',
+  'AGENTS_OFFICE_LIBRARY_ROOTS',
 ];
 
 /** A config file past this size, or that is not a regular file, is never read (it cannot hold more than a few KB of real config anyway). */
@@ -68,6 +69,9 @@ export function defaultConfigTemplate() {
 
 # Path to an image (png, jpg, jpeg, webp or gif, at most 2 MB) for the office door portrait.
 # AGENTS_OFFICE_PORTRAIT=
+
+# Repo roots whose documentation/bibliotheque/INDEX.md becomes a floor's library, comma-separated.
+# AGENTS_OFFICE_LIBRARY_ROOTS=
 `;
 }
 
