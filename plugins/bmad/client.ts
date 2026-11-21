@@ -13,7 +13,10 @@ import { personaName } from './roster.js';
  */
 
 export const MAX_HATS = 4;
-const HEAD_TOP = 0.12;
+/** Issue #165 round 2: the Hero head grew from a 0.15 to a 0.205 radius; this keeps the
+ * same ratio to the head (0.12 / 0.15) so a hat still sits where hair and a persona's
+ * own head-top previously sat, not floating above a now-bigger head. */
+const HEAD_TOP = 0.164;
 const SHRINK = 0.9;
 
 interface Worn {

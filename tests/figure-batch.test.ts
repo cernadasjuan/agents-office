@@ -43,20 +43,37 @@ test('all figures draw in one call per part shape and color, each part where its
   const scene = new THREE.Scene();
   const all = figures(scene, [RED, RED, BLUE]);
   scene.updateMatrixWorld();
-  assert.equal(countDrawCalls(scene).main, 42);
+  // 17 body + face parts (head, torso, 2 hands, 2 feet, 8 limbs, 2 eyes, 1 mouth) per
+  // figure, plus hair (issue #165 round 2): f0 seeds 'cap' (1 piece), f1 and f2 both seed
+  // 'spiky' (5 cones each) — 3 * 17 + 1 + 5 + 5 = 62.
+  assert.equal(countDrawCalls(scene).main, 62);
 
   const batch = new FigureBatch(scene);
   batch.sync(all.map((figure) => figure.group));
 
-  // head, hand, foot, leg, arm and torso shapes; two torso colors
-  assert.equal(countDrawCalls(scene).main, 7);
+  // head, hand, foot, leg, arm and torso shapes (two torso colors) = 7, plus the Hero
+  // face/hair additions: eyes (1, shared by every figure), the mouth's one shape (all
+  // three start idle, so all three share the 'neutral' bucket), and 2 hair buckets
+  // ('cap' and 'spiky' — the two spiky wearers share one bucket, not one each) = 11.
+  assert.equal(countDrawCalls(scene).main, 11);
   for (const figure of all) for (const part of partsOf(figure)) assert.equal(part.layers.isEnabled(0), false);
   const heads = batch.meshes.find((mesh) => mesh.geometry === all[0].joints.head.geometry)!;
   assert.equal(heads.count, 3);
   const matrix = new THREE.Matrix4();
   heads.getMatrixAt(2, matrix);
-  assert.ok(matrix.equals(all[2].joints.head.matrixWorld));
-  assert.ok(batch.meshes.every((mesh) => mesh.castShadow));
+  // The instance buffer stores float32 (FigureBatch.ts); a per-agent body-width scale
+  // (issue #165 round 2, HeroVariety.ts) is rarely exactly float32-representable, so the
+  // comparison rounds the same way the buffer itself does, rather than asserting bit-exact
+  // equality against the figure's own double-precision matrixWorld.
+  const expected = all[2].joints.head.matrixWorld.clone();
+  for (let i = 0; i < 16; i++) expected.elements[i] = Math.fround(expected.elements[i]);
+  assert.ok(matrix.equals(expected));
+  // Body parts still cast a shadow; the Hero face and hair additions never do (same "a
+  // tiny topper casts nothing worth the cost" rationale as a persona hat).
+  const bodyBucket = batch.meshes.find((mesh) => mesh.geometry === all[0].joints.head.geometry)!;
+  assert.equal(bodyBucket.castShadow, true);
+  const mouthBucket = batch.meshes.find((mesh) => mesh.geometry === all[0].joints.mouth.geometry)!;
+  assert.equal(mouthBucket.castShadow, false);
 });
 
 test('a figure that moves is reported; a still figure is not', () => {
