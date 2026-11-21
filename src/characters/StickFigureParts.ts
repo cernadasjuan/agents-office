@@ -17,12 +17,20 @@ const TORSO_RADIUS = 0.17; // was 0.12-0.15 (tapered cylinder); now one wider ca
 const TORSO_LENGTH = 0.26; // the capsule's straight middle; its rounded caps add 2 * TORSO_RADIUS on top
 const TORSO_HEIGHT = TORSO_LENGTH + TORSO_RADIUS * 2;
 const HAND_RADIUS = 0.052; // was a 0.06 box; a mitten reads rounder at a slightly smaller radius
+/**
+ * Issue #165 round 3 (review follow-up): arms and legs stayed at the old plain-stick
+ * 0.035 radius through every earlier Hero round, reading as thin dark wires under the
+ * new chunky torso/head/hands at the default isometric zoom. Roughly 2x the old radius,
+ * the ratio the review asked for, enough to read as a toy limb next to the mitten hand
+ * (`HAND_RADIUS`) without the limb overtaking it.
+ */
+export const LIMB_RADIUS = 0.06;
 /** ~20% shorter than the old 0.4 upper/lower leg segments (round 1 "chibi" direction, folded into Hero). */
 const LEG_SEGMENT = 0.32;
 /** Keeps the old ~0.1 ground margin above the now-shorter legs (2 * LEG_SEGMENT), same ratio as 0.9 above 2 * 0.4. */
-const HIP_HEIGHT = 0.74;
+export const HIP_HEIGHT = 0.74;
 /** Body-space y of the shoulders: hips plus the torso's own height, the same relationship the old 1.5 = 0.9 + 0.6 kept. */
-const SHOULDERS_Y = HIP_HEIGHT + TORSO_HEIGHT;
+export const SHOULDERS_Y = HIP_HEIGHT + TORSO_HEIGHT;
 /** The gap between the shoulders and the neck joint, same as the old 1.6 - 1.5. */
 const NECK_MARGIN = 0.1;
 export const NECK_HEIGHT = SHOULDERS_Y + NECK_MARGIN;
@@ -63,7 +71,7 @@ export function createTorso(accentColor: THREE.Color): THREE.Mesh {
   return part(shared('torso', () => new THREE.CapsuleGeometry(TORSO_RADIUS, TORSO_LENGTH, CAP_SEGMENTS, RADIAL_SEGMENTS)), getToonMaterial(accentColor));
 }
 
-export function createLimb(length: number, radius = 0.035): THREE.Mesh {
+export function createLimb(length: number, radius = LIMB_RADIUS): THREE.Mesh {
   const geometry = shared(`limb:${length}:${radius}`, () => {
     const geo = new THREE.CylinderGeometry(radius, radius, length, RADIAL_SEGMENTS);
     geo.translate(0, -length / 2, 0);

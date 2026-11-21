@@ -93,6 +93,7 @@ const view = new ViewController({
   wallColliders: () => layout.wallColliders?.() ?? [],
   keys: window,
   hint: document.getElementById('pointer-hint'),
+  crosshair: document.getElementById('crosshair-dot'),
   hash: window.location.hash,
   view: chooseViewMode(window.location.hash, window.localStorage, defaultViewFor(layoutId)),
   modeChanged: (mode) => {
