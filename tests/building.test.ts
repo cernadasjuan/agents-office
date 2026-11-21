@@ -645,6 +645,32 @@ test('deskView sits inside the office, behind the desk, looking back toward the 
   assert.ok(view.lookAt.x < view.position.x, 'looks toward the door side of the room, where the queue stands');
 });
 
+// --- deskTalkSpot and isQueued (issue #162) ---
+
+test('deskTalkSpot sits between the desk and the queue, standing, facing the desk camera', () => {
+  const { layout } = setup();
+  const spot = layout.deskTalkSpot()!;
+  const view = layout.deskView()!;
+  const rect = slotFor(0).rect;
+  assert.ok(spot.position.x > rect.minX && spot.position.x < rect.maxX, 'inside the office on x');
+  assert.ok(spot.position.z > rect.minZ && spot.position.z < rect.maxZ, 'inside the office on z');
+  assert.equal(spot.posture, 'standing');
+  assert.deepEqual(spot.lookAt.toArray(), view.position.toArray(), 'faces back toward the desk camera, the same point it sits at');
+  // The queue's own front row (`room0_queue_0`-ish) sits at a smaller x than the desk itself
+  // (the office door is west, same reasoning as the deskView test above); the talk spot steps
+  // out from the desk toward that door, but not all the way to the front row.
+  assert.ok(spot.position.x < view.position.x, 'nearer the door than the desk camera sits');
+});
+
+test('isQueued is true only for an agent actually waiting in the queue', () => {
+  const { layout, agent } = setup();
+  layout.seatFor(agent('q', 'idle', { attention: 'waiting', waitMinutes: 5 }), null);
+  layout.seatFor(agent('d', 'implementing'), null);
+  assert.equal(layout.isQueued('q'), true);
+  assert.equal(layout.isQueued('d'), false);
+  assert.equal(layout.isQueued('nobody'), false, 'an unknown agent id is never queued');
+});
+
 test('roomAt finds the office by a point inside its rect, and returns null between rooms', () => {
   const { layout } = setup();
   const rect = slotFor(0).rect;

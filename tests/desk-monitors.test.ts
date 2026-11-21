@@ -20,7 +20,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { DeskMonitorsExtension, drawMiniBoard, monitorWorldCorners } = await import('../src/addons/building/deskMonitors.js');
 const { countDrawCalls } = await import('../src/scene/RenderBudget.js');
-const { deskCameraPose, queueSpotWorldPositions, rayBlockedByQuad } = await import('../src/addons/building/deskGeometry.js');
+const { deskCameraPose, deskTalkSpotPose, queueSpotWorldPositions, rayBlockedByQuad } = await import('../src/addons/building/deskGeometry.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -149,6 +149,22 @@ test('from the desk camera pose, a ray to every queue spot clears both monitors'
   const monitors = monitorWorldCorners();
   const blocked = queueSpotWorldPositions().filter((spot) => monitors.some((quad) => rayBlockedByQuad(camera, spot, quad)));
   assert.deepEqual(blocked, [], `${blocked.length} queue spot(s) have a monitor in the way`);
+});
+
+// --- Issue #162: the desk-talk spot must never stand between the camera and a monitor ---
+
+test('the desk talk spot sits farther from the desk camera than either monitor, so it can never block a sightline to one', () => {
+  const { position: camera } = deskCameraPose();
+  const { position: spot } = deskTalkSpotPose();
+  for (const [side, quad] of (['left', 'right'] as const).map((s, i) => [s, monitorWorldCorners()[i]!] as const)) {
+    const monitorDistance = camera.distanceTo(quad.reduce((sum, p) => sum.add(p), new THREE.Vector3()).divideScalar(quad.length));
+    assert.ok(camera.distanceTo(spot) > monitorDistance, `the talk spot is nearer the camera than the ${side} monitor`);
+  }
+  // Directly reusing the same sightline check (issue #161 review round 2) the queue spots
+  // already pass: a ray from the camera to the talk spot itself clears both monitor quads.
+  const monitors = monitorWorldCorners();
+  const blocked = monitors.filter((quad) => rayBlockedByQuad(camera, spot, quad));
+  assert.deepEqual(blocked, [], `${blocked.length} monitor(s) stand between the camera and the talk spot`);
 });
 
 test('both monitor faces sit inside the desk camera\'s own view frustum', () => {

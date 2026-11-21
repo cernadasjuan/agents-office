@@ -77,6 +77,8 @@ const view = new ViewController({
   modeChanged: (mode) => {
     rememberViewMode(mode, window.localStorage);
     if (viewStatus) viewStatus.textContent = viewStatusText(layoutName(layoutId), mode);
+    // Issue #162: leaving desk mode walks a talker back to its queue spot, same as deselecting it.
+    agentManager.setDeskTalker(mode === 'desk' ? selectedAgentId() : null);
   },
   figureShiftPx: () => agentCard.cameraShiftPx(),
 });
@@ -91,6 +93,9 @@ const panel = new AgentPanel(document.getElementById('agent-list')!, {
 });
 setupPanelCollapse(document.getElementById('ui-panel')!, document.getElementById('ui-panel-toggle')!, window.localStorage);
 onSelectionChange((agentId) => panel.setSelected(agentId));
+// Issue #162: selecting a queued agent in desk mode walks it to the front of the desk; any
+// other selection (or none) walks the previous talker, if any, back to its queue spot.
+onSelectionChange((agentId) => agentManager.setDeskTalker(view.mode === 'desk' ? agentId : null));
 // Footer: "Updated N s ago", amber after 2 failed polls, red after 5. "?" opens the legend.
 const freshness = new FreshnessFooter(document.getElementById('panel-footer')!);
 new Legend({ parent: document.body, button: document.getElementById('legend-button')!, keys: window, layout: layoutId, plugins: () => currentWorld().plugins });

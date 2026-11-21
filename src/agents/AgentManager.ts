@@ -53,6 +53,12 @@ export class AgentManager {
   private settledPose = new WeakMap<ManagedAgent, string>();
   private scene: THREE.Scene;
   readonly layout: LayoutStrategy;
+  /**
+   * The one agent visually walked up to the desk's talk spot (issue #162), and the real seat
+   * to walk it back to once it stops. A visual stand-in only: `realSeat` is what the layout
+   * still tracks as occupied the whole time, so nothing here ever double-books a station.
+   */
+  private talker: { agentId: string; realSeat: Seat } | null = null;
 
   constructor(scene: THREE.Scene, layout: LayoutStrategy | Map<string, Station>) {
     this.scene = scene;
@@ -121,6 +127,13 @@ export class AgentManager {
 
   update(elapsed: number, delta: number): void {
     for (const move of this.layout.update?.(elapsed, delta) ?? []) {
+      // Issue #162: the talker's true seat still moves with the queue (and keeps the layout's
+      // own occupancy correct), but the figure itself stays put at the desk until deselected —
+      // applying this move now would walk it back into line mid-conversation.
+      if (this.talker?.agentId === move.agentId) {
+        this.talker.realSeat = move.seat;
+        continue;
+      }
       const managed = this.agents.get(move.agentId);
       if (managed) this.goToSeat(managed, move.seat, false);
     }
@@ -144,9 +157,32 @@ export class AgentManager {
     }
   }
 
+  /**
+   * Issue #162: walk the one selected queued agent to the front of the desk, as if addressing
+   * Gabriel, and walk back whoever was there before. A null id (deselected, left desk mode, or
+   * a selection that is not a queued agent) just releases the previous talker, if there was
+   * one. A visual stand-in only, the brief's own words: it never changes what the layout
+   * tracks for any agent, so a reload or a queue reorder mid-conversation still lands the
+   * real seat correctly once the agent walks back to it.
+   */
+  setDeskTalker(agentId: string | null): void {
+    if (this.talker && this.talker.agentId !== agentId) {
+      const previous = this.agents.get(this.talker.agentId);
+      if (previous) this.goToSeat(previous, this.talker.realSeat, false);
+      this.talker = null;
+    }
+    if (!agentId || this.talker) return;
+    const managed = this.agents.get(agentId);
+    const spot = this.layout.deskTalkSpot?.();
+    if (!managed?.seat || !spot || !(this.layout.isQueued?.(agentId) ?? false)) return;
+    this.talker = { agentId, realSeat: managed.seat };
+    this.goToSeat(managed, spot, false);
+  }
+
   removeAgent(agentId: string): void {
     const managed = this.agents.get(agentId);
     if (!managed) return;
+    if (this.talker?.agentId === agentId) this.talker = null;
 
     this.layout.release(agentId);
     this.scene.remove(managed.figure.group);

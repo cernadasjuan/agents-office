@@ -6,7 +6,7 @@ import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, RoomView, Seat } from '../../layout/LayoutStrategy.js';
 import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type Rect, type RoomSlot } from './RoomPlanner.js';
 import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, type RoomKind } from './rooms.js';
-import { deskCameraPose, monitorWorldCorners } from './deskGeometry.js';
+import { deskCameraPose, deskTalkSpotPose, monitorWorldCorners } from './deskGeometry.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
@@ -279,6 +279,26 @@ export class BuildingLayout implements LayoutStrategy {
    */
   deskMonitorCorners(): THREE.Vector3[][] {
     return monitorWorldCorners();
+  }
+
+  /**
+   * Where a selected queued agent walks to address Gabriel directly (issue #162, desk mode
+   * only): a fixed spot in front of the desk, standing, facing the desk camera. Null without a
+   * rented office room yet — the same graceful degradation `deskView` uses.
+   */
+  deskTalkSpot(): Seat | null {
+    if (!this.rooms.some((room) => room.kind === 'office')) return null;
+    const pose = deskTalkSpotPose();
+    return { key: 'desk-talk-spot', position: pose.position, lookAt: pose.lookAt, posture: 'standing' };
+  }
+
+  /**
+   * Whether this agent currently queues in front of the user's own desk (issue #162): the only
+   * agents eligible to walk up to `deskTalkSpot`. A subagent, a war-room agent or anyone else
+   * waiting somewhere other than the queue never qualifies, even while selected.
+   */
+  isQueued(agentId: string): boolean {
+    return this.agents.get(agentId)?.target === 'queue';
   }
 
   /**
