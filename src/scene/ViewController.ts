@@ -14,6 +14,8 @@ const PAN_SPEED_PER_DISTANCE = 0.9;
 const FAST_MULTIPLIER = 2.5;
 /** Issue #161: the office settles into the desk view after this long with no camera input. */
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 120;
+/** Issue #252: `checkPendingRoom` gives up quietly past this many `sceneChanged()` checks (one per world poll, `main.ts`'s own `pollWorld`, plus one per agent poll — both call it) — a typo'd or never-opened mission name must not keep paying this check for the rest of the session. */
+const PENDING_ROOM_MAX_ATTEMPTS = 50;
 /** A ground plane for the isometric double-click room pick (issue #175): where the ray meets `y=0`. */
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 /** Review (defect 2): held, these send no further discrete event, so the idle clock needs its own per-frame check, not just the keydown that started the hold. */
@@ -126,6 +128,9 @@ export class ViewController {
   private idleTimeoutSeconds: number;
   /** Issue #199: the shared camera's own FOV from just before desk mode widened it, restored on the way out. Null outside desk mode, and while a `deskView` never sets `fov` at all (graceful degradation, no lens change). */
   private deskRestoreFov: number | null = null;
+  /** Issue #252: a `#room=` target that did not resolve at construction (a mission room, not yet created by the first world poll) — re-checked by `checkPendingRoom` on every `sceneChanged()`, until it resolves or `pendingRoomAttempts` reaches `PENDING_ROOM_MAX_ATTEMPTS`. Null once resolved, given up on, or never requested. */
+  private pendingRoomName: string | null = null;
+  private pendingRoomAttempts = 0;
 
   constructor(private options: ViewControllerOptions) {
     this.selection = options.selection ?? officeSelection();
@@ -150,9 +155,74 @@ export class ViewController {
     // `setMode` no-ops for `desk` without a pose to show (graceful degradation): report the
     // mode actually landed on (first person), which never ran its own `modeChanged` above.
     if (this.currentMode === 'first-person') options.modeChanged?.(this.currentMode);
-    const room = start.room !== null ? (this.options.roomView?.(start.room) ?? null) : null;
-    if (room) this.applyStartRoom(room);
-    else if (start.zoom !== null) this.applyStartZoom(start.zoom);
+    if (start.room !== null) {
+      const room = this.options.roomView?.(start.room) ?? null;
+      if (room) {
+        this.applyStartRoom(room, true);
+      } else {
+        // Issue #252: a mission room never exists this early — `BuildingLayout` builds
+        // `office`/`library` synchronously right here at construction, but a mission only
+        // appears once the first `/api/world` poll creates it, well after this constructor
+        // returns. Keep the name and keep checking (`sceneChanged`, fired after every world
+        // poll) instead of treating "not found yet" the same as "not a real room". `#zoom=`
+        // still applies meanwhile, same as a genuinely unknown name would get today.
+        this.pendingRoomName = start.room;
+        if (start.zoom !== null) this.applyStartZoom(start.zoom);
+      }
+    } else if (start.zoom !== null) {
+      this.applyStartZoom(start.zoom);
+    }
+  }
+
+  /**
+   * Issue #252: re-checks a `#room=` target that did not resolve at construction, once per
+   * `sceneChanged()` (so, once per world poll — `main.ts`'s own `pollWorld`). Applies a cut,
+   * never a flight, once it finally appears: a flight is a transition *from* the view's own
+   * default framing (the PR #200 review comment on `applyStartRoom` below), and this one never
+   * got a chance to show that framing even for a moment, so there is nothing to fly from.
+   * Gives up quietly past `PENDING_ROOM_MAX_ATTEMPTS` checks — a typo'd or never-opened mission
+   * name must not keep paying this check for the rest of the session.
+   */
+  private checkPendingRoom(): void {
+    const name = this.pendingRoomName;
+    if (name === null) return;
+    const room = this.options.roomView?.(name) ?? null;
+    if (room) {
+      this.pendingRoomName = null;
+      // Review round 2: refresh the overall pan/zoom clamp bounds before framing the room, not
+      // by skipping that refresh — the room's own floor is already in the scene by now (the
+      // world poll that created it ran before this `sceneChanged()`), so this correctly widens
+      // `this.isometric`'s clamp box to include it right away, instead of leaving `this.bounds`
+      // stale (excluding the new room) until whatever scene change happens to fire next.
+      this.isometric.retrack(overviewBounds(this.options.scene), this.aspect());
+      this.applyStartRoom(room, false);
+      // `sceneChanged()` (which led here) already set `isometricBoundsDirty`, for its own,
+      // unrelated reason (any floor content change re-derives the pan/zoom limits). Clear it
+      // again: the framing just above IS the freshly computed goal for this room, the same
+      // thing `setMode('isometric', ...)` already protects its own fresh framing from — left
+      // dirty, the very next `update()` would retrack against the overall scene bounds and
+      // immediately clamp this target back, the one tick it is applied. The explicit `retrack`
+      // just above already did that refresh once, on purpose, before `applyStartRoom` overwrote
+      // the goal; leaving this flag dirty would only repeat it redundantly next frame.
+      this.isometricBoundsDirty = false;
+      return;
+    }
+    this.pendingRoomAttempts++;
+    if (this.pendingRoomAttempts >= PENDING_ROOM_MAX_ATTEMPTS) this.pendingRoomName = null;
+  }
+
+  /**
+   * Issue #252 review round 2: user intent wins. A pending `#room=` target is dropped the
+   * moment there is any real sign the user is driving the camera (or picking an agent)
+   * themselves — a drag, a wheel zoom, a keyboard pan, a room double-click, first-person free
+   * look, a view switch, or an explicit agent pick (click, or `main.ts`'s own N/F triage keys,
+   * which is why this is public). A mission that finishes building later must never yank the
+   * camera away from wherever the user has since moved on to. `sceneChanged()`/a world poll
+   * alone never calls this — only real input does, so a user who never touches the camera
+   * still gets the landing this issue was filed for.
+   */
+  dismissPendingRoom(): void {
+    this.pendingRoomName = null;
   }
 
   /** `#zoom=<distance>` (issue #89): starts the view at that camera distance instead of its own default framing. A no-op in first person, which has no zoom. */
@@ -177,8 +247,15 @@ export class ViewController {
    * using the same pure framing math a selection flight target would (never narrowing the
    * view's own pan/zoom limits, unlike `frame`); first person stands inside the room, facing
    * its main wall. Read-only: it never changes the scene, only the camera.
+   *
+   * @param flight True for the cold-start case (the constructor resolved the room right away):
+   * a transition from the view's own default framing, same as `applyStartZoom`. False for a
+   * `#room=` target resolved later, after waiting on a mission room to appear
+   * (`checkPendingRoom`, issue #252): a cut, the same `DIRECT_FOLLOW_RATES` + cancelled flight
+   * idiom a drag or a wheel zoom already uses for "respond right now, no easing" — there is no
+   * default framing to transition from this time, since none was ever shown.
    */
-  private applyStartRoom(room: RoomView): void {
+  private applyStartRoom(room: RoomView, flight: boolean): void {
     if (this.currentMode === 'isometric') {
       this.isometric.target.copy(room.bounds.getCenter(new THREE.Vector3()));
       this.isometric.halfHeight = THREE.MathUtils.clamp(
@@ -186,12 +263,31 @@ export class ViewController {
         this.isometric.minHalfHeight,
         this.isometric.maxHalfHeight,
       );
-      // PR #200 review round: a start parameter is a flight from the view's own default
-      // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
-      // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
-      this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
+      if (flight) {
+        // PR #200 review round: a start parameter is a flight from the view's own default
+        // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
+        // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
+        this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
+      } else {
+        this.flight = null;
+        this.isometricFollowRates = DIRECT_FOLLOW_RATES;
+        // Review round 2 (issue #252): `DIRECT_FOLLOW_RATES` is a faster *follower*, not an
+        // instant snap — left alone, `liveIsometric` stays at its old live pose and only
+        // eases toward this room's target over the next several frames, which for a room far
+        // from wherever the camera already was reads as a multi-second pan, not the cut this
+        // branch promises. A real mode-kind cut (`setMode` entering isometric, just above)
+        // always re-seeds `liveIsometric` from the goal the same way; this is the same
+        // situation — a goal that never had a shown frame to ease from.
+        this.liveIsometric = this.isometric.state();
+      }
       this.applyIsometric();
     } else {
+      // Review round 2 (issue #252): an in-flight first-person tween (a selection flight still
+      // closing when the pending room resolves) is not cancelled by the isometric branch
+      // above, so without this `update()`'s very next tick would resume that tween and pull
+      // the camera straight back off the room this just landed on. Harmless for the cold-start
+      // case too: at construction no flight has started yet, so this is a no-op there.
+      this.flight = null;
       this.applyPose(room.standing);
       setFreeCameraLook(this.options.camera, room.standing.position, room.standing.lookAt);
     }
@@ -216,11 +312,13 @@ export class ViewController {
 
   /** Key I: into the isometric view, and back to first person. */
   toggleIsometric(): void {
+    this.dismissPendingRoom(); // issue #252 review round 2: an explicit view switch is user intent
     this.setMode(this.currentMode === 'isometric' ? 'first-person' : 'isometric', true);
   }
 
   /** Key H (issue #161): into the fixed desk view, and back to first person. A no-op without a desk to show (graceful degradation). */
   toggleDesk(): void {
+    this.dismissPendingRoom(); // issue #252 review round 2: an explicit view switch is user intent
     this.setMode(this.currentMode === 'desk' ? 'first-person' : 'desk', true);
   }
 
@@ -296,6 +394,7 @@ export class ViewController {
    */
   sceneChanged(): void {
     this.isometricBoundsDirty = true;
+    if (this.pendingRoomName !== null) this.checkPendingRoom();
   }
 
   /**
@@ -425,7 +524,14 @@ export class ViewController {
       if (event.code === 'KeyI') this.toggleIsometric();
       else if (event.code === 'KeyH') this.toggleDesk();
       else if (event.code === 'Escape') this.selection.clear();
-      else this.panKeys.add(event.code);
+      else {
+        // Issue #252 review round 2: a keyboard pan (WASD/arrows) is user intent, isometric
+        // or first person alike — `panWithKeys` reads this same set for the isometric pan,
+        // and `FreeCamera`'s own listener tracks first-person movement separately, but either
+        // way a movement key going down means the user is about to drive the camera.
+        if (MOVEMENT_KEYS.includes(event.code)) this.dismissPendingRoom();
+        this.panKeys.add(event.code);
+      }
     });
     keys.addEventListener('keyup', (event: KeyboardEvent) => this.panKeys.delete(event.code));
 
@@ -441,13 +547,15 @@ export class ViewController {
       this.dragged = false;
     });
     document.addEventListener('pointermove', (event) => {
-      if (document.pointerLockElement === canvas) this.markActive(); // first-person look
+      // Issue #252 review round 2: first-person free look under pointer lock is user intent too.
+      if (document.pointerLockElement === canvas) { this.markActive(); this.dismissPendingRoom(); }
       if (!this.dragPoint || !isViewFromAbove(this.currentMode)) return;
       this.markActive();
       const point = { x: event.clientX, y: event.clientY };
       if (isClick(this.pressPoint, point)) return;
       this.dragged = true;
       this.flight = null;
+      this.dismissPendingRoom(); // issue #252 review round 2: a drag is user intent
       // PR #200 review round: a drag is direct manipulation, not a flight — responsive even
       // mid-correction, even right after a flight-type change (a selection, a start parameter).
       this.isometricFollowRates = DIRECT_FOLLOW_RATES;
@@ -469,7 +577,8 @@ export class ViewController {
       if (document.pointerLockElement) {
         if (this.currentMode !== 'first-person') return;
         const agentId = this.pickAtCenter();
-        if (agentId) this.selection.select(agentId);
+        // Issue #252 review round 2: picking an agent by click is user intent.
+        if (agentId) { this.dismissPendingRoom(); this.selection.select(agentId); }
         return;
       }
       // A gesture that panned and returned near the press point is still a drag, not a click
@@ -479,7 +588,7 @@ export class ViewController {
       // selection, exactly like first person already does — it never engages pointer lock
       // (the filter above already guards that) and never switches view.
       const agentId = this.pickAt(event.clientX, event.clientY);
-      if (agentId) this.selection.select(agentId);
+      if (agentId) { this.dismissPendingRoom(); this.selection.select(agentId); }
       else this.selection.clear();
     });
     canvas.addEventListener('dblclick', (event) => {
@@ -490,6 +599,7 @@ export class ViewController {
       const room = this.roomUnderPoint(event.clientX, event.clientY);
       if (!room) return;
       this.markActive();
+      this.dismissPendingRoom(); // issue #252 review round 2: picking a different room is user intent
       this.setMode('first-person', false, room.standing);
     });
     canvas.addEventListener('wheel', (event) => {
@@ -497,6 +607,7 @@ export class ViewController {
       this.markActive();
       event.preventDefault();
       this.flight = null;
+      this.dismissPendingRoom(); // issue #252 review round 2: the wheel is user intent
       // PR #200 review round: the wheel is direct manipulation, not a flight.
       this.isometricFollowRates = DIRECT_FOLLOW_RATES;
       // Zoom toward the cursor (issue #87, AC1), not toward the room center: the point

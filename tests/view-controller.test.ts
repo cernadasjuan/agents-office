@@ -16,6 +16,7 @@ const { ViewController } = await import('../src/scene/ViewController.js');
 const { SelectionState } = await import('../src/scene/Selection.js');
 const { STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
 const { EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
+const { DIRECT_FOLLOW_RATES, FLIGHT_FOLLOW_RATES } = await import('../src/scene/IsometricCamera.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -430,6 +431,184 @@ test('issue #89: #room= wins over #zoom= when both are given and the room resolv
   const { view } = setup('#view=iso&zoom=5&room=office', undefined, (name) => (name === 'office' ? room : null));
   view.update(0, 1 / 60);
   assert.notEqual(view.zoomDistance, 5, 'the room framing wins, not the literal #zoom= value');
+});
+
+// --- Issue #252: #room=<mission> resolves after the first world poll, not only at construction ---
+
+test('issue #252: a #room= target that does not exist yet stays pending and keeps the default framing', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const baseline = setup('#view=iso');
+  baseline.view.update(0, 1 / 60);
+  const { view } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60);
+  assert.equal(view.zoomDistance, baseline.view.zoomDistance, 'no room yet: the view keeps its own default framing, same as an unknown name');
+});
+
+test('issue #252: once the layout reports the pending room (sceneChanged after a world poll), the camera cuts to it', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60); // still pending, no roomView match yet
+
+  exists = true; // the world poll just created the mission room
+  view.sceneChanged();
+  view.update(0, 1 / 60);
+
+  assert.equal(view.mode, 'isometric');
+  const target = (view as unknown as { isometric: { target: THREE.Vector3 } }).isometric.target;
+  const center = room.bounds.getCenter(new THREE.Vector3());
+  assert.ok(Math.abs(target.x - center.x) < 0.5 && Math.abs(target.z - center.z) < 0.5, `target is near the room's center (${target.toArray()} vs ${center.toArray()})`);
+});
+
+test('issue #252: the pending room\'s own first framing is a cut (DIRECT_FOLLOW_RATES), never a flight — it never had a default framing to fly from', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60);
+
+  exists = true;
+  view.sceneChanged();
+  const rates = (view as unknown as { isometricFollowRates: typeof DIRECT_FOLLOW_RATES }).isometricFollowRates;
+  assert.deepEqual(rates, DIRECT_FOLLOW_RATES);
+});
+
+test('issue #252: a room resolved right away at construction (today\'s rect-room case) still flies, unchanged', () => {
+  const room = fixtureRoomView();
+  const { view } = setup('#view=iso&room=office', undefined, (name) => (name === 'office' ? room : null));
+  const rates = (view as unknown as { isometricFollowRates: typeof FLIGHT_FOLLOW_RATES }).isometricFollowRates;
+  assert.deepEqual(rates, FLIGHT_FOLLOW_RATES, 'office/library resolve synchronously at construction and keep the existing flight behavior');
+});
+
+test('issue #252: a pending room in first person stands at its pose the instant it resolves', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view, camera } = setup('#room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60);
+  assert.ok(camera.position.distanceTo(room.standing.position) > 0.01, 'not yet resolved, camera stays at its default first-person spot');
+
+  exists = true;
+  view.sceneChanged();
+  view.update(0, 1 / 60);
+  assert.ok(camera.position.distanceTo(room.standing.position) < 1e-6, 'stands exactly at the room\'s standing point, the instant it resolves');
+});
+
+test('issue #252: a pending room is only ever applied once — the pending name clears, so a later sceneChanged() never re-checks roomView for it', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  let roomViewCalls = 0;
+  const { view } = setup('#view=iso&room=mission-x', undefined, (name) => {
+    roomViewCalls++;
+    return exists && name === 'mission-x' ? room : null;
+  });
+  view.update(0, 1 / 60);
+  exists = true;
+  view.sceneChanged();
+  view.update(0, 1 / 60);
+  assert.equal((view as unknown as { pendingRoomName: string | null }).pendingRoomName, null, 'cleared once resolved');
+
+  const callsAfterResolution = roomViewCalls;
+  view.sceneChanged();
+  view.sceneChanged();
+  assert.equal(roomViewCalls, callsAfterResolution, 'roomView is never consulted again for a name that already resolved');
+});
+
+test('issue #252: a room that never appears gives up quietly after enough checks, without ever disturbing the default framing', () => {
+  const baseline = setup('#view=iso');
+  baseline.view.update(0, 1 / 60);
+  const { view } = setup('#view=iso&room=never-opens', undefined, () => null);
+  view.update(0, 1 / 60);
+  // PENDING_ROOM_MAX_ATTEMPTS (ViewController.ts) is 50; sceneChanged() past that must stop checking.
+  for (let i = 0; i < 60; i++) view.sceneChanged();
+  view.update(0, 1 / 60);
+  assert.equal(view.zoomDistance, baseline.view.zoomDistance, 'gave up quietly: still the view\'s own default framing');
+});
+
+test('issue #252 review round 2: the isometric cut actually lands on the room, not just the follow rate — the live pose is re-seeded, not just chasing at DIRECT_FOLLOW_RATES', () => {
+  const room = fixtureRoomView(); // centered far from the view's own default framing
+  let exists = false;
+  const { view } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60);
+
+  exists = true;
+  view.sceneChanged();
+  // No further update() tick yet: a true cut must already be on the room right here, same
+  // frame — a follow (even a fast one) would still be back at the default framing this tick.
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+  camera.updateMatrixWorld();
+  const toRoom = camera.position.distanceTo(room.bounds.getCenter(new THREE.Vector3()));
+  const toDefault = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
+  assert.ok(toRoom < toDefault, `the camera is already closer to the room than to the view's own default center (room ${toRoom}, default ${toDefault})`);
+});
+
+test('issue #252 review round 2: a first-person selection flight in progress is cancelled when the pending room resolves mid-flight', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view, camera, manager, selection } = setup('#room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a'); // starts a first-person flight toward the agent, well away from the room
+  view.update(0, 1 / 60); // flight in progress
+
+  exists = true;
+  view.sceneChanged(); // pending room resolves mid-flight
+
+  view.update(0, 1 / 30); // the next frame: the stale flight tween must not resume and pull away
+  assert.ok(camera.position.distanceTo(room.standing.position) < 1e-6, 'the room landing survives the next frame; the in-flight selection tween was cancelled, not resumed');
+});
+
+// --- Issue #252 review round 2: user intent wins — real input drops a still-pending #room= ---
+
+test('issue #252 review round 2: a drag drops a pending room — the user has moved on, so it must never yank the camera there once it finally resolves', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view, camera, canvas } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60); // still pending
+
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 400, clientY: 10 }));
+  assert.equal((view as unknown as { pendingRoomName: string | null }).pendingRoomName, null, 'the drag drops the pending target right away');
+
+  // The mission resolves anyway, moments later — it must not move the camera: the user is driving now.
+  exists = true;
+  view.sceneChanged();
+  view.update(0, 1 / 60);
+  assert.ok(camera.position.distanceTo(room.standing.position) > 0.01, 'the camera never landed on the room; the drag already claimed it');
+});
+
+test('issue #252 review round 2: a wheel zoom drops a pending room', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view, canvas } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60);
+  canvas.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -400, cancelable: true }));
+  assert.equal((view as unknown as { pendingRoomName: string | null }).pendingRoomName, null, 'the wheel drops the pending target right away');
+});
+
+test('issue #252 review round 2: double-clicking a different room drops a pending room', () => {
+  const room = fixtureRoomView();
+  const otherRoom = { bounds: new THREE.Box3(new THREE.Vector3(-5, 0, -5), new THREE.Vector3(5, 2.6, 5)), standing: { position: new THREE.Vector3(0, EYE_HEIGHT, 0), lookAt: new THREE.Vector3(0, EYE_HEIGHT, 5) } };
+  let exists = false;
+  const { view, canvas } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null), { roomAt: () => otherRoom });
+  view.update(0, 1 / 60);
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1600, height: 900, right: 1600, bottom: 900, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  canvas.dispatchEvent(new dom.window.MouseEvent('dblclick', { clientX: 800, clientY: 450 }));
+  assert.equal(view.mode, 'first-person', 'the double-click itself still works, entering the room picked');
+  assert.equal((view as unknown as { pendingRoomName: string | null }).pendingRoomName, null, 'picking a different room drops the still-pending one');
+});
+
+test('issue #252 review round 2: dismissPendingRoom() (what N/F, an explicit agent pick, and a view switch all call) drops the pending target', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view, camera } = setup('#room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60);
+
+  view.dismissPendingRoom(); // main.ts calls this from the N/F triage keys; a click/drag/wheel/dblclick/view-switch call it directly
+  assert.equal((view as unknown as { pendingRoomName: string | null }).pendingRoomName, null);
+
+  exists = true;
+  view.sceneChanged();
+  view.update(0, 1 / 60);
+  assert.ok(camera.position.distanceTo(room.standing.position) > 0.01, 'the camera never landed on the room once intent elsewhere was signalled');
 });
 
 test('a click picks a tombstone, not just an agent figure (issue #127)', () => {
