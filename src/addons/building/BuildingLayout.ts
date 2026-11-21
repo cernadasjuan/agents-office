@@ -4,8 +4,9 @@ import type { Activity } from '../../agents/ActivityAnimations.js';
 import { OFFICE_WALLS, type Station } from '../../scene/Office.js';
 import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, RoomView, Seat } from '../../layout/LayoutStrategy.js';
-import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type RoomSlot } from './RoomPlanner.js';
+import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type Rect, type RoomSlot } from './RoomPlanner.js';
 import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, type RoomKind } from './rooms.js';
+import { deskCameraPose, monitorWorldCorners } from './deskGeometry.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
@@ -251,6 +252,46 @@ export class BuildingLayout implements LayoutStrategy {
       }
     }
     return slot ? roomViewFromSlot(slot) : null;
+  }
+
+  /**
+   * Where the fixed desk-view camera (issue #161, key `H`) sits: behind the user's own desk,
+   * a little lower than a standing first-person pose, looking at the queue in front of it.
+   * Null without a rented office room yet (graceful degradation, rule 3) — a layout only ever
+   * has one at construction, so this should not happen in practice, but a fresh office render
+   * mid-rebuild is still handled the same way `roomView` handles an unknown name.
+   */
+  deskView(): { position: THREE.Vector3; lookAt: THREE.Vector3 } | null {
+    if (!this.rooms.some((room) => room.kind === 'office')) return null;
+    return deskCameraPose();
+  }
+
+  /**
+   * World corners of each desk monitor's bezel, left then right (issue #161 review): lets the
+   * label declutter keep a queued agent's label clear of them in desk mode. Delegates to the
+   * pure geometry in `deskGeometry.ts` — the one source of where a monitor actually sits, the
+   * same one the desk camera pose above and the mesh builder in `deskMonitors.ts` read, so
+   * none of the three can drift from the others (review round 2's own root cause).
+   */
+  deskMonitorCorners(): THREE.Vector3[][] {
+    return monitorWorldCorners();
+  }
+
+  /**
+   * The room (building or mission) whose floor contains a world point, or null between rooms
+   * or outside the building (issue #175, double-click a room in isometric). Pure rect
+   * containment: cheap, and exact since rooms never overlap.
+   */
+  roomAt(x: number, z: number): RoomView | null {
+    const inside = (rect: Rect) => x >= rect.minX && x <= rect.maxX && z >= rect.minZ && z <= rect.maxZ;
+    for (const record of this.rooms) {
+      const slot = slotFor(record.index);
+      if (inside(slot.rect)) return roomViewFromSlot(slot);
+    }
+    for (const room of this.missionRooms.values()) {
+      if (inside(room.slot.rect)) return roomViewFromSlot(room.slot);
+    }
+    return null;
   }
 
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {

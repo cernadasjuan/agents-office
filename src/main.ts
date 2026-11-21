@@ -55,7 +55,7 @@ const tombstoneCard = new TombstoneCard(document.body, { anchor: document.getEle
 const missionIssuesCard = new MissionIssuesCard(document.body, { anchor: document.getElementById('ui-panel')! });
 
 // Camera mode (key I toggles first person and the isometric view) and click to select.
-// Start view: `#view=first-person|iso`, then the last view, then the layout default.
+// Start view: `#view=first-person|iso|desk`, then the last view, then the layout default.
 // `#select=<agent id>` (`#focus=`, its older name, still works) selects that agent once it
 // appears. `#zoom=<distance>` starts at that camera distance. `#room=<name>` frames a room
 // from the active layout (issue #89); a layout with no rooms, or an unknown name, is a no-op.
@@ -68,6 +68,8 @@ const view = new ViewController({
   agents: () => agentManager.getAgents(),
   tombstones: () => activeExtensions(scene).flatMap((extension) => extension.pickTargets?.() ?? []),
   roomView: (name) => layout.roomView?.(name) ?? null,
+  deskView: () => layout.deskView?.() ?? null,
+  roomAt: (x, z) => layout.roomAt?.(x, z) ?? null,
   keys: window,
   hint: document.getElementById('pointer-hint'),
   hash: window.location.hash,
@@ -163,6 +165,7 @@ const labelDetail = new LabelDetailController({
   keys: window,
   viewMode: () => view.mode,
   zoomDistance: () => view.zoomDistance,
+  deskMonitorCorners: () => layout.deskMonitorCorners?.() ?? [],
   pick: (x, y) => view.pickAt(x, y),
   selected: () => selectedAgentId(),
   hash: window.location.hash,

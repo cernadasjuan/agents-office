@@ -41,6 +41,8 @@ const piece = <N extends string>(name: N, category: PieceCategory, create: () =>
 
 export const PIECES = {
   desk: () => piece('desk', 'station', () => createDesk(true)),
+  /** Issue #161 review (round 2): the user's own desk loses the stock monitor — it sits too close to the desk-view camera and crowds out the queue behind it. The two desk monitors (`deskMonitors.ts`) take its place. */
+  deskNoMonitor: () => piece('deskNoMonitor', 'station', () => createDesk(false)),
   whiteboard: () => piece('whiteboard', 'station', createWhiteboard),
   bookshelf: (shelfColor?: number | THREE.Color, rand?: () => number, colors?: readonly (THREE.Color | number)[]) =>
     piece('bookshelf', 'station', () => createBookshelf(shelfColor, rand, colors)),

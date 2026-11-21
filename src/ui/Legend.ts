@@ -55,9 +55,10 @@ const SECTIONS: LegendSection[] = [
   {
     title: 'Keys',
     entries: [
-      { sign: 'Click', meaning: 'Select a figure or a row. In first person, a click elsewhere engages the camera.' },
-      { sign: 'W A S D', meaning: 'Move or pan. Space and Q go up and down. Shift moves faster.' },
+      { sign: 'Click', meaning: 'Select a figure or a row. In first person, a click elsewhere engages the camera. In the isometric view, double-click a room to enter it.' },
+      { sign: 'W A S D', meaning: 'Walk or pan. Double-tap W to run. Shift crouches (first person) or pans faster (isometric). Space jumps.' },
       { sign: 'I', meaning: 'Switch between first person and the isometric view.' },
+      { sign: 'H', meaning: 'Jump to the desk view: a fixed camera at your own desk. The office also settles here on its own after a while with no camera input.', layout: 'building' },
       { sign: 'V', meaning: 'Switch the labels between smart and all.' },
       { sign: 'Shift+L', meaning: 'Switch the layout.' },
       { sign: 'N', meaning: 'Select the next agent that needs you, in queue order.' },

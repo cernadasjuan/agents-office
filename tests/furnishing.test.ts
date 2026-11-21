@@ -129,6 +129,18 @@ test('your office reads as furnished: 6 or more pieces besides the desk, and 5 o
   assert.ok(names.includes('sofa') || names.filter((n) => n === 'armchair').length >= 2, 'a lounge corner: a sofa or two armchairs');
 });
 
+test('issue #161 review round 2: the user\'s own office desk loses the stock monitor; an overflow waiting room keeps it', () => {
+  const primary = roomFurnishing('office', { doorAlong: 0 }); // usersOffice defaults true
+  const names = primary.pieces.map((p) => p.piece.name);
+  assert.ok(names.includes('deskNoMonitor'), 'the user\'s own desk has no stock monitor to crowd the desk-view camera');
+  assert.equal(names.includes('desk'), false, 'the plain desk piece does not appear at all here');
+
+  const overflow = roomFurnishing('office', { doorAlong: 0, usersOffice: false });
+  const overflowNames = overflow.pieces.map((p) => p.piece.name);
+  assert.ok(overflowNames.includes('desk'), 'a later waiting room is nobody\'s desk-view target, so it keeps the normal desk');
+  assert.equal(overflowNames.includes('deskNoMonitor'), false);
+});
+
 function assertPathsClear(kind: 'office' | 'lounge', doorAlong: number) {
   const plan = roomFurnishing(kind, { doorAlong });
   for (const placement of plan.pieces.filter(standsOnFloor)) {

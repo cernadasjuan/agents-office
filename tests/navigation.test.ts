@@ -116,7 +116,7 @@ test('floorUnder finds the floor that holds a point, or null outside every floor
   assert.equal(floorUnder(scene, new THREE.Vector3(100, 0, 100)), null);
 });
 
-function viewSetup(options: { hash?: string; seat?: THREE.Vector3; floors?: THREE.Box3[]; view?: 'isometric' | 'first-person'; modes?: string[] } = {}) {
+function viewSetup(options: { hash?: string; seat?: THREE.Vector3; floors?: THREE.Box3[]; view?: 'isometric' | 'first-person' | 'desk'; modes?: string[]; deskView?: () => { position: THREE.Vector3; lookAt: THREE.Vector3 } | null } = {}) {
   const document = dom.window.document;
   const scene = new THREE.Scene();
   for (const box of options.floors ?? []) scene.add(floorPlane(box));
@@ -139,9 +139,10 @@ function viewSetup(options: { hash?: string; seat?: THREE.Vector3; floors?: THRE
     hash: options.hash ?? '',
     view: options.view,
     modeChanged: options.modes ? (mode) => options.modes!.push(mode) : undefined,
+    deskView: options.deskView,
   });
   const press = (code: string) => dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { code, key: code }));
-  return { view, camera, manager, selection, press };
+  return { view, camera, canvas, manager, selection, press };
 }
 
 test('fly-to an agent next to a room wall ends inside its room, with the figure in frame', () => {
@@ -290,6 +291,24 @@ test('the view controller starts in the given view and reports each mode change 
 test('without a given view the hash still decides and first person stays the default', () => {
   assert.equal(viewSetup().view.mode, 'first-person');
   assert.equal(viewSetup({ hash: '#view=iso' }).view.mode, 'isometric');
+});
+
+test('issue #161: desk mode never engages pointer lock, from any click; first person still does', () => {
+  const desk = { position: new THREE.Vector3(20, 1.3, -2), lookAt: new THREE.Vector3(20, 1.2, -6) };
+  const { view, camera, canvas, press } = viewSetup({ deskView: () => desk });
+  let locks = 0;
+  (canvas as unknown as { requestPointerLock: () => void }).requestPointerLock = () => { locks++; };
+  initFreeCamera(camera, canvas, camera.position.clone().add(new THREE.Vector3(0, 0, -1)));
+
+  // First person, clicking empty ground (no agent under the cursor): the click engages the lock.
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10 }));
+  assert.equal(locks, 1, 'first person locks the pointer on a ground click');
+
+  press('KeyH');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.equal(view.mode, 'desk');
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10 }));
+  assert.equal(locks, 1, 'desk mode never locks the pointer, on this or any other click');
 });
 
 test('the header text names the layout and the view', () => {
