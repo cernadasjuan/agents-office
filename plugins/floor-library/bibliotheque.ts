@@ -42,21 +42,47 @@ function withinRoot(real: string, root: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-/** A regular file under the byte cap, inside `allowedRoot` once every symlink resolves, or
- * undefined on any read failure (missing, too big, not a plain file, or a symlinked section
- * directory that resolves outside the bibliothèque root — review: checking only the leaf
- * file's own `lstat` let a symlinked *directory* earlier in the path redirect the read anywhere
- * on disk, the same escape `findStoryFile` already guards against for a session record). Never
- * throws: a malformed, oversized or escaping index is the same as no library. */
-function readCapped(file: string, allowedRoot: string): string | undefined {
+/** `readCapped`'s own result: the readable prefix, and whether the file ran past
+ * `MAX_INDEX_BYTES` so content past the cap was never read at all (review: a section whose
+ * table has entries before the cap and more rows after it still fits under `MAX_ENTRIES`, so
+ * `parseSectionEntries`'s own row-count `truncated` stayed false — the byte cut has to carry
+ * its own truncation signal forward, not be inferred from entry count alone). */
+interface CappedRead {
+  text: string;
+  truncated: boolean;
+}
+
+/**
+ * A regular file inside `allowedRoot` once every symlink resolves, read up to `MAX_INDEX_BYTES`
+ * (issue: a real top `INDEX.md` can run well past a round number once a wiki grows — reading a
+ * capped prefix of it is still useful data, not the same as no library). An oversized file is
+ * cut at its last full line within the cap, never a byte count that could split a link or a
+ * multi-byte UTF-8 sequence mid-character: `topLevelSections`/`parseSectionEntries` only ever
+ * see whole lines. Undefined on any read failure (missing, not a plain file, or a symlinked
+ * section directory that resolves outside the bibliothèque root — review: checking only the
+ * leaf file's own `lstat` let a symlinked *directory* earlier in the path redirect the read
+ * anywhere on disk, the same escape `findStoryFile` already guards against for a session
+ * record). Never throws: a malformed or escaping index is the same as no library.
+ */
+function readCapped(file: string, allowedRoot: string): CappedRead | undefined {
+  let fd: number | undefined;
   try {
     const real = fs.realpathSync(file);
     if (!withinRoot(real, allowedRoot)) return undefined;
     const stat = fs.lstatSync(real);
-    if (!stat.isFile() || stat.size > MAX_INDEX_BYTES) return undefined;
-    return fs.readFileSync(real, 'utf-8');
+    if (!stat.isFile()) return undefined;
+    const readBytes = Math.min(stat.size, MAX_INDEX_BYTES);
+    const buffer = Buffer.alloc(readBytes);
+    fd = fs.openSync(real, 'r');
+    fs.readSync(fd, buffer, 0, readBytes, 0);
+    const text = buffer.toString('utf-8');
+    if (stat.size <= MAX_INDEX_BYTES) return { text, truncated: false };
+    const lastNewline = text.lastIndexOf('\n');
+    return { text: lastNewline >= 0 ? text.slice(0, lastNewline) : '', truncated: true };
   } catch {
     return undefined;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 
@@ -107,8 +133,8 @@ export function parseSectionEntries(sectionIndexMarkdown: string): { entries: Li
 /**
  * A repo root's own library, or undefined when it has no `documentation/bibliotheque/INDEX.md`
  * (graceful degradation: no data, old behavior — here, no library room content at all). A
- * section whose own `INDEX.md` is missing, oversized, or carries no table-row entries is
- * dropped rather than shown empty.
+ * section whose own `INDEX.md` is missing, or carries no table-row entries (within the capped
+ * prefix `readCapped` reads for an oversized one), is dropped rather than shown empty.
  */
 export function readBibliotheque(root: string): Bibliotheque | undefined {
   const base = path.join(root, BIBLIOTHEQUE_RELATIVE);
@@ -118,15 +144,15 @@ export function readBibliotheque(root: string): Bibliotheque | undefined {
   } catch {
     return undefined;
   }
-  const topIndex = readCapped(path.join(base, 'INDEX.md'), realBase);
-  if (topIndex === undefined) return undefined;
+  const topRead = readCapped(path.join(base, 'INDEX.md'), realBase);
+  if (topRead === undefined) return undefined;
   const sections: LibrarySection[] = [];
-  for (const segment of topLevelSections(topIndex).slice(0, MAX_SECTIONS)) {
-    const sectionIndex = readCapped(path.join(base, segment, 'INDEX.md'), realBase);
-    if (sectionIndex === undefined) continue;
-    const { entries, truncated } = parseSectionEntries(sectionIndex);
+  for (const segment of topLevelSections(topRead.text).slice(0, MAX_SECTIONS)) {
+    const sectionRead = readCapped(path.join(base, segment, 'INDEX.md'), realBase);
+    if (sectionRead === undefined) continue;
+    const { entries, truncated } = parseSectionEntries(sectionRead.text);
     if (entries.length === 0) continue;
-    sections.push({ name: segment, entries, truncated });
+    sections.push({ name: segment, entries, truncated: truncated || sectionRead.truncated });
   }
   return { sections };
 }
