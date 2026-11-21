@@ -12,9 +12,11 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { StickFigure } = await import('../src/characters/StickFigure.js');
 const { formatWait, formatWaitShort } = await import('../src/ui/attention.js');
-const { HIP_HEIGHT } = await import('../src/characters/StickFigureParts.js');
-// Issue #165's Hero body shortened the legs, moving the seated hip height off the pre-Hero 0.5.
-const SEATED_HIPS = HIP_HEIGHT - 0.4;
+const { SEATED_HIP_HEIGHT } = await import('../src/agents/ActivityAnimations.js');
+// Issue #165's Hero body shortened the legs, moving the seated hip height off the pre-Hero
+// 0.5; round 7 re-tuned the seated drop so hips land on the seat, not below it — read the
+// real constant (ActivityAnimations.ts), not a second hardcoded copy of it.
+const SEATED_HIPS = SEATED_HIP_HEIGHT;
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');

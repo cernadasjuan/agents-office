@@ -14,7 +14,16 @@ const CAP_SEGMENTS = 4;
  */
 const HEAD_RADIUS = 0.205; // was a plain 0.15 sphere
 const TORSO_RADIUS = 0.17; // was 0.12-0.15 (tapered cylinder); now one wider capsule radius
-const TORSO_LENGTH = 0.26; // the capsule's straight middle; its rounded caps add 2 * TORSO_RADIUS on top
+/**
+ * Issue #165 round 7 (review: "the lack of neck is kind of disturbing"): was 0.26,
+ * leaving a bare 0.1 gap between the torso top and the head bottom (the old
+ * `NECK_MARGIN`, below). Grown by exactly that gap so the capsule itself now reaches
+ * the head, with no separate "neck" part needed — "longer body to the head that
+ * connects to the head. It will also connect with the top of the arms," since the
+ * shoulders stay defined as the torso's own top (see `SHOULDERS_Y`): a taller torso
+ * carries the shoulders up with it, the same relationship as before.
+ */
+const TORSO_LENGTH = 0.36;
 const TORSO_HEIGHT = TORSO_LENGTH + TORSO_RADIUS * 2;
 const HAND_RADIUS = 0.052; // was a 0.06 box; a mitten reads rounder at a slightly smaller radius
 /**
@@ -25,22 +34,43 @@ const HAND_RADIUS = 0.052; // was a 0.06 box; a mitten reads rounder at a slight
  * (`HAND_RADIUS`) without the limb overtaking it.
  */
 export const LIMB_RADIUS = 0.06;
+/**
+ * Issue #165 round 7 (review: "a little bit thinner legs too"): legs already have
+ * their own shared-geometry bucket, distinct from the arms' (a different length,
+ * `LEG_SEGMENT` vs 0.3) — so a dedicated, slightly smaller leg radius replaces that
+ * one bucket's own geometry; it does not add a bucket, there was never an arm/leg
+ * bucket to begin with.
+ */
+const LEG_RADIUS = 0.05;
+/**
+ * Issue #165 round 7 (review: "their hands and their front arms looks like dicks...
+ * make the front part of the forearm thinner"): the forearm shares its bucket with
+ * the upper arm (both `createLimb(0.3)`, the same length and radius) — a smaller
+ * `radius` argument here would mint a second bucket instead of thinning the shared
+ * one. A per-instance x/z scale on the forearm mesh keeps the same geometry and
+ * material (so the same bucket), thinning only that instance's own cross-section,
+ * the same "a transform, never a new shape" rule `HeroVariety.ts`'s body width and
+ * the equipment catalog's item scale already follow.
+ */
+export const FOREARM_THIN_SCALE = 0.75;
 /** ~20% shorter than the old 0.4 upper/lower leg segments (round 1 "chibi" direction, folded into Hero). */
 const LEG_SEGMENT = 0.32;
 /** Keeps the old ~0.1 ground margin above the now-shorter legs (2 * LEG_SEGMENT), same ratio as 0.9 above 2 * 0.4. */
 export const HIP_HEIGHT = 0.74;
 /** Body-space y of the shoulders: hips plus the torso's own height, the same relationship the old 1.5 = 0.9 + 0.6 kept. */
 export const SHOULDERS_Y = HIP_HEIGHT + TORSO_HEIGHT;
-/** The gap between the shoulders and the neck joint, same as the old 1.6 - 1.5. */
-const NECK_MARGIN = 0.1;
+/** Issue #165 round 7 (review, the neck fix above): was 0.1, the exact gap this round
+ * closes by growing the torso instead. The neck joint now sits exactly at the
+ * shoulders' own height — the torso, not a separate gap, is what reaches the head. */
+const NECK_MARGIN = 0;
 export const NECK_HEIGHT = SHOULDERS_Y + NECK_MARGIN;
 /** The head center sits one radius above the neck, same convention as the old 0.15 (== the old head radius). */
 export const HEAD_OFFSET = HEAD_RADIUS;
-/** Issue #174: first person's eye height matches a standing agent's own eye height (the neck joint plus the head center), not an arbitrary guess. Re-derived for the Hero body (issue #165): a bigger head and shorter legs move this from 1.75 to roughly 1.67. */
+/** Issue #174: first person's eye height matches a standing agent's own eye height (the neck joint plus the head center), not an arbitrary guess. Re-derived for the Hero body (issue #165): a bigger head and shorter legs move this from 1.75 to roughly 1.67, then the round 7 neck fix (a taller torso) raises it again. */
 export const FIGURE_EYE_HEIGHT = NECK_HEIGHT + HEAD_OFFSET;
 
 export type FaceState = 'neutral' | 'focused' | 'waiting';
-export type HairStyle = 'cap' | 'spiky' | 'bun' | 'none';
+export type HairStyle = 'tufts' | 'spiky' | 'bun' | 'none';
 
 // Every figure shares one geometry per part shape, so the figure batch draws all
 // figures' parts of one shape and color in one call (src/characters/FigureBatch.ts).
@@ -91,9 +121,13 @@ export function handTintFor(color: THREE.Color): THREE.Color {
  * still shares the one skin-colored material and bucket (`FigureBatch.ts`); the color
  * shows up as a per-instance tint, never a second material, so a mission's hand color
  * costs no extra draw call.
+ *
+ * Issue #165 round 7 (review: a round mitten "really looks like a dick head... keep the
+ * hands squared or something, or triangular"): a box, not a sphere, same `'hand'` shared
+ * key and bucket as before, just a different geometry object cached under it.
  */
 export function createHand(color?: THREE.Color): THREE.Mesh {
-  const mesh = part(shared('hand', () => new THREE.SphereGeometry(HAND_RADIUS, 8, 6)), getToonMaterial(Colors.skin));
+  const mesh = part(shared('hand', () => new THREE.BoxGeometry(HAND_RADIUS * 1.8, HAND_RADIUS * 1.8, HAND_RADIUS * 1.6)), getToonMaterial(Colors.skin));
   if (color) mesh.userData.tint = handTintFor(color);
   return mesh;
 }
@@ -158,28 +192,49 @@ export function setMouthState(mouth: THREE.Mesh, state: FaceState): void {
 }
 
 /**
- * A small set of hair shapes (issue #165 round 2, "hair + body-shape variety"), one
- * per agent, seeded off its name (`HeroVariety.ts`). Every style shares its geometry
- * and material across every figure wearing it — one bucket per style kind, like a
- * persona hat, never one per figure. `'none'` costs nothing.
+ * A small set of hair shapes (issue #165 round 2, "hair + body-shape variety"; round 7
+ * replaced the dome-shaped `'cap'` style with `'tufts'`, below), one per agent, seeded
+ * off its name (`HeroVariety.ts`). Every style shares its geometry and material across
+ * every figure wearing it — one bucket per style kind, like a persona hat, never one
+ * per figure. `'none'` costs nothing.
  */
 function createHair(style: HairStyle): THREE.Group | null {
   if (style === 'none') return null;
   const group = new THREE.Group();
   group.name = 'hero-hair';
   const material = getToonMaterial(Colors.hair);
-  const addPiece = (geometry: THREE.BufferGeometry, position: [number, number, number], rotation?: [number, number, number]): void => {
+  const addPiece = (
+    geometry: THREE.BufferGeometry, position: [number, number, number], rotation?: [number, number, number], scale?: number,
+  ): void => {
     const mesh = part(geometry, material);
     mesh.castShadow = false;
     mesh.position.set(...position);
     if (rotation) mesh.rotation.set(...rotation);
+    if (scale) mesh.scale.setScalar(scale);
     group.add(mesh);
   };
   switch (style) {
-    case 'cap': {
-      // A snug dome over the top of the head, like short hair combed flat.
-      const geometry = shared('hair:cap', () => new THREE.SphereGeometry(HEAD_RADIUS * 1.06, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55));
-      addPiece(geometry, [0, HEAD_RADIUS * 0.1, 0]);
+    case 'tufts': {
+      // Issue #165 round 7 (review: "the hairs... look like little caps, I'm not sure
+      // if I like the hairs" — replaces the old snug-dome 'cap' style). A review-round
+      // follow-up found the first cut (3 thin cones at their raw geometry size) read as
+      // "small black dots floating around the head", not hair, at both a close-up and
+      // the default zoom: individually tiny (a 0.033-radius base) and spread wide (0.35
+      // head-radii apart), each with a visible gap off the scalp. Fixed per the two
+      // options on the table: fewer, bigger tufts (2, not 3), moved close enough
+      // together their bases overlap into one mass, and sized up with a per-instance
+      // scale (the same "a transform, never a new shape" trick the forearm thin-down
+      // uses) rather than a bigger geometry argument, so this still costs no bucket of
+      // its own. Reuses `spiky`'s own cone shape and bucket (`hair:spike`, now built
+      // with the same dimensions as `spiky`'s own build below, so whichever style's
+      // figure builds first in a scene does not silently decide the other's cone size)
+      // — a style with no shape of its own, so this round still spends one bucket
+      // *less* than before (the removed `hair:cap` dome).
+      const geometry = shared('hair:spike', () => new THREE.ConeGeometry(HEAD_RADIUS * 0.16, HEAD_RADIUS * 0.55, 6));
+      const offsets: number[] = [-0.18, 0.18];
+      for (const dx of offsets) {
+        addPiece(geometry, [dx * HEAD_RADIUS, HEAD_RADIUS * 0.88, HEAD_RADIUS * 0.5], [-0.5, dx * 0.9, 0], 1.8);
+      }
       break;
     }
     case 'spiky': {
@@ -251,13 +306,13 @@ export function buildSkeleton(accentColor: THREE.Color, secondColor?: THREE.Colo
   const leftUpperLeg = new THREE.Group();
   leftUpperLeg.position.set(-0.1, 0, 0);
   hips.add(leftUpperLeg);
-  const leftUpperLegMesh = createLimb(LEG_SEGMENT);
+  const leftUpperLegMesh = createLimb(LEG_SEGMENT, LEG_RADIUS);
   leftUpperLeg.add(leftUpperLegMesh);
 
   const leftLowerLeg = new THREE.Group();
   leftLowerLeg.position.set(0, -LEG_SEGMENT, 0);
   leftUpperLeg.add(leftLowerLeg);
-  const leftLowerLegMesh = createLimb(LEG_SEGMENT);
+  const leftLowerLegMesh = createLimb(LEG_SEGMENT, LEG_RADIUS);
   leftLowerLeg.add(leftLowerLegMesh);
 
   const leftFoot = createFoot();
@@ -267,13 +322,13 @@ export function buildSkeleton(accentColor: THREE.Color, secondColor?: THREE.Colo
   const rightUpperLeg = new THREE.Group();
   rightUpperLeg.position.set(0.1, 0, 0);
   hips.add(rightUpperLeg);
-  const rightUpperLegMesh = createLimb(LEG_SEGMENT);
+  const rightUpperLegMesh = createLimb(LEG_SEGMENT, LEG_RADIUS);
   rightUpperLeg.add(rightUpperLegMesh);
 
   const rightLowerLeg = new THREE.Group();
   rightLowerLeg.position.set(0, -LEG_SEGMENT, 0);
   rightUpperLeg.add(rightLowerLeg);
-  const rightLowerLegMesh = createLimb(LEG_SEGMENT);
+  const rightLowerLegMesh = createLimb(LEG_SEGMENT, LEG_RADIUS);
   rightLowerLeg.add(rightLowerLegMesh);
 
   const rightFoot = createFoot();
@@ -296,6 +351,7 @@ export function buildSkeleton(accentColor: THREE.Color, secondColor?: THREE.Colo
   leftForearm.position.set(0, -0.3, 0);
   leftUpperArm.add(leftForearm);
   const leftForearmMesh = createLimb(0.3);
+  leftForearmMesh.scale.set(FOREARM_THIN_SCALE, 1, FOREARM_THIN_SCALE);
   leftForearm.add(leftForearmMesh);
 
   const leftHand = createHand(secondColor);
@@ -312,6 +368,7 @@ export function buildSkeleton(accentColor: THREE.Color, secondColor?: THREE.Colo
   rightForearm.position.set(0, -0.3, 0);
   rightUpperArm.add(rightForearm);
   const rightForearmMesh = createLimb(0.3);
+  rightForearmMesh.scale.set(FOREARM_THIN_SCALE, 1, FOREARM_THIN_SCALE);
   rightForearm.add(rightForearmMesh);
 
   const rightHand = createHand(secondColor);
