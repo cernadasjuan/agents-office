@@ -40,6 +40,98 @@ function approachY(current: number, target: number, delta: number, speed = 8): n
   return current + (target - current) * Math.min(speed * delta, 1);
 }
 
+// --- OCCASIONAL VARIANTS (#164): a short canned clip now and then, on top of an
+// otherwise still pose. Each figure's own root uuid seeds its gap and clip choice,
+// so a room full of idle (or testing, or planning) figures never plays the same
+// clip at the same time. A channel keys the schedule per activity, so idle's
+// clock and testing's clock never share state. ---
+
+function fnv1a(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+/** A deterministic 0..1 value from a figure's uuid and an integer draw: no shared RNG state to desync in tests. */
+function seededFraction(uuid: string, draw: number): number {
+  return fnv1a(`${uuid}:${draw}`) / 0xffffffff;
+}
+
+interface VariantConfig {
+  /** Seconds between the end of one clip and the earliest the next can start, at least. */
+  minGap: number;
+  /** The upper end of that same random gap. */
+  maxGap: number;
+  /** How long a clip plays once it starts, in seconds. */
+  duration: number;
+  /** How many clips this channel offers; `clipCount <= 1` never varies which one plays. */
+  clipCount: number;
+}
+
+interface VariantState {
+  nextAt: number;
+  playing: boolean;
+  clipEndsAt: number;
+  clipIndex: number;
+  lastIndex: number;
+  draws: number;
+}
+
+const variantStates = new WeakMap<THREE.Object3D, Map<string, VariantState>>();
+
+function variantStateFor(root: THREE.Object3D, channel: string): VariantState {
+  let byChannel = variantStates.get(root);
+  if (!byChannel) {
+    byChannel = new Map();
+    variantStates.set(root, byChannel);
+  }
+  let state = byChannel.get(channel);
+  if (!state) {
+    state = { nextAt: -1, playing: false, clipEndsAt: 0, clipIndex: -1, lastIndex: -1, draws: 0 };
+    byChannel.set(channel, state);
+  }
+  return state;
+}
+
+function scheduleNext(state: VariantState, root: THREE.Object3D, t: number, cfg: VariantConfig): void {
+  state.draws++;
+  const span = cfg.maxGap - cfg.minGap;
+  state.nextAt = t + cfg.minGap + seededFraction(root.uuid, state.draws) * span;
+}
+
+/**
+ * -1 while the base pose should show; otherwise the clip index to apply this
+ * frame. A figure gets its first gap the first time its channel is asked
+ * about, so nothing plays before the pose itself has settled.
+ */
+function occasionalVariant(root: THREE.Object3D, channel: string, t: number, cfg: VariantConfig): number {
+  const state = variantStateFor(root, channel);
+  if (state.nextAt < 0) scheduleNext(state, root, t, cfg);
+
+  if (state.playing) {
+    if (t >= state.clipEndsAt) {
+      state.playing = false;
+      scheduleNext(state, root, t, cfg);
+      return -1;
+    }
+    return state.clipIndex;
+  }
+
+  if (t < state.nextAt || cfg.clipCount <= 0) return -1;
+
+  state.draws++;
+  let index = Math.floor(seededFraction(root.uuid, state.draws) * cfg.clipCount);
+  if (cfg.clipCount > 1 && index === state.lastIndex) index = (index + 1) % cfg.clipCount;
+  state.lastIndex = index;
+  state.clipIndex = index;
+  state.playing = true;
+  state.clipEndsAt = t + cfg.duration;
+  return index;
+}
+
 // Rotations that only some poses drive. Every other pose eases them back to rest.
 type SideAxis = 'leftUpperArm.z' | 'rightUpperArm.z' | 'neck.x' | 'neck.y';
 const SIDE_AXES: SideAxis[] = ['leftUpperArm.z', 'rightUpperArm.z', 'neck.x', 'neck.y'];
@@ -219,11 +311,55 @@ function animateActivityPose(joints: Joints, activity: Activity, elapsed: number
 }
 
 // --- IDLE: Holding coffee cup, holds still (#163: no continuous sway) ---
-function animateIdle(j: Joints, _t: number, dt: number): void {
+
+/** One figure's clip plays roughly every 45-90s: across a dozen idle figures, that reads as "one of them, every several seconds" (#164), not a crowd all moving at once. */
+const IDLE_CLIP_CONFIG: VariantConfig = { minGap: 45, maxGap: 90, duration: 1.6, clipCount: 3 };
+
+/** Stretches both arms up for a moment, then settles back. */
+function applyIdleStretch(j: Joints, dt: number): void {
+  j.leftUpperArm.rotation.x = approach(j.leftUpperArm.rotation.x, -2.6, dt, 5);
+  j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -2.6, dt, 5);
+  j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -0.1, dt, 5);
+  j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -0.1, dt, 5);
+  j.neck.rotation.z = approach(j.neck.rotation.z, -0.1, dt, 5);
+}
+
+/** Glances at a phone held up near the face. */
+function applyIdleCheckPhone(j: Joints, t: number, dt: number): void {
+  j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -2.2, dt, 6);
+  j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -2.3, dt, 6);
+  j.leftUpperArm.rotation.x = approach(j.leftUpperArm.rotation.x, 0.1, dt, 6);
+  j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -0.1, dt, 6);
+  j.neck.rotation.z = approach(j.neck.rotation.z, 0.25 + Math.sin(t * 2) * 0.03, dt, 6);
+}
+
+/** Looks around the room, head turning side to side. */
+function applyIdleLookAround(j: Joints, t: number, dt: number): void {
+  j.neck.rotation.z = approach(j.neck.rotation.z, Math.sin(t * 1.4) * 0.35, dt, 5);
+  j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -1.0, dt, 5);
+  j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -1.5, dt, 5);
+  j.leftUpperArm.rotation.x = approach(j.leftUpperArm.rotation.x, 0.1, dt, 5);
+  j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -0.1, dt, 5);
+}
+
+const IDLE_CLIPS: Array<(j: Joints, t: number, dt: number) => void> = [
+  (j, _t, dt) => applyIdleStretch(j, dt),
+  applyIdleCheckPhone,
+  applyIdleLookAround,
+];
+
+/**
+ * The same pose and clips apply whether the layout seated this figure at the
+ * coffee machine or on open floor (no idle seat was free, #164): an overflow
+ * standing idle figure is not a special case, it reads the same "taking a
+ * break" as a seated one, clips included.
+ */
+function animateIdle(j: Joints, t: number, dt: number): void {
   applyStandingBase(j, dt);
 
   j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
 
+  // Base pose: holding a coffee cup.
   j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -1.2, dt);
   j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -1.8, dt);
 
@@ -231,6 +367,25 @@ function animateIdle(j: Joints, _t: number, dt: number): void {
   j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -0.1, dt);
 
   j.neck.rotation.z = approach(j.neck.rotation.z, 0, dt);
+
+  // #164: an occasional canned clip on top of the held pose.
+  const clip = occasionalVariant(j.root, 'idle', t, IDLE_CLIP_CONFIG);
+  if (clip >= 0) IDLE_CLIPS[clip](j, t, dt);
+}
+
+/** #164: now and then, sketches on a notepad instead of the whiteboard: hands lower, closer to the body. */
+const PLANNING_VARIANT_CONFIG: VariantConfig = { minGap: 25, maxGap: 55, duration: 2.2, clipCount: 1 };
+
+function applyDrawing(j: Joints, t: number, dt: number): void {
+  const sketch = Math.sin(t * 4) * 0.12;
+  j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -1.1 + sketch, dt, 6);
+  j.rightUpperArm.rotation.z = approach(j.rightUpperArm.rotation.z, -0.1, dt, 6);
+  j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -1.3, dt, 6);
+
+  j.leftUpperArm.rotation.x = approach(j.leftUpperArm.rotation.x, -1.0, dt, 6);
+  j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -1.4, dt, 6);
+
+  j.neck.rotation.x = approach(j.neck.rotation.x, 0.15, dt, 6);
 }
 
 // --- PLANNING: Writing on whiteboard ---
@@ -250,6 +405,8 @@ function animatePlanning(j: Joints, t: number, dt: number): void {
   j.neck.rotation.z = approach(j.neck.rotation.z, Math.sin(t * 1.5) * 0.05, dt);
 
   j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
+
+  if (occasionalVariant(j.root, 'planning', t, PLANNING_VARIANT_CONFIG) >= 0) applyDrawing(j, t, dt);
 }
 
 // --- IMPLEMENTING: Typing at keyboard ---
@@ -287,6 +444,21 @@ function animateResearching(j: Joints, t: number, dt: number): void {
   j.body.rotation.z = approach(j.body.rotation.z, 0, dt);
 }
 
+/** #164: now and then, prays for the tests to pass instead of watching with crossed arms. Gabriel likes this one. */
+const TESTING_VARIANT_CONFIG: VariantConfig = { minGap: 25, maxGap: 55, duration: 2.2, clipCount: 1 };
+
+function applyPraying(j: Joints, dt: number): void {
+  j.leftUpperArm.rotation.x = approach(j.leftUpperArm.rotation.x, -2.0, dt, 6);
+  j.leftUpperArm.rotation.z = approach(j.leftUpperArm.rotation.z, 0.35, dt, 6);
+  j.leftForearm.rotation.x = approach(j.leftForearm.rotation.x, -1.6, dt, 6);
+
+  j.rightUpperArm.rotation.x = approach(j.rightUpperArm.rotation.x, -2.0, dt, 6);
+  j.rightUpperArm.rotation.z = approach(j.rightUpperArm.rotation.z, -0.35, dt, 6);
+  j.rightForearm.rotation.x = approach(j.rightForearm.rotation.x, -1.6, dt, 6);
+
+  j.neck.rotation.x = approach(j.neck.rotation.x, 0.3, dt, 6);
+}
+
 // --- TESTING: Arms crossed, watching monitor ---
 function animateTesting(j: Joints, t: number, dt: number): void {
   applyStandingBase(j, dt);
@@ -303,6 +475,8 @@ function animateTesting(j: Joints, t: number, dt: number): void {
 
   j.neck.rotation.x = approach(j.neck.rotation.x, -0.1, dt);
   j.neck.rotation.z = approach(j.neck.rotation.z, 0, dt);
+
+  if (occasionalVariant(j.root, 'testing', t, TESTING_VARIANT_CONFIG) >= 0) applyPraying(j, dt);
 }
 
 // --- DEBUGGING: Scratching head, looking at red screen ---
