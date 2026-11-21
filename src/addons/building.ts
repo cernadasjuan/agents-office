@@ -4,6 +4,7 @@ import { BuildingLayout } from './building/BuildingLayout.js';
 import { loadPortrait } from './building/portrait.js';
 import { ALL_FLOORS } from '../floors/FloorRegistry.js';
 import { focusedFloor } from '../floors/floorState.js';
+import { mountHexDebugOverlay } from './building/HexDebugOverlay.js';
 // Issue #161: registers itself (two small monitors on the user's own desk) as a side effect.
 import './building/deskMonitors.js';
 
@@ -24,6 +25,10 @@ registerLayout('building', (scene, stations) => {
   });
   // The picture over your office door, from this server only; without one the frame keeps its placeholder
   void loadPortrait(scene);
+  // Issue #218 step 1: a dev-only preview of the hex office planner's claimed region, off
+  // the building's own geometry (x = 200) so it never changes what Gabriel sees by default.
+  // No-op (builds no geometry at all) without `?hexDebug=1`.
+  mountHexDebugOverlay(scene);
   return activeBuilding;
 }, { makeDefault: true, defaultView: 'isometric' });
 
