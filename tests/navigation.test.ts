@@ -7,6 +7,10 @@ import type { Seat, LayoutStrategy } from '../src/layout/LayoutStrategy.js';
 // Toon materials paint a gradient on a canvas at import time.
 const dom = new JSDOM('<!doctype html><html><body><div id="pointer-hint"></div></body></html>');
 Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true, writable: true });
+// initFreeCamera (re-review, round 2: the crouch-mid-flight test below) wires its own
+// window-level key listeners, so this file needs a real `window` global too, not only
+// `document`, the same pattern tests/free-camera-ground-walk.test.ts already uses.
+Object.defineProperty(globalThis, 'window', { value: dom.window, configurable: true, writable: true });
 dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   get: () => () => undefined,
   set: () => true,
@@ -14,7 +18,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { ViewController, VIEW_HINTS } = await import('../src/scene/ViewController.js');
 const { SelectionState } = await import('../src/scene/Selection.js');
-const { updateFreeCamera, setFreeCameraLook, focusPosition, MIN_EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
+const { updateFreeCamera, setFreeCameraLook, focusPosition, initFreeCamera, EYE_HEIGHT, CROUCH_EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
 const { floorUnder } = await import('../src/scene/OverviewCamera.js');
 const { chooseViewMode, rememberViewMode, viewStatusText, VIEW_STORAGE_KEY } = await import('../src/scene/ViewMemory.js');
 const { applyCeilingCut, findCeilings } = await import('../src/scene/Cutaway.js');
@@ -26,6 +30,7 @@ const registry = await import('../src/layout/registry.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
+  Reflect.deleteProperty(globalThis, 'window');
 });
 
 function memoryStorage(initial: Record<string, string> = {}) {
@@ -47,21 +52,26 @@ test('every view hint lists N, F and the filter key', () => {
   }
 });
 
-// --- Free camera: no bounding box ---
+// --- Free camera: ground-walk, no flying (issue #174) ---
 
-test('first person keeps a position far outside the old office box and above the building', () => {
+test('first person keeps x/z free outside the old office box (no horizontal bounding box)', () => {
   const camera = new THREE.PerspectiveCamera();
   setFreeCameraLook(camera, new THREE.Vector3(40, 20, -35), new THREE.Vector3(0, 0, 0));
   updateFreeCamera(camera, 1 / 30);
-  assert.deepEqual(camera.position.toArray(), [40, 20, -35]);
+  assert.equal(camera.position.x, 40);
+  assert.equal(camera.position.z, -35);
 });
 
-test('first person still cannot sink below the floor', () => {
+test('first person settles at standing eye height, never flies (issue #174, replaces the old floor-only clamp)', () => {
   const camera = new THREE.PerspectiveCamera();
+  setFreeCameraLook(camera, new THREE.Vector3(30, 20, 0), new THREE.Vector3(0, 0, 0));
+  updateFreeCamera(camera, 1 / 30);
+  assert.equal(camera.position.y, EYE_HEIGHT, 'a placement above the ground comes straight back down to standing height');
+  assert.equal(camera.position.x, 30);
+
   setFreeCameraLook(camera, new THREE.Vector3(30, -4, 0), new THREE.Vector3(0, 0, 0));
   updateFreeCamera(camera, 1 / 30);
-  assert.equal(camera.position.y, MIN_EYE_HEIGHT);
-  assert.equal(camera.position.x, 30);
+  assert.equal(camera.position.y, EYE_HEIGHT, 'a placement below the ground also settles at standing height, not at the floor');
 });
 
 // --- Fly-to: the camera ends on the agent's side of the walls ---
@@ -166,6 +176,65 @@ test('key F fix: refocus flies to an already-selected agent, even though a resel
   for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
   assert.ok(Math.abs(camera.position.x - afterFirstFly.x) < 0.05 && Math.abs(camera.position.z - afterFirstFly.z) < 0.05,
     'refocus flew back to the same framing');
+});
+
+test('review #185: selecting an agent in first person lands at ground-walk\'s own eye height, with no pop a frame later', () => {
+  // Running a full second before sampling (the original version of this test) misses the bug
+  // entirely: the old pop happened and self-corrected to EYE_HEIGHT well within that window,
+  // so `justLanded` was already past it either way. The only frame that can tell the fix apart
+  // from the bug is the landing frame itself, against the very next one (re-review, round 2).
+  const { view, manager, selection, camera } = viewSetup();
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  const flightField = (view as unknown as { flight: unknown }) as { flight: unknown };
+  let justLanded = NaN;
+  let afterOneMoreFrame = NaN;
+  for (let i = 0; i < 120; i++) {
+    const wasFlying = flightField.flight !== null;
+    view.update(i / 60, 1 / 60);
+    if (wasFlying && flightField.flight === null) {
+      justLanded = camera.position.y;
+      view.update((i + 1) / 60, 1 / 60);
+      afterOneMoreFrame = camera.position.y;
+      break;
+    }
+  }
+  assert.ok(Math.abs(justLanded - EYE_HEIGHT) < 1e-6, `the flight itself should land at EYE_HEIGHT (${EYE_HEIGHT}), got ${justLanded}`);
+  // The bug this guards against: the old fixed focus height (2.3) landed there, then the very
+  // next frame's ground-walk rule snapped it down to EYE_HEIGHT (1.75), a visible 0.55 m pop.
+  assert.equal(afterOneMoreFrame, justLanded, 'no height change on the frame right after the flight lands');
+});
+
+test('review #185 (re-review, round 2): crouching mid-flight never pops on arrival', () => {
+  // The fix round closed this for the simple case (land, then nothing changes next frame),
+  // but a posture change WHILE the 0.6 s flight is still animating was never covered: the
+  // flight's destination height was baked in once, at launch, from whatever currentEyeHeight()
+  // returned at that instant. Pressing Shift partway through the flight must not leave that
+  // destination stale.
+  const { view, manager, selection, camera } = viewSetup();
+  const canvas = dom.window.document.createElement('canvas');
+  initFreeCamera(camera, canvas, camera.position.clone().add(new THREE.Vector3(0, 0, -1)));
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  const flightField = (view as unknown as { flight: unknown }) as { flight: unknown };
+  // Press Shift partway through the flight (it takes 0.6 s; this is well inside that window).
+  for (let i = 0; i < 20; i++) view.update(i / 60, 1 / 60);
+  dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { code: 'ShiftLeft' }));
+  let justLanded = NaN;
+  let afterOneMoreFrame = NaN;
+  for (let i = 20; i < 120; i++) {
+    const wasFlying = flightField.flight !== null;
+    view.update(i / 60, 1 / 60);
+    if (wasFlying && flightField.flight === null) {
+      justLanded = camera.position.y;
+      view.update((i + 1) / 60, 1 / 60);
+      afterOneMoreFrame = camera.position.y;
+      break;
+    }
+  }
+  dom.window.dispatchEvent(new dom.window.KeyboardEvent('keyup', { code: 'ShiftLeft' }));
+  assert.ok(Math.abs(justLanded - CROUCH_EYE_HEIGHT) < 1e-6, `crouched by the time it lands, so it should land at CROUCH_EYE_HEIGHT (${CROUCH_EYE_HEIGHT}), got ${justLanded}`);
+  assert.equal(afterOneMoreFrame, justLanded, 'no height change on the frame right after the flight lands, even though Shift was pressed mid-flight');
 });
 
 test('key F fix: refocus on an agent no longer in the scene does nothing', () => {

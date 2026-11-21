@@ -12,19 +12,25 @@ import * as THREE from 'three';
 const dom = new JSDOM('<!doctype html><html><body><canvas id="c"></canvas><input id="filter"></body></html>');
 Object.defineProperty(globalThis, 'window', { value: dom.window, configurable: true, writable: true });
 Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true, writable: true });
+// FreeCamera.ts now reads the agent's own eye height from StickFigureParts.ts (issue #174),
+// which imports Materials.ts, which paints a toon gradient on a canvas at import time.
+dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
+  get: () => () => undefined,
+  set: () => true,
+})) as never;
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'window');
   Reflect.deleteProperty(globalThis, 'document');
 });
 
-const { initFreeCamera, updateFreeCamera } = await import('../src/scene/FreeCamera.js');
+const { initFreeCamera, updateFreeCamera, EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
 
 function setup() {
   const camera = new THREE.PerspectiveCamera();
-  camera.position.set(0, 0.5, 0); // already above MIN_EYE_HEIGHT, so the floor clamp alone never moves it
+  camera.position.set(0, EYE_HEIGHT, 0); // already standing, so only x/z move on a walk key
   const canvas = dom.window.document.getElementById('c') as unknown as HTMLCanvasElement;
-  initFreeCamera(camera, canvas, new THREE.Vector3(0, 0.5, -1));
+  initFreeCamera(camera, canvas, new THREE.Vector3(0, EYE_HEIGHT, -1));
   return { camera, input: dom.window.document.getElementById('filter')! };
 }
 
