@@ -235,6 +235,9 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
       server.middlewares.use('/api/bubbles', async (req, res) => {
         if (!admit(server, req, res)) return;
         if (!bubbleSource || !isExactPath(req)) return notFound(res);
+        // Issue #81 review: a bubble source bounded by "forget what's gone", not a fixed
+        // cache size, needs the current live set every request.
+        bubbleSource.forget?.([...agentsByPublicId.values()]);
         const out: Record<string, { kind: 'text' | 'tool'; text: string }> = {};
         for (const [id, agent] of agentsByPublicId) {
           try {

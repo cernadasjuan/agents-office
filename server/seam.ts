@@ -1,4 +1,4 @@
-import { maskedLine } from './secrets.js';
+import { lastWords, maskedLine } from './secrets.js';
 import { PERSONAS } from '../plugins/bmad/roster.js';
 
 /**
@@ -250,6 +250,14 @@ export interface BubbleReply {
  */
 export interface BubbleSource {
   read(agent: Observation): BubbleReply | undefined | Promise<BubbleReply | undefined>;
+  /**
+   * Called once per `/api/bubbles` request with the agents the latest `/api/agents` poll
+   * still knows (issue #81 review): a source whose own per-agent state needs bounding (a
+   * dedicated transcript cache for 40+ agents, not `PeekReader`'s 20-file one) prunes
+   * whatever is no longer live here, instead of an arbitrary fixed cache size. Optional: a
+   * source that keeps no per-agent state at all needs no bound.
+   */
+  forget?(liveAgents: Observation[]): void;
 }
 
 export interface OfficePlugin {
@@ -572,6 +580,10 @@ const PEEK_TOKEN = /^[A-Za-z0-9:_.-]{1,64}$/;
 const ASSET_KINDS = new Set(['issue', 'pr', 'mr', 'jira']);
 /** A bubble's own, much shorter cap (issue #81 AC1: locked at 40 characters). */
 const BUBBLE_LINE_LENGTH = 40;
+/** A tool-call bubble's own cap (review: "verb + tool name only" is always short; a tighter
+ * cap than the general 40 is a cheap, independent backstop if a bubble source ever forgets
+ * the rule — it cannot leak more than this many characters of anything, friendly label or not). */
+const BUBBLE_TOOL_LINE_LENGTH = 24;
 
 function peekText(value: unknown): string {
   return maskedLine(value, PEEK_LINE_LENGTH);
@@ -612,11 +624,14 @@ export function projectPeek(input: PeekInput, maxLines: number = PEEK_LINES) {
 }
 
 /** One agent's bubble (issue #81): masked and cut again at the bubble's own, shorter length,
- * never the peek line length. `undefined` in, or an empty line out, both drop the entry. */
+ * never the peek line length; the end kept, not the start ("the last few words", AC1), the
+ * same rule a tool-call bubble's own tighter cap follows too. `undefined` in, or an empty
+ * line out, both drop the entry. */
 export function projectBubble(input: BubbleReply | undefined): BubbleReply | undefined {
   if (!input) return undefined;
-  const text = maskedLine(input.text, BUBBLE_LINE_LENGTH);
-  return text ? { kind: input.kind === 'text' ? 'text' : 'tool', text } : undefined;
+  const kind = input.kind === 'text' ? 'text' as const : 'tool' as const;
+  const text = maskedLine(input.text, kind === 'tool' ? BUBBLE_TOOL_LINE_LENGTH : BUBBLE_LINE_LENGTH, lastWords);
+  return text ? { kind, text } : undefined;
 }
 
 export function projectWorld(parts: WorldInput[], pluginNames: string[], publicId: PublicId) {

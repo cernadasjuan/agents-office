@@ -76,6 +76,13 @@ export class PeekPanel implements CardPanel {
   private textHidden = false;
   /** AC5: "Show 100 lines" was pressed for the agent currently shown. Resets on agent switch. */
   private tailMode = false;
+  /** Review: `showTail()` fires a load without waiting for an in-flight one to finish (the
+   * normal throttle is for "nothing changed yet", not for a request the user just asked for),
+   * so two requests for the same agent can race. Each `load()` call tags itself with the next
+   * number; a reply only applies if it is still the newest one asked for, so an older,
+   * slower reply (for example the short view's own scheduled poll) never overwrites a newer
+   * one still in flight (for example "Show 100 lines"). */
+  private requestSeq = 0;
   private timer: unknown = null;
   private readonly now: () => number;
   private readonly setTimer: (run: () => void, ms: number) => unknown;
@@ -153,6 +160,7 @@ export class PeekPanel implements CardPanel {
   }
 
   private async load(agentId: string): Promise<void> {
+    const seq = ++this.requestSeq;
     this.inFlightFor = agentId;
     this.fetchedAt = this.now();
     const lines = this.tailMode ? `&lines=${PEEK_TAIL_LINES}` : '';
@@ -166,6 +174,9 @@ export class PeekPanel implements CardPanel {
       if (this.inFlightFor === agentId) this.inFlightFor = null;
     }
     if (agentId !== this.agentId) return;
+    // A newer request for this agent (for example "Show 100 lines") already started: this
+    // reply is stale, whatever it answers, and must never overwrite what the newer one finds.
+    if (seq !== this.requestSeq) return;
     this.data = data;
     this.failed = data === null;
     this.draw();

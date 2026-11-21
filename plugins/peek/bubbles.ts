@@ -16,7 +16,14 @@ import { BUBBLE_CAP, BubbleScheduler, type BubbleEvent } from './bubbleFeed.js';
 /** Between the label (y=2.1, `characters/Label.ts`) and the beacon (y=2.55, `StickFigure.ts`):
  * "never covers the beacon" (AC4) — the bubble's own box only grows downward from this anchor
  * (see the CSS: `.agent-bubble-box` is `position: absolute; top: ...`, never centered on it),
- * so it never reaches up toward the beacon regardless of the office's zoom level. */
+ * so it never reaches up toward the beacon regardless of the office's zoom level.
+ *
+ * Review (issue #81): this keeps a bubble off its OWN owner's beacon only, by construction (one
+ * is always above the other in world Y). A bubble can still land on a neighboring agent's
+ * beacon in a crowded room, in screen space, from some camera angles — the same kind of check
+ * `LabelDeclutter.ts`'s desk-mode obstruction rects already do for the triage monitors.
+ * Follow-up, not fixed here: cheap only with that same per-frame screen-space obstruction
+ * pass, which this module does not have. */
 const BUBBLE_Y = 2.32;
 const REFRESH_INTERVAL_MS = 150;
 const POLL_INTERVAL_MS = 3000;

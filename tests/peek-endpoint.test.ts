@@ -17,6 +17,7 @@ import { PeekReader } from '../plugins/peek/transcript.js';
 const fixtures = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-peek-endpoint-'));
 const FAKE_GHP = 'ghp_' + 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8';
 const say = (text: string) => JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+const useTool = (name: string, input: Record<string, unknown>) => JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'x', name, input }] } });
 const alphaFile = path.join(fixtures, 'alpha.jsonl');
 const betaFile = path.join(fixtures, 'beta.jsonl');
 fs.writeFileSync(alphaFile, `${say(`alpha says hello with ${FAKE_GHP}`)}\n`);
@@ -192,4 +193,46 @@ test('/api/bubbles: one agent failing drops only that agent, never the whole ans
   const reply = JSON.parse((await request('/api/bubbles')).body);
   assert.deepEqual(reply[beta.id], { kind: 'text', text: 'beta still answers' });
   assert.equal(Object.keys(reply).length, 1);
+});
+
+// --- Review items 1 and 2, through the real /api/bubbles endpoint: last words, not first;
+// a tool-call bubble carries nothing from its own input. ---
+
+test('/api/bubbles: a tool call never carries input-derived detail — a hostile fixture per tool', async () => {
+  const hostile = path.join(fixtures, 'hostile.jsonl');
+  fs.writeFileSync(hostile, [
+    useTool('Read', { file_path: '/private/clients/customer-plan.md' }),
+  ].join('\n') + '\n');
+  const withHostile: DetectedAgent[] = [{ id: 'raw-hostile', name: 'hostile', pid: 3, cwd: fixtures, startedAt: 1, alive: true, activity: 'implementing', transcriptPath: hostile }];
+  const { request, agents } = await office([peekPlugin()], withHostile);
+  const { list } = await agents();
+  const id = list[0].id;
+  assert.deepEqual(JSON.parse((await request('/api/bubbles')).body)[id], { kind: 'tool', text: 'Reading a file' });
+
+  fs.appendFileSync(hostile, useTool('Bash', { command: 'git commit -m "secret plan, do not tell anyone"' }) + '\n');
+  assert.deepEqual(JSON.parse((await request('/api/bubbles')).body)[id], { kind: 'tool', text: 'Running a command' });
+
+  fs.appendFileSync(hostile, useTool('Bash', { command: `curl -H "Authorization: Bearer ${FAKE_GHP}" https://internal.example/x` }) + '\n');
+  const bashReply = await request('/api/bubbles');
+  assert.deepEqual(JSON.parse(bashReply.body)[id], { kind: 'tool', text: 'Running a command' });
+  assert.equal(bashReply.body.includes(FAKE_GHP), false);
+  assert.equal(bashReply.body.includes('internal.example'), false);
+
+  fs.appendFileSync(hostile, useTool('WebFetch', { url: 'https://docs.example.com/private/customer-plan?token=abc123' }) + '\n');
+  const webReply = await request('/api/bubbles');
+  assert.deepEqual(JSON.parse(webReply.body)[id], { kind: 'tool', text: 'Fetching a page' });
+  assert.equal(webReply.body.includes('docs.example.com'), false);
+  assert.equal(webReply.body.includes('customer-plan'), false);
+});
+
+test('/api/bubbles: a text bubble keeps the last words, not the first, within the 40-character cap', async () => {
+  const longFile = path.join(fixtures, 'long.jsonl');
+  fs.writeFileSync(longFile, `${say('the opening sentence rambles on for quite a while before THE ACTUAL LAST WORDS appear right here')}\n`);
+  const withLong: DetectedAgent[] = [{ id: 'raw-long', name: 'long', pid: 4, cwd: fixtures, startedAt: 1, alive: true, activity: 'implementing', transcriptPath: longFile }];
+  const { request, agents } = await office([peekPlugin()], withLong);
+  const { list } = await agents();
+  const reply = JSON.parse((await request('/api/bubbles')).body)[list[0].id];
+  assert.ok(reply.text.length <= 40, reply.text);
+  assert.ok(reply.text.endsWith('ACTUAL LAST WORDS appear right here'), reply.text);
+  assert.equal(reply.text.includes('opening sentence'), false, reply.text);
 });
