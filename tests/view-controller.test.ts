@@ -524,7 +524,7 @@ test('issue #252: a room that never appears gives up quietly after enough checks
   assert.equal(view.zoomDistance, baseline.view.zoomDistance, 'gave up quietly: still the view\'s own default framing');
 });
 
-test('issue #252 review (codex): the isometric cut actually lands on the room, not just the follow rate — the live pose is re-seeded, not just chasing at DIRECT_FOLLOW_RATES', () => {
+test('issue #252 review round 2: the isometric cut actually lands on the room, not just the follow rate — the live pose is re-seeded, not just chasing at DIRECT_FOLLOW_RATES', () => {
   const room = fixtureRoomView(); // centered far from the view's own default framing
   let exists = false;
   const { view } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
@@ -541,7 +541,7 @@ test('issue #252 review (codex): the isometric cut actually lands on the room, n
   assert.ok(toRoom < toDefault, `the camera is already closer to the room than to the view's own default center (room ${toRoom}, default ${toDefault})`);
 });
 
-test('issue #252 review (codex): a first-person selection flight in progress is cancelled when the pending room resolves mid-flight', () => {
+test('issue #252 review round 2: a first-person selection flight in progress is cancelled when the pending room resolves mid-flight', () => {
   const room = fixtureRoomView();
   let exists = false;
   const { view, camera, manager, selection } = setup('#room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
