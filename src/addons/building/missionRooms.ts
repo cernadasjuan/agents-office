@@ -7,7 +7,8 @@ import { markStatic } from '../../scene/StaticMerge.js';
 import type { PickTarget } from '../../scene/Selection.js';
 import type { WorldRoom } from '../../extensions.js';
 import { ROOM_SIZE, type Rect, type RoomSlot } from './RoomPlanner.js';
-import { buildWalls, doorFrame, markCutaway, markDoorCutaway, roomLabel, RoomFrame, setRoomLabelText } from './rooms.js';
+import { buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
+import { furnishWarRoom, type WarRoomCounts } from './warRoomFurnishing.js';
 
 /**
  * The mission wing: war rooms north of the hall, behind its back wall, two per
@@ -28,7 +29,7 @@ export const MAX_TOMBSTONES = 12;
 const TABLE_SEATS = 8;
 const STANDING_SPOTS = 12;
 
-function canvasBoard(width: number, height: number): { mesh: THREE.Mesh; draw: (title: string, lines: string[]) => void } {
+export function canvasBoard(width: number, height: number): { mesh: THREE.Mesh; draw: (title: string, lines: string[]) => void } {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = Math.round(512 * (height / width));
@@ -79,14 +80,22 @@ export interface MissionRoom {
    * and a client never sees the raw slug. */
   title: string;
   update(room: WorldRoom): void;
+  /** War-room furniture (issue #125): grows with the peak live count, never shrinks. */
+  updateCounts(counts: WarRoomCounts): void;
+  /** The room's current peak (issue #129 review round 2): `BuildingLayout` persists this
+   * with the room id, so a reload while the room happens to be empty does not reset it to
+   * zero and undo the never-shrinks rule. */
+  readonly peakCounts: WarRoomCounts;
   /** This room's tombstones, pickable by a click or hover (issue #127). */
   tombstonePickTargets(): PickTarget[];
+  /** This room's issue board, pickable by a click (issue #146): opens the real-link list. */
+  issuesBoardPickTarget(): PickTarget;
 }
 
 const FLOOR_OPEN = 0x6f7f9a;
 const FLOOR_LOCKED = 0x4a4f5a;
 
-export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
+export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?: WarRoomCounts): MissionRoom {
   const slot = missionSlot(index);
   const frame = new RoomFrame(slot.rect, slot.door);
   const group = new THREE.Group();
@@ -144,7 +153,9 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   mount(boards.issues.mesh, 3.6, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
   mount(boards.kanban.mesh, ROOM_SIZE / 2 - 0.12, 6, 1.7, frame.faceDoor - Math.PI / 2);
 
-  const title = sign(room.title, frame.point(0, 0.4, 3.0), slot.rect, false);
+  // Issue #124: the title and lock signs sit on the far wall, over the statement board, not
+  // near the door frame (the narration: "they are in the door frames so it's kind of weird").
+  const title = sign(room.title, frame.point(0, ROOM_SIZE - 0.3, 2.6), slot.rect, false);
   group.add(title);
   const tombstonesGroup = new THREE.Group();
   group.add(tombstonesGroup);
@@ -157,14 +168,62 @@ export function buildMissionRoom(room: WorldRoom, index: number): MissionRoom {
   // The closed door stands in the doorway: it drops with the walls in the overview
   markCutaway(door);
   group.add(door);
-  const lockSign = sign('Locked: mission closed', frame.point(0, 0.4, 2.6), slot.rect, false, 'rgba(120, 40, 40, 0.9)');
+  const lockSign = sign('Locked: mission closed', frame.point(0, ROOM_SIZE - 0.3, 2.3), slot.rect, false, 'rgba(120, 40, 40, 0.9)');
   lockSign.visible = false;
   group.add(lockSign);
   let sleepersSign: CSS2DObject | null = null;
 
+  // War-room furniture (issue #125): a rule set, not hand-placed. `furniture` holds every
+  // piece `furnishWarRoom` plans; it rebuilds only when the peak live count actually grows.
+  const furniture = new THREE.Group();
+  group.add(furniture);
+  // A stable identity per piece (its station type and its ordinal among stations of that
+  // same type), not the array position `furnishWarRoom` happens to place it at (issue #125/
+  // #126 review round 3): the desk grid's slots come first in that array, so growing one
+  // desk shifts every must-have after it by one index. Keying by array position carried an
+  // existing occupant's `occupied` flag onto a now-different piece (a researcher's flag
+  // landing on the whiteboard), so a planner found the real whiteboard falsely taken.
+  const furnitureKey = (type: string, ordinal: number) => `mission${index}_furniture_${type}_${ordinal}`;
+  let peakCounts: WarRoomCounts = initialCounts ? { ...initialCounts } : { deskLike: 0, debugging: 0 };
+  let furnitureStationKeys: string[] = [];
+
+  const rebuildFurniture = () => {
+    for (const key of furnitureStationKeys) stations.delete(key);
+    furnitureStationKeys = [];
+    furniture.clear();
+    const plan = furnishWarRoom(room.id, peakCounts, frame.doorAlong);
+    plan.pieces.forEach((placement) => {
+      const object = placement.piece.create();
+      object.userData.piece = placement.piece.name;
+      place(furniture, object, frame.point(placement.a, placement.d, placement.y ?? 0), frame.faceDoor + (placement.turn ?? 0));
+    });
+    const ordinalByType = new Map<string, number>();
+    plan.stations.forEach((spot) => {
+      const ordinal = ordinalByType.get(spot.type) ?? 0;
+      ordinalByType.set(spot.type, ordinal + 1);
+      const key = furnitureKey(spot.type, ordinal);
+      // Room-scoped, issue #126: `room:<id>:<activity>` so BuildingLayout can route an agent to
+      // this room's own piece without ever matching another war room's same-named station.
+      stations.set(key, station(`room:${room.id}:${spot.type}`, frame.point(spot.a, spot.d), frame.point(...spot.look), spot.posture));
+      furnitureStationKeys.push(key);
+    });
+  };
+  rebuildFurniture();
+
   const result: MissionRoom = {
     id: room.id, index, slot, group, stations, locked: false, title: room.title,
+    get peakCounts() {
+      return peakCounts;
+    },
+    updateCounts(next: WarRoomCounts) {
+      const deskLike = Math.max(peakCounts.deskLike, next.deskLike);
+      const debugging = Math.max(peakCounts.debugging, next.debugging);
+      if (deskLike === peakCounts.deskLike && debugging === peakCounts.debugging) return;
+      peakCounts = { deskLike, debugging };
+      rebuildFurniture();
+    },
     tombstonePickTargets: () => [...tombstones].map(([id, { object }]) => ({ id, object })),
+    issuesBoardPickTarget: () => ({ id: `issues:${room.id}`, object: boards.issues.mesh }),
     update(next: WorldRoom) {
       result.locked = next.state === 'locked';
       result.title = next.title;

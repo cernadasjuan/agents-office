@@ -3,9 +3,11 @@ import { createArmchair } from './Armchair.js';
 import { createBookshelf } from './Bookshelf.js';
 import { createCoffeeMachine } from './CoffeeMachine.js';
 import { createClock, createPlant, createRug, createTallPlant, createWallArt } from './Decorations.js';
+import { createDebugStation } from './DebugStation.js';
 import { createDesk } from './Desk.js';
 import { createDisplayShelf } from './DisplayShelf.js';
 import { createFloorLamp } from './FloorLamp.js';
+import { createLowDivider } from './LowDivider.js';
 import { createMeetingTable } from './MeetingTable.js';
 import { createPortrait } from './Portrait.js';
 import { createPrinter } from './Printer.js';
@@ -13,6 +15,7 @@ import { createSofa } from './Sofa.js';
 import { createCredenza, createLowTable } from './Tables.js';
 import { createTestStation } from './TestStation.js';
 import { createTombstone } from './Tombstone.js';
+import { createTV } from './TV.js';
 import { createWaterCooler } from './WaterCooler.js';
 import { createWhiteboard } from './Whiteboard.js';
 
@@ -38,8 +41,10 @@ const piece = <N extends string>(name: N, category: PieceCategory, create: () =>
 export const PIECES = {
   desk: () => piece('desk', 'station', () => createDesk(true)),
   whiteboard: () => piece('whiteboard', 'station', createWhiteboard),
-  bookshelf: (color?: number | THREE.Color) => piece('bookshelf', 'station', () => createBookshelf(color)),
+  bookshelf: (shelfColor?: number | THREE.Color, rand?: () => number, colors?: readonly (THREE.Color | number)[]) =>
+    piece('bookshelf', 'station', () => createBookshelf(shelfColor, rand, colors)),
   testStation: () => piece('testStation', 'station', createTestStation),
+  debugStation: () => piece('debugStation', 'station', createDebugStation),
   sofa: (color = 0x6a5acd) => piece('sofa', 'station', () => createSofa(color)),
   coffeeMachine: () => piece('coffeeMachine', 'station', createCoffeeMachine),
   meetingTable: () => piece('meetingTable', 'station', createMeetingTable),
@@ -59,6 +64,8 @@ export const PIECES = {
   tombstone: () => piece('tombstone', 'furniture', createTombstone),
   plant: (scale = 1.2) => piece('plant', 'plant', () => createPlant(scale)),
   tallPlant: () => piece('tallPlant', 'plant', createTallPlant),
+  tv: () => piece('tv', 'furniture', createTV),
+  lowDivider: (length?: number) => piece('lowDivider', 'furniture', () => createLowDivider(length)),
 } as const;
 
 export type PieceName = keyof typeof PIECES;

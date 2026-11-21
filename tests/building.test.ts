@@ -71,14 +71,19 @@ function builtRoomRect(scene: THREE.Scene, index: number, kind: string): { minX:
 
 function setup(storage = new Map<string, string>()) {
   let clock = 0;
+  let wallClock = Date.parse('2026-11-20T00:00:00Z');
   const scene = new THREE.Scene();
   const layout = new BuildingLayout(scene, createOffice(scene), {
     now: () => clock,
+    wallClock: () => wallClock,
     dwellMs: 4000,
     storage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => void storage.set(k, v) },
   });
   const agent = (id: string, activity: Activity, extras?: AgentExtras) => ({ id, activity, ...(extras ? { extras } : {}) });
-  return { scene, layout, storage, agent, tick: (ms: number) => { clock += ms; return layout.update(); } };
+  return {
+    scene, layout, storage, agent,
+    tick: (ms: number) => { clock += ms; wallClock += ms; return layout.update(); },
+  };
 }
 
 test('the building opens with the user office and the Library, and remembers its rooms', () => {
@@ -325,14 +330,155 @@ test('a mission becomes a war room north of the hall, with a door in the hall ba
 test('agents of a mission work in its war room, their helpers stand near them, and a locked room keeps them out', () => {
   const { layout, agent } = setup();
   layout.syncWorldRooms([missionRoom()]);
-  const seat = layout.seatFor(agent('s', 'planning', { room: 'room-1' }), null)!;
-  assert.match(seat.key, /^mission0_seat_/);
+  const seat = layout.seatFor(agent('s', 'implementing', { room: 'room-1' }), null)!;
+  assert.match(seat.key, /^mission0_/);
   const helper = layout.seatFor(agent('h', 'researching', { parentId: 's' }), null)!;
-  assert.match(helper.key, /^mission0_seat_\d+_pod\d$/);
+  assert.match(helper.key, /^mission0_.+_pod\d$/);
 
   layout.syncWorldRooms([missionRoom('locked')]);
   const late = layout.seatFor(agent('late', 'implementing', { room: 'room-1' }), null)!;
   assert.doesNotMatch(late.key, /^mission/);
+});
+
+// --- Issue #126: war-room furniture routes agent activity, in-room first ---
+
+test('AC1/AC2/AC3: researching, planning and idle agents go to their own room\'s bookshelf, whiteboard and sofa', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const researching = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
+  assert.match(researching.key, /^mission0_furniture_\w+_\d+$/);
+  const planning = layout.seatFor(agent('p', 'planning', { room: 'room-1' }), null)!;
+  assert.match(planning.key, /^mission0_furniture_\w+_\d+$/);
+  const idle = layout.seatFor(agent('i', 'idle', { room: 'room-1' }), null)!;
+  assert.match(idle.key, /^mission0_furniture_\w+_\d+$/);
+  // Three different pieces, not the same one shared by coincidence
+  assert.equal(new Set([researching.key, planning.key, idle.key]).size, 3);
+});
+
+test('AC5: a researching mission agent never goes to the library-knowledge shelves', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const seat = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
+  assert.doesNotMatch(seat.key, /^room1_researching_/, 'room1 is the building Library, not the war room');
+});
+
+test('AC4: once the room\'s one researching spot is taken, the next researcher still stays in the room, not a dedicated room', () => {
+  const { layout, agent } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  layout.seatFor(agent('r1', 'researching', { room: 'room-1' }), null);
+  const seat = layout.seatFor(agent('r2', 'researching', { room: 'room-1' }), null)!;
+  assert.match(seat.key, /^mission0_/, 'still in the war room: the generic ring, not the library or a dedicated room');
+});
+
+// --- Issue #129: a 9th desk-like agent overflows to the room's standing ring, not a 9th desk ---
+
+test('AC4 (#129): once a war room\'s desk cap is full, the next desk-like agent uses the room\'s standing ring', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  for (let i = 0; i < 8; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
+  tick(0); // grows the desk grid to its cap
+  for (let i = 0; i < 8; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
+  const overflow = layout.seatFor(agent('d8', 'implementing', { room: 'room-1' }), null)!;
+  assert.doesNotMatch(overflow.key, /_furniture_/, 'no extra desk piece');
+  // mission0_seat_0 through 7 are the meeting table's own seats (TABLE_SEATS,
+  // missionRooms.ts); 8 and up are the standing ring. A desk-cap overflow must stand.
+  assert.doesNotMatch(overflow.key, /^mission0_seat_[0-7]$/, 'not seated at the meeting table');
+  assert.match(overflow.key, /^mission0_seat_/, 'the room\'s own standing ring instead');
+});
+
+// --- Issue #129 review round 2: the standing ring fills before the meeting table's own
+// seats, even though they share one station type (posture is the only difference) ---
+
+test('every desk-cap overflow stands, until the standing ring itself is full', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  // room-1's door is off-center (missionSlot's first wing column, issue #125 review): 3 desk slots here.
+  for (let i = 0; i < 3; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
+  tick(0);
+  for (let i = 0; i < 3; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
+  // STANDING_SPOTS (missionRooms.ts) is 12: every one of the next 12 overflow agents must stand.
+  for (let i = 0; i < 12; i++) {
+    const seat = layout.seatFor(agent(`o${i}`, 'implementing', { room: 'room-1' }), null)!;
+    assert.doesNotMatch(seat.key, /^mission0_seat_[0-7]$/, `overflow ${i} sat at the meeting table instead of standing`);
+  }
+  // The 13th overflow: every desk and every standing spot is full, so only the table's own seats are left.
+  const lastResort = layout.seatFor(agent('o12', 'implementing', { room: 'room-1' }), null)!;
+  assert.match(lastResort.key, /^mission0_seat_[0-7]$/, 'the meeting table\'s own seats, the true last resort');
+});
+
+// --- Issue #126 review round 2: growth must actually reach seating, and an activity change
+// inside the same room must re-run claimInRoom, through the real BuildingLayout ---
+
+test('a desk-like agent moves onto a grown desk once one exists, not forever stuck on the generic ring', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const a = agent('a', 'implementing', { room: 'room-1' });
+  const first = layout.seatFor(a, null)!;
+  assert.match(first.key, /^mission0_seat_/, 'no desk exists yet: the generic ring');
+
+  tick(0); // grows one desk, now that an implementing agent is counted in the room
+  // Same activity, same room target string: only an activity-aware re-check (not the
+  // brand-new-agent path above) can notice the freshly grown desk is now free.
+  layout.seatFor(a, 'implementing');
+  const moves = tick(4000); // past the dwell time
+  const move = moves.find((m) => m.agentId === 'a');
+  assert.ok(move, 'the agent is moved once the dwell time passes');
+  assert.match(move!.seat.key, /mission0_furniture_/, 'onto the grown desk, not left on the generic ring');
+});
+
+// --- Issue #126 review round 3: growing one furniture station must never carry its
+// `occupied` flag onto a different one, just because growth shifted the array position
+// (the desk grid's slots sit first in the plan, so adding one shifts every must-have
+// after it by one index) ---
+
+test('growing a desk never makes the whiteboard read as falsely taken (a researcher keeps the bookshelf, a planner still gets the real whiteboard)', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const researcher = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
+  assert.match(researcher.key, /^mission0_furniture_researching_\d+$/, 'the bookshelf, a must-have, before any growth');
+
+  // An implementing agent grows the desk grid (0 -> 1), shifting the whiteboard, bookshelf
+  // and idle spots one index later in `furnishWarRoom`'s plan array.
+  const implementer = agent('i', 'implementing', { room: 'room-1' });
+  layout.seatFor(implementer, null);
+  tick(0);
+  layout.seatFor(implementer, 'implementing');
+  tick(4000);
+
+  const planner = layout.seatFor(agent('p', 'planning', { room: 'room-1' }), null)!;
+  assert.match(planner.key, /^mission0_furniture_planning_\d+$/, 'the real whiteboard, not the generic ring');
+});
+
+test('growing a debug station never makes the bookshelf read as falsely taken', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const idler = layout.seatFor(agent('x', 'idle', { room: 'room-1' }), null)!;
+  assert.match(idler.key, /^mission0_furniture_idle_\d+$/, 'a sofa seat, a must-have, before any growth');
+
+  const debugger_ = agent('b', 'debugging', { room: 'room-1' });
+  layout.seatFor(debugger_, null);
+  tick(0);
+  layout.seatFor(debugger_, 'debugging');
+  tick(4000);
+
+  const researcher = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
+  assert.match(researcher.key, /^mission0_furniture_researching_\d+$/, 'the real bookshelf, not the generic ring');
+});
+
+test('an activity change inside the same war room re-runs claimInRoom, not swallowed as "same target"', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const a = agent('a', 'researching', { room: 'room-1' });
+  const first = layout.seatFor(a, null)!;
+  assert.match(first.key, /^mission0_furniture_\w+_\d+$/, 'the room\'s own bookshelf (a must-have, no growth needed)');
+
+  a.activity = 'planning';
+  const immediate = layout.seatFor(a, 'researching');
+  assert.equal(immediate, null, 'a mid-room activity change still waits for the dwell time, like any other move');
+  const moves = tick(4000);
+  const move = moves.find((m) => m.agentId === 'a');
+  assert.ok(move, 'the agent moves once the dwell time passes');
+  assert.notEqual(move!.seat.key, first.key, 'off the bookshelf, not stuck there forever');
 });
 
 test('a waiting agent still goes to the user office before its war room', () => {
@@ -340,6 +486,58 @@ test('a waiting agent still goes to the user office before its war room', () => 
   layout.syncWorldRooms([missionRoom()]);
   const seat = layout.seatFor(agent('w', 'meeting', { room: 'room-1', attention: 'waiting' }), null)!;
   assert.match(seat.key, /^room0_queue_/);
+});
+
+test('a war room\'s furniture grows with the agents actually seated in it (issue #125)', () => {
+  const { layout, agent, scene, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const warRoom = scene.getObjectByName('mission-room-0')!;
+  const pieceCount = (name: string) => {
+    let n = 0;
+    warRoom.traverse((o) => { if (o.userData.piece === name) n++; });
+    return n;
+  };
+  assert.equal(pieceCount('desk') + pieceCount('debugStation'), 0, 'no one works there yet');
+
+  layout.seatFor(agent('a', 'implementing', { room: 'room-1' }), null);
+  layout.seatFor(agent('b', 'implementing', { room: 'room-1' }), null);
+  layout.seatFor(agent('c', 'debugging', { room: 'room-1' }), null);
+  tick(0);
+  assert.equal(pieceCount('desk'), 2);
+  assert.equal(pieceCount('debugStation'), 1);
+
+  // The debugger leaves; the furniture stays at its peak
+  layout.seatFor(agent('c', 'idle', { room: 'room-1' }), 'debugging');
+  tick(0);
+  assert.equal(pieceCount('desk'), 2);
+  assert.equal(pieceCount('debugStation'), 1);
+});
+
+// --- Issue #129 review round 2: a war room's peak counts persist, so a reload while the
+// room happens to be empty does not reset the never-shrinks rule to zero ---
+
+test('a war room\'s peak desk and debug counts survive a reload, even while the room is empty', () => {
+  const storage = new Map<string, string>();
+  const first = setup(storage);
+  first.layout.syncWorldRooms([missionRoom()]);
+  first.layout.seatFor(first.agent('a', 'implementing', { room: 'room-1' }), null);
+  first.layout.seatFor(first.agent('b', 'debugging', { room: 'room-1' }), null);
+  first.tick(0);
+  const pieceCount = (scene: THREE.Scene, name: string) => {
+    let n = 0;
+    scene.getObjectByName('mission-room-0')!.traverse((o) => { if (o.userData.piece === name) n++; });
+    return n;
+  };
+  assert.equal(pieceCount(first.scene, 'desk'), 1);
+  assert.equal(pieceCount(first.scene, 'debugStation'), 1);
+
+  // A reload: a fresh BuildingLayout and scene, the same storage, the room reported with no
+  // agents yet (the mission server itself tracks who is where, not a peak; this layout's own
+  // in-memory peak is what is at risk here).
+  const second = setup(storage);
+  second.layout.syncWorldRooms([missionRoom()]);
+  assert.equal(pieceCount(second.scene, 'desk'), 1, 'the peak survived the reload, not reset to zero');
+  assert.equal(pieceCount(second.scene, 'debugStation'), 1);
 });
 
 // --- roomView (issue #89, #room=) ---
@@ -466,7 +664,10 @@ test('a main session with a war room keeps a non-librarian research trip inside 
   const { layout, agent } = setup();
   layout.syncWorldRooms([missionRoom()]);
   const seat = layout.seatFor(agent('r', 'researching', { room: 'room-1' }), null)!;
-  assert.match(seat.key, /^mission0_seat_/, 'inside its own war room');
+  // Issue #126, after this AC was written: a researching agent in a war room prefers that
+  // room's own bookshelf (`mission0_furniture_*`) over its generic ring (`mission0_seat_*`).
+  // Either one satisfies this AC's real point, inside the war room and never the Library.
+  assert.match(seat.key, /^mission0_(seat|furniture)_/, 'inside its own war room');
   assert.doesNotMatch(seat.key, /^room1_researching_/, 'never the Library');
 });
 
@@ -567,4 +768,30 @@ test('a session whose workspace becomes known later keeps its desk; home is for 
   const first = layout.seatFor(agent('late', 'implementing'), null)!;
   assert.match(first.key, /^desk_/);
   assert.equal(layout.seatFor(agent('late', 'implementing', inWorkspace('Gamma')), 'implementing'), null, 'no move');
+});
+
+// --- Issue #144: a small missions board near the mission corridor ---
+
+test('the missions board exists from the start, empty, and updates as missions arrive and close', () => {
+  const { layout, scene, tick } = setup();
+  const board = scene.getObjectByName('missions-board');
+  assert.ok(board, 'the board is mounted even with no missions yet');
+
+  layout.syncWorldRooms([{
+    id: 'm-1', kind: 'mission', title: 'Office roadmap', state: 'open',
+    createdAt: '2026-11-20T00:00:00Z',
+    walls: { statement: 'x', docs: [], issues: [], kanban: [] },
+  }]);
+  // The board's own timer tick (not tied to the next world poll) must not throw
+  tick(1500);
+  tick(1500);
+
+  layout.syncWorldRooms([{
+    id: 'm-1', kind: 'mission', title: 'Office roadmap', state: 'locked',
+    createdAt: '2026-11-20T00:00:00Z', closedAt: '2026-11-20T00:00:03Z',
+    walls: { statement: 'x', docs: [], issues: [], kanban: [] },
+  }]);
+  tick(1500);
+  // Still mounted: a closed mission does not remove the board or itself from it
+  assert.ok(scene.getObjectByName('missions-board'));
 });

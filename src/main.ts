@@ -12,6 +12,7 @@ import { nextInQueue, tabTitleFor, triageQueue } from './ui/attention.js';
 import { LabelDetailController } from './ui/LabelDetail.js';
 import { AgentCard } from './ui/AgentCard.js';
 import { TombstoneCard } from './ui/TombstoneCard.js';
+import { MissionIssuesCard } from './ui/MissionIssuesCard.js';
 import { OffscreenMarkers } from './ui/OffscreenMarkers.js';
 import { FrameLoop } from './scene/FrameLoop.js';
 import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
@@ -50,6 +51,8 @@ const agentCard = new AgentCard(document.body, { anchor: document.getElementById
 // Tombstone card (issue #127): same dock spot, same selection; shares it with the agent card
 // since a tombstone id never matches an agent id, so only one of the two ever shows.
 const tombstoneCard = new TombstoneCard(document.body, { anchor: document.getElementById('ui-panel')! });
+// Mission issues card (issue #146): same dock spot and selection, a click on a war room's issue board opens it.
+const missionIssuesCard = new MissionIssuesCard(document.body, { anchor: document.getElementById('ui-panel')! });
 
 // Camera mode (key O toggles first person and the overview, key I the isometric view) and click to select.
 // Start view: `#view=overview|first-person|iso`, then the last view, then the layout default.
@@ -198,6 +201,7 @@ async function pollWorld(): Promise<void> {
     setWorld(world);
     for (const extension of activeExtensions(scene)) extension.worldChanged?.(world);
     tombstoneCard.render(world.rooms.flatMap((room) => room.sleepers ?? []));
+    missionIssuesCard.render(world.rooms.map((room) => ({ id: room.id, title: room.title, issues: room.walls.issues ?? [] })));
     labelDetail.sceneChanged();
     frameLoop.sceneChanged();
   } catch {

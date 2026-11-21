@@ -72,10 +72,14 @@ export interface RoomInput {
   state: 'open' | 'locked';
   /** One entry per ended session, its own id and the day it ended (a tombstone). */
   sleepers?: Array<{ id: string; endedAt?: string }>;
+  /** For the missions board (issue #144): when a mission started, and when a closed one stopped. */
+  createdAt?: string;
+  closedAt?: string;
   walls?: {
     statement?: string;
     docs?: string[];
-    issues?: Array<{ number: number; title: string; state: 'open' | 'closed' }>;
+    /** `repo` is a full `owner/name`, unlike an agent card issue's short name: a mission can span repos. */
+    issues?: Array<{ number: number; repo?: string; title: string; state: 'open' | 'closed' }>;
     kanban?: Array<{ column: string; cards: Array<{ number: number; title: string }> }>;
   };
 }
@@ -212,6 +216,13 @@ function isoDate(value: unknown): string | undefined {
   return typeof value === 'string' ? ISO_DATE.exec(value)?.[1] : undefined;
 }
 
+/** A full ISO-8601 timestamp, parseable by `Date`: for the missions board's elapsed-time clock (issue #144). */
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+function isoTimestamp(value: unknown): string | undefined {
+  return typeof value === 'string' && ISO_TIMESTAMP.test(value) ? value : undefined;
+}
+
 const REPO_SHORT = /^[A-Za-z0-9_.-]{1,40}$/;
 
 /** The repository name after the last slash, or undefined when it is not a plain short token. */
@@ -219,6 +230,13 @@ function repoShortName(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const short = value.slice(value.lastIndexOf('/') + 1);
   return REPO_SHORT.test(short) && short !== '.' && short !== '..' ? short : undefined;
+}
+
+const OWNER_REPO = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
+
+/** A full `owner/name` pair, or undefined when the value does not match that shape. */
+function ownerRepo(value: unknown): string | undefined {
+  return typeof value === 'string' && OWNER_REPO.test(value) && value !== './.' ? value : undefined;
 }
 
 const HEX_COLOR = /^#?([0-9A-Fa-f]{6})$/;
@@ -363,12 +381,17 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
       title: displayText(room.title, 60),
       state: room.state === 'locked' ? 'locked' : 'open',
       ...(sleepers.length > 0 ? { sleepers } : {}),
+      ...(isoTimestamp(room.createdAt) ? { createdAt: isoTimestamp(room.createdAt) } : {}),
+      ...(isoTimestamp(room.closedAt) ? { closedAt: isoTimestamp(room.closedAt) } : {}),
       walls: {
         ...(walls.statement ? { statement: displayText(walls.statement, 240) } : {}),
         ...(Array.isArray(walls.docs) ? { docs: walls.docs.slice(0, 8).map((doc) => displayText(doc, 60)) } : {}),
         ...(Array.isArray(walls.issues) ? { issues: walls.issues.slice(0, 12)
-          .map((issue) => ({ number: wholeNumber(issue.number, 10_000_000), title: displayText(issue.title, 80),
-            state: issue.state === 'closed' ? 'closed' : 'open' }))
+          .map((issue) => {
+            const repo = ownerRepo(issue?.repo);
+            return { number: wholeNumber(issue.number, 10_000_000), title: displayText(issue.title, 80),
+              state: issue.state === 'closed' ? 'closed' : 'open', ...(repo ? { repo } : {}) };
+          })
           .filter((issue) => issue.number !== undefined) } : {}),
         ...(Array.isArray(walls.kanban) ? { kanban: walls.kanban.slice(0, 6).map((column) => ({
           column: displayText(column.column, 24),
