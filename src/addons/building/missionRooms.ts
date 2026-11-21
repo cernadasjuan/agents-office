@@ -161,7 +161,9 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   group.add(tombstonesGroup);
   // One tombstone per ended session, along the side wall opposite the kanban, keyed by its own id
   // (not by position): a session that returns removes its own tombstone, not whichever is oldest.
-  const tombstones = new Map<string, { object: THREE.Object3D; hoverSign: CSS2DObject; endedAt?: string }>();
+  // `nameplate` is a child of `object` (issue #159): it moves with the stone for free and never
+  // becomes its own merge candidate (StaticMerge only merges `THREE.Mesh`, never a CSS2DObject).
+  const tombstones = new Map<string, { object: THREE.Object3D; nameplate: CSS2DObject; name?: string }>();
   const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.4, 0.1), getToonMaterial(0x5a4a3a));
   door.position.copy(frame.point(slot.door.at - (slot.rect.minX + slot.rect.maxX) / 2, 0.02, 1.2));
   door.visible = false;
@@ -243,26 +245,32 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
       const sleepers = next.sleepers ?? [];
       const shown = sleepers.slice(0, MAX_TOMBSTONES);
       const keep = new Set(shown.map((entry) => entry.id));
-      for (const [id, { object, hoverSign }] of [...tombstones]) {
+      for (const [id, { object }] of [...tombstones]) {
         if (keep.has(id)) continue;
-        tombstonesGroup.remove(object);
-        group.remove(hoverSign);
+        tombstonesGroup.remove(object); // the nameplate is object's own child, removed with it
         tombstones.delete(id);
       }
       shown.forEach((entry, i) => {
         const position = frame.point(-ROOM_SIZE / 2 + 0.7 + (i % 2) * 1.05, 2.2 + Math.floor(i / 2) * 1.6, 0);
+        const name = entry.name ?? 'Ended session';
         let item = tombstones.get(entry.id);
         if (!item) {
           const object = PIECES.tombstone().create();
           object.rotation.y = frame.faceDoor + Math.PI / 2;
+          // Issue #159: the engraved name replaces the old hover-only sign, near the bottom of
+          // the stone's grey body (`body` in Tombstone.ts spans local y 0.05-0.45), always on at
+          // the same distance the room's other detail signs use (`hoverOnly: false`), never on
+          // hover or click alone.
+          const nameplate = sign(name, new THREE.Vector3(0, 0.12, 0.045), slot.rect, false);
+          object.add(nameplate);
           tombstonesGroup.add(object);
-          const hoverSign = sign(`Ended ${entry.endedAt ?? 'unknown'}`, position.clone().setY(0.6), slot.rect, true);
-          group.add(hoverSign);
-          item = { object, hoverSign, endedAt: entry.endedAt };
+          item = { object, nameplate, name: entry.name };
           tombstones.set(entry.id, item);
+        } else if (item.name !== entry.name) {
+          item.name = entry.name;
+          item.nameplate.element.textContent = name;
         }
         item.object.position.copy(position);
-        item.hoverSign.position.copy(position.clone().setY(0.6));
       });
       const extra = sleepers.length - shown.length;
       if (sleepersSign) group.remove(sleepersSign);

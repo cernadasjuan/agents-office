@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
 import type { Enricher, Observation, OfficePlugin, RoomInput, WorldProvider } from '../../server/seam.js';
+import { readSessionStory } from './sessionStoryReader.js';
 
 /**
  * Mission war rooms. Reads mission records (`<root>/missions/<slug>/mission.yaml`)
@@ -25,8 +26,10 @@ export interface MissionSummary {
   /** The root issue (`root_issue` in mission.yaml), first in the list, when the record has one. */
   issues: Array<{ number: number; repo?: string; title: string; state: 'open' | 'closed' }>;
   kanban: Array<{ column: string; cards: Array<{ number: number; title: string }> }>;
-  /** One entry per ended session (a tombstone), its own journey id and the day it ended. */
-  sleepers: Array<{ id: string; endedAt?: string }>;
+  /** One entry per ended session (a tombstone), its own journey id and the day it ended. `session`
+   * is the journey entry's own `session:` field (its slug, issue #159/#160's lookup key) when the
+   * record names one; the journey id (`id`) stays the pick-target key either way. */
+  sleepers: Array<{ id: string; endedAt?: string; session?: string }>;
   /** When the mission started (`created` in mission.yaml), for the missions board (issue #144). */
   createdAt?: string;
   /** When a closed mission stopped, approximated by its last `updated` timestamp. Open missions have none. */
@@ -114,7 +117,7 @@ export function summarizeMission(slug: string, record: unknown): MissionSummary 
     ],
     sleepers: list(mission.journey)
       .filter((entry) => text(entry.kind) === 'session' || text(entry.kind) === 'night_run')
-      .map((entry) => ({ id: text(entry.id), ...(text(entry.end) ? { endedAt: text(entry.end) } : {}) }))
+      .map((entry) => ({ id: text(entry.id), ...(text(entry.end) ? { endedAt: text(entry.end) } : {}), ...(text(entry.session) ? { session: text(entry.session) } : {}) }))
       .filter((entry) => entry.id !== ''),
     ...(text(mission.created) ? { createdAt: text(mission.created) } : {}),
     ...(status === 'done' || status === 'abandoned' ? (text(mission.updated) ? { closedAt: text(mission.updated) } : {}) : {}),
@@ -223,6 +226,16 @@ export function missionsPlugin(roots: string[], now: () => number = Date.now): O
     },
   };
 
+  type SleeperInput = NonNullable<RoomInput['sleepers']>[number];
+
+  // Issue #159/#160: a sleeper with a known session slug carries that slug as its engraved
+  // `name` and, when an archived record exists for it, the story its card reads.
+  const sleeperInput = (sleeper: MissionSummary['sleepers'][number]): SleeperInput => ({
+    id: sleeper.id,
+    ...(sleeper.endedAt ? { endedAt: sleeper.endedAt } : {}),
+    ...(sleeper.session ? { name: sleeper.session, story: readSessionStory(roots, sleeper.session) ?? undefined } : {}),
+  });
+
   const world: WorldProvider = {
     id: 'mission-rooms',
     world: () => ({
@@ -231,7 +244,7 @@ export function missionsPlugin(roots: string[], now: () => number = Date.now): O
         kind: 'mission',
         title: mission.title,
         state: mission.state,
-        sleepers: mission.sleepers,
+        sleepers: mission.sleepers.map(sleeperInput),
         ...(mission.createdAt ? { createdAt: mission.createdAt } : {}),
         ...(mission.closedAt ? { closedAt: mission.closedAt } : {}),
         walls: { statement: mission.statement, docs: mission.docs, issues: mission.issues, kanban: mission.kanban },

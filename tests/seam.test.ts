@@ -129,6 +129,40 @@ test('the world projection cleans rooms and boards and hashes their keys', () =>
   assert.deepEqual(world.boards[0].columns[0].cards, []);
 });
 
+// --- Issue #159/#160: engraved name and tombstone story, whitelisted and capped ---
+
+test('a sleeper\'s name is capped display text; without one, the output carries no name key', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter' }, { id: 'J-2' }] }] }], ['missions'], publicId);
+  assert.deepEqual(world.rooms[0].sleepers, [{ id: 'h(sleeper:m-1:J-1)', name: 'tidy-otter' }, { id: 'h(sleeper:m-1:J-2)' }]);
+});
+
+test('a story keeps only known personas, caps every list, and always carries an issues key once present', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter', story: {
+      intent: 'Fix the git situation safely',
+      personas: ['Amelia', 'NotAPersona', 'Amelia'],
+      counts: { done: 11, open: 0, abandoned: 0 },
+      doneList: Array.from({ length: 20 }, (_, i) => `item ${i}`),
+      handoffs: ['/etc/passwd', '2026-11-17-handoff.md'],
+      issues: ['gabriel-amyot/agents-office#160', 'not-a-ref', '#160'],
+    } }] }] }], ['missions'], publicId);
+
+  const story = world.rooms[0].sleepers![0].story;
+  assert.deepEqual(story?.personas, ['Amelia']);
+  assert.deepEqual(story?.counts, { done: 11, open: 0, abandoned: 0 });
+  assert.equal(story?.doneList?.length, 8);
+  // A handoff is a file name, never a path (issue #160): only the last path segment survives.
+  assert.deepEqual(story?.handoffs, ['passwd', '2026-11-17-handoff.md']);
+  assert.deepEqual(story?.issues, [{ repo: 'gabriel-amyot/agents-office', number: 160, url: 'https://github.com/gabriel-amyot/agents-office/issues/160' }]);
+});
+
+test('a sleeper with no story at all carries no story key (the card tells the difference from zero issues)', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter' }] }] }], ['missions'], publicId);
+  assert.ok(!('story' in world.rooms[0].sleepers![0]));
+});
+
 test('a mission issue keeps a clean owner/repo, and drops one that does not match the shape (#146)', () => {
   const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
     walls: { issues: [

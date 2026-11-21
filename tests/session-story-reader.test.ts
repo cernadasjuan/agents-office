@@ -1,0 +1,120 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { after, test } from 'node:test';
+import {
+  extractDoneList,
+  extractPersonas,
+  findStoryFile,
+  parseIntentTree,
+  readSessionStory,
+  resetSessionStoryCache,
+} from '../plugins/missions/sessionStoryReader.js';
+
+/**
+ * Issue #160: the tombstone story reader resolves a session slug to its archived
+ * `intent-tree.md` and reads only display fields. Fixtures are synthetic, written
+ * under a tmp dir — never a real `~/.claude` or project-management checkout.
+ */
+
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-story-'));
+after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+function writeRecord(slug: string, body: string, sub = ''): string {
+  const dir = path.join(root, 'sessions', 'archive', sub, slug);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'intent-tree.md');
+  fs.writeFileSync(file, body);
+  return file;
+}
+
+const RECORD = `---
+session_slug: tidy-otter
+intent: "Fix the git situation safely"
+org: personal
+created: 2026-11-12T14:57:57Z
+closed: 2026-11-17T20:56:15Z
+verdict: CLOSE
+node_counts: {done: 2, open: 0, abandoned: 0, handoff: 1, ticket: 0}
+handoffs_generated: [2026-11-17-handoff.md]
+gh_issues_referenced: [gabriel-amyot/agents-office#160, gabriel-amyot/agents-office#159]
+---
+
+## Intent Tree
+
+\`\`\`
+◉ Root: "Fix the git situation safely"
+├── ◉ Amelia cleared the stale revert sequencer
+└── ◉ Merged origin/main (no conflicts)
+\`\`\`
+`;
+
+test('AC: parses intent, personas, counts, done list, handoffs and issues from a real-shaped record', () => {
+  const story = parseIntentTree(RECORD);
+  assert.equal(story?.intent, 'Fix the git situation safely');
+  assert.deepEqual(story?.personas, ['Amelia']);
+  assert.deepEqual(story?.counts, { done: 2, open: 0, abandoned: 0 });
+  assert.deepEqual(story?.doneList, ['Root: "Fix the git situation safely"', 'Amelia cleared the stale revert sequencer', 'Merged origin/main (no conflicts)']);
+  assert.deepEqual(story?.handoffs, ['2026-11-17-handoff.md']);
+  assert.deepEqual(story?.issues, ['gabriel-amyot/agents-office#160', 'gabriel-amyot/agents-office#159']);
+});
+
+test('a record missing the required intent field is not a valid story', () => {
+  assert.equal(parseIntentTree('---\nsession_slug: x\n---\nbody'), null);
+});
+
+test('text with no frontmatter block is not a valid story', () => {
+  assert.equal(parseIntentTree('just some text'), null);
+});
+
+test('AC: extractDoneList ignores non-done tree markers (handoff and ticket glyphs)', () => {
+  const body = '◉ Done item\n⤴🎫 Handoff marker\n🎫 Ticket marker\n└── ◉ Nested done item';
+  assert.deepEqual(extractDoneList(body), ['Done item', 'Nested done item']);
+});
+
+test('AC: extractPersonas only ever returns names from the closed BMAD roster', () => {
+  assert.deepEqual(extractPersonas('Amelia built it, Winston reviewed it, Gabriel approved it'), ['Winston', 'Amelia']);
+  assert.deepEqual(extractPersonas('no persona mentioned here'), []);
+});
+
+test('AC: findStoryFile checks the direct archive folder, then done/, then abandoned/', () => {
+  writeRecord('plain-slug', RECORD);
+  assert.ok(findStoryFile([root], 'plain-slug')?.endsWith(path.join('plain-slug', 'intent-tree.md')));
+  writeRecord('done-slug', RECORD, 'done');
+  assert.ok(findStoryFile([root], 'done-slug')?.includes(path.join('archive', 'done', 'done-slug')));
+  writeRecord('abandoned-slug', RECORD, 'abandoned');
+  assert.ok(findStoryFile([root], 'abandoned-slug')?.includes(path.join('archive', 'abandoned', 'abandoned-slug')));
+});
+
+test('AC: a missing archived record reads as no story, not an error', () => {
+  resetSessionStoryCache();
+  assert.equal(readSessionStory([root], 'never-existed'), null);
+});
+
+test('a slug outside the slug shape is rejected before touching the filesystem', () => {
+  resetSessionStoryCache();
+  assert.equal(findStoryFile([root], '../../etc/passwd'), undefined);
+  assert.equal(readSessionStory([root], '../../etc/passwd'), null);
+});
+
+test('an oversized record is skipped (S6: validate and cap the size of what a reader reads)', () => {
+  const dir = path.join(root, 'sessions', 'archive', 'huge-slug');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'intent-tree.md'), 'x'.repeat(200_001));
+  assert.equal(findStoryFile([root], 'huge-slug'), undefined);
+});
+
+test('readSessionStory caches a read: a file removed within the cache window still answers the old story', () => {
+  const slug = 'cache-slug';
+  writeRecord(slug, RECORD);
+  let now = 1_000_000;
+  resetSessionStoryCache();
+  const first = readSessionStory([root], slug, () => now);
+  assert.ok(first);
+  fs.rmSync(path.join(root, 'sessions', 'archive', slug), { recursive: true, force: true });
+  now += 1_000; // well within the 30s cache window
+  assert.ok(readSessionStory([root], slug, () => now));
+  now += 40_000; // past the cache window: the removal is now visible
+  assert.equal(readSessionStory([root], slug, () => now), null);
+});

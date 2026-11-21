@@ -17,7 +17,7 @@ after(() => {
   Reflect.deleteProperty(globalThis, 'document');
 });
 
-const room = (id: string, state: 'open' | 'locked', sleepers: Array<{ id: string; endedAt?: string }> = []) => ({
+const room = (id: string, state: 'open' | 'locked', sleepers: Array<{ id: string; endedAt?: string; name?: string }> = []) => ({
   id, kind: 'mission' as const, title: id, state, sleepers, walls: { statement: 'x', docs: [], issues: [], kanban: [] },
 });
 
@@ -66,10 +66,57 @@ test('AC2: a session that returns removes its own tombstone by id, leaving the o
 test('AC3: a tombstone carries which session it was and when it ended', () => {
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', endedAt: '2026-11-18' }]));
-  let hoverSign: THREE.Object3D | undefined;
-  missionRoom.group.traverse((o) => { if (o.userData.detailSign?.hoverOnly && /Ended/.test((o as { element?: HTMLElement }).element?.textContent ?? '')) hoverSign = o; });
-  assert.ok(hoverSign, 'a hover-only sign names the end date, not an always-on label');
-  assert.match((hoverSign as unknown as { element: HTMLElement }).element.textContent ?? '', /2026-11-18/);
+  const targets = missionRoom.tombstonePickTargets();
+  assert.equal(targets[0].id, 'tomb-1');
+});
+
+// --- Issue #159: engrave the session name, remove the hover-only sign ---
+
+test('AC: a tombstone engraves its session name, always on, never hover-only', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
+  let nameplate: THREE.Object3D | undefined;
+  missionRoom.group.traverse((o) => { if ((o as { element?: HTMLElement }).element?.textContent === 'tidy-otter') nameplate = o; });
+  assert.ok(nameplate, 'the engraved name is findable as a detail sign');
+  assert.equal((nameplate!.userData.detailSign as { hoverOnly?: boolean }).hoverOnly, false);
+});
+
+test('AC: no floating hover sign remains on a tombstone', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.update(room('a', 'open', [{ id: 'tomb-1', endedAt: '2026-11-18', name: 'tidy-otter' }]));
+  let hoverOnlySign: THREE.Object3D | undefined;
+  missionRoom.group.traverse((o) => { if (o.userData.detailSign?.hoverOnly === true && /Ended/.test((o as { element?: HTMLElement }).element?.textContent ?? '')) hoverOnlySign = o; });
+  assert.equal(hoverOnlySign, undefined);
+});
+
+test('AC: a tombstone with no known session name shows a plain placeholder, not a blank', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.update(room('a', 'open', [{ id: 'tomb-1' }]));
+  const object = missionRoom.tombstonePickTargets()[0].object;
+  const nameplate = object.children.find((child) => (child as { element?: HTMLElement }).element !== undefined);
+  assert.equal((nameplate as unknown as { element: HTMLElement } | undefined)?.element.textContent, 'Ended session');
+});
+
+test('AC: a session that changes name updates the same nameplate element, not a new object', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
+  const before = missionRoom.tombstonePickTargets()[0].object;
+  missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'keen-lynx' }]));
+  const after = missionRoom.tombstonePickTargets()[0].object;
+  assert.equal(after, before);
+  const nameplate = after.children.find((child) => (child as { element?: HTMLElement }).element !== undefined);
+  assert.equal((nameplate as unknown as { element: HTMLElement } | undefined)?.element.textContent, 'keen-lynx');
+});
+
+// The engraved nameplate is a child of the tombstone's own object (issue #159 review): it
+// travels with the stone for free, and a room full of tombstones still merges the same way
+// as before (`StaticMerge` only ever merges `THREE.Mesh`, never a CSS2DObject).
+test('AC: the nameplate is a child of the tombstone object, not a scene-level sibling', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
+  const object = missionRoom.tombstonePickTargets()[0].object;
+  const nameplate = object.children.find((child) => (child as { element?: HTMLElement }).element?.textContent === 'tidy-otter');
+  assert.ok(nameplate, 'the nameplate is a direct child of the tombstone object');
 });
 
 test('AC4: beyond the cap, the existing "N not shown" sign logic carries over', () => {

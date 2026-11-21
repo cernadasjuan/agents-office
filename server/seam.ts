@@ -65,13 +65,34 @@ export interface Enricher {
   enrich(observations: Observation[]): void | Promise<void>;
 }
 
+/**
+ * A session's story (issue #160), read from the archived `intent-tree.md` the
+ * session plugin writes at close (never the live ledger). `personas` is checked
+ * again below against `SESSION_PERSONAS`, a closed set: a reader free-texting
+ * something else never leaves the server. `issues` arrives as raw
+ * `"owner/repo#N"` strings; the projection turns each into a link or drops it.
+ */
+export interface SessionStoryInput {
+  intent?: string;
+  personas?: string[];
+  counts?: { done?: number; open?: number; abandoned?: number };
+  doneList?: string[];
+  handoffs?: string[];
+  issues?: string[];
+}
+
+/** The closed set of persona names a story may name (the BMAD roster's first names). */
+export const SESSION_PERSONAS = ['Mary', 'Winston', 'Amelia', 'John', 'Quinn', 'Barry', 'Bob', 'Paige', 'Sally', 'Dexter', 'Prospero'] as const;
+
 export interface RoomInput {
   key: string;
   kind: 'mission' | 'workspace';
   title: string;
   state: 'open' | 'locked';
-  /** One entry per ended session, its own id and the day it ended (a tombstone). */
-  sleepers?: Array<{ id: string; endedAt?: string }>;
+  /** One entry per ended session, its own id and the day it ended (a tombstone). `name` is the
+   * session's own slug (issue #159): not a secret, already how Gabriel names sessions elsewhere,
+   * engraved on the stone in place of the old hover sign. `story` is issue #160's card data. */
+  sleepers?: Array<{ id: string; endedAt?: string; name?: string; story?: SessionStoryInput }>;
   /** For the missions board (issue #144): when a mission started, and when a closed one stopped. */
   createdAt?: string;
   closedAt?: string;
@@ -232,6 +253,59 @@ function repoShortName(value: unknown): string | undefined {
   return REPO_SHORT.test(short) && short !== '.' && short !== '..' ? short : undefined;
 }
 
+/** A full `owner/repo#N` reference (the session plugin's own convention, `gh_issues_referenced`). */
+const SESSION_ISSUE_REF = /^([A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100})#(\d{1,7})$/;
+
+/** One session-story issue reference, with the link built from the validated repo and number. */
+function sessionIssue(ref: unknown): { repo: string; number: number; url: string } | undefined {
+  if (typeof ref !== 'string') return undefined;
+  const match = SESSION_ISSUE_REF.exec(ref);
+  if (!match) return undefined;
+  return { repo: match[1], number: Number(match[2]), url: `https://github.com/${match[1]}/issues/${match[2]}` };
+}
+
+const STORY_MAX_PERSONAS = 6;
+const STORY_MAX_DONE_ITEMS = 8;
+const STORY_MAX_HANDOFFS = 6;
+const STORY_MAX_ISSUES = 8;
+
+/**
+ * The tombstone story card's whitelist (issue #160, S4): a short intent, persona names from
+ * the closed `SESSION_PERSONAS` set, done/open/abandoned counts, a capped done list, handoff
+ * file names (never a path) and resolved issue links. `issues` is always present (even empty)
+ * once a story exists, so the card can tell "no issue yet" apart from "no record at all".
+ */
+function projectStory(input: SessionStoryInput | undefined) {
+  if (!input || typeof input !== 'object') return undefined;
+  const intent = displayText(input.intent, 160);
+  const personas = Array.isArray(input.personas)
+    ? [...new Set(input.personas.filter((name): name is string => (SESSION_PERSONAS as readonly string[]).includes(name)))].slice(0, STORY_MAX_PERSONAS)
+    : [];
+  const rawCounts = input.counts;
+  const counts = rawCounts && typeof rawCounts === 'object'
+    ? { done: wholeNumber(rawCounts.done, 999) ?? 0, open: wholeNumber(rawCounts.open, 999) ?? 0, abandoned: wholeNumber(rawCounts.abandoned, 999) ?? 0 }
+    : undefined;
+  const doneList = Array.isArray(input.doneList)
+    ? input.doneList.map((item) => displayText(item, 100)).filter(Boolean).slice(0, STORY_MAX_DONE_ITEMS)
+    : [];
+  // A handoff is a file name, never a path (issue #160's privacy rule): the last path
+  // segment only, whichever separator a reader's own OS happened to use.
+  const handoffs = Array.isArray(input.handoffs)
+    ? input.handoffs.map((file) => displayText(file, 80).split(/[/\\]/).pop() ?? '').filter(Boolean).slice(0, STORY_MAX_HANDOFFS)
+    : [];
+  const issues = (Array.isArray(input.issues) ? input.issues : [])
+    .map(sessionIssue).filter((issue): issue is NonNullable<ReturnType<typeof sessionIssue>> => issue !== undefined).slice(0, STORY_MAX_ISSUES);
+  if (!intent && personas.length === 0 && !counts && doneList.length === 0 && handoffs.length === 0 && issues.length === 0) return undefined;
+  return {
+    ...(intent ? { intent } : {}),
+    ...(personas.length > 0 ? { personas } : {}),
+    ...(counts ? { counts } : {}),
+    ...(doneList.length > 0 ? { doneList } : {}),
+    ...(handoffs.length > 0 ? { handoffs } : {}),
+    issues,
+  };
+}
+
 const OWNER_REPO = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
 
 /** A full `owner/name` pair, or undefined when the value does not match that shape. */
@@ -373,7 +447,9 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         const rawId = displayText(entry?.id, 64);
         if (!rawId) return [];
         const endedAt = isoDate(entry?.endedAt);
-        return [{ id: publicId(`sleeper:${room.key}:${rawId}`), ...(endedAt ? { endedAt } : {}) }];
+        const name = displayText(entry?.name, 64);
+        const story = projectStory(entry?.story);
+        return [{ id: publicId(`sleeper:${room.key}:${rawId}`), ...(endedAt ? { endedAt } : {}), ...(name ? { name } : {}), ...(story ? { story } : {}) }];
       });
     return {
       id: publicId(`room:${room.key}`),
