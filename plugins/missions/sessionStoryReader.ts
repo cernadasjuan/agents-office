@@ -46,15 +46,25 @@ export const EMPTY_GITHUB_CONFIG: GithubConfig = { repos: [], owners: [] };
 
 const OWNER_REPO_PAIR = /^([A-Za-z0-9_.-]{1,64})\/([A-Za-z0-9_.-]{1,100})$/;
 const OWNER_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+/** A bare `.` or `..` owner or repo segment: valid against the patterns above, never a real one. */
+const DOT_SEGMENT = new Set(['.', '..']);
 
-/** Parses `AGENTS_OFFICE_GITHUB_REPOS` and `AGENTS_OFFICE_GITHUB_OWNERS`. Malformed entries are dropped. */
+/**
+ * Parses `AGENTS_OFFICE_GITHUB_REPOS` and `AGENTS_OFFICE_GITHUB_OWNERS`. Malformed entries are
+ * dropped, including a `.` or `..` owner or repo segment: the owner/repo patterns above allow
+ * dots, same as `resolveIssueRef`'s own refs and the `repoShortName`/`repos` patterns in
+ * `server/seam.ts`, so this config needs the same explicit rejection they already have.
+ */
 export function parseGithubConfig(repos: string | undefined, owners: string | undefined): GithubConfig {
   const repoList = (repos ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
     .flatMap((entry) => {
       const match = OWNER_REPO_PAIR.exec(entry);
-      return match ? [{ owner: match[1], repo: match[2] }] : [];
+      if (!match) return [];
+      const [, owner, repo] = match;
+      return DOT_SEGMENT.has(owner) || DOT_SEGMENT.has(repo) ? [] : [{ owner, repo }];
     });
-  const ownerList = (owners ?? '').split(',').map((entry) => entry.trim()).filter((entry) => OWNER_NAME.test(entry));
+  const ownerList = (owners ?? '').split(',').map((entry) => entry.trim())
+    .filter((entry) => OWNER_NAME.test(entry) && !DOT_SEGMENT.has(entry));
   return { repos: repoList, owners: ownerList };
 }
 
@@ -68,7 +78,6 @@ const FULL_ISSUE_REF = /^([A-Za-z0-9_.-]{1,64})\/([A-Za-z0-9_.-]{1,100})#(\d{1,7
 const BARE_ISSUE_REF = /^([A-Za-z0-9_.-]{1,100})#(\d{1,7})$/;
 /** A Jira-style key (`PREFIX-123`): never a GitHub issue, shown as plain text, same shape the Jira plugin already links. */
 const JIRA_KEY = /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/;
-const DOT_SEGMENT = new Set(['.', '..']);
 
 export interface ResolvedIssueRef {
   label: string;

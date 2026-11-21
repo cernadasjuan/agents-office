@@ -136,6 +136,12 @@ test('parseGithubConfig: parses owner/repo pairs and owners, dropping malformed 
   assert.deepEqual(parseGithubConfig(undefined, undefined), EMPTY_GITHUB_CONFIG);
 });
 
+test('parseGithubConfig: a "." or ".." owner or repo segment is rejected, same as resolveIssueRef', () => {
+  assert.deepEqual(parseGithubConfig('../repo, owner/.., ./x, valid/pair', undefined),
+    { repos: [{ owner: 'valid', repo: 'pair' }], owners: [] });
+  assert.deepEqual(parseGithubConfig(undefined, '., .., gabriel-amyot'), { repos: [], owners: ['gabriel-amyot'] });
+});
+
 test('a record missing the required intent field is not a valid story', () => {
   assert.equal(parseIntentTree('---\nsession_slug: x\n---\nbody'), null);
 });
