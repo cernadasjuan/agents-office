@@ -68,8 +68,8 @@ test('the card shows name, activity, attention band and wait, workspace, provide
   const { card, selection, text, root } = makeCard(t);
   card.render([main, sub, codex]);
   selection.select('main-1');
-  assert.equal(text('.inspector-activity'), 'Waiting for you');
-  assert.equal(text('.inspector-wait'), 'Waiting for you · 12 min');
+  assert.equal(text('.inspector-activity'), 'Waiting for you · 12 min');
+  assert.equal(root().querySelector<HTMLElement>('.inspector-wait')!.hidden, true, 'the header already carries the elapsed time; the wait line never repeats it');
   assert.equal(text('.inspector-band'), 'fresh');
   assert.equal(text('.inspector-workspace'), 'personal');
   assert.equal(text('.inspector-provider'), 'Claude Code');
@@ -172,25 +172,43 @@ test('AC7: the Repos column shows its own empty state when peek is off (no spinn
 });
 
 test('an idle agent with a your-turn wait shows "Your turn" in the header, not "Taking a break" (issue #168)', (t) => {
-  const { card, selection, text } = makeCard(t);
+  const { card, selection, text, root } = makeCard(t);
   const idleYourTurn: AgentInfo = { id: 'idle-1', name: 'idle-1', activity: 'idle', extras: { attention: 'your-turn', waitMinutes: 5 } };
   card.render([idleYourTurn]);
   selection.select('idle-1');
-  assert.equal(text('.inspector-activity'), 'Your turn', 'the override wins over the raw idle activity, the same as the panel row and the label');
-  assert.equal(text('.inspector-wait'), 'Your turn · 5 min');
+  assert.equal(text('.inspector-activity'), 'Your turn · 5 min', 'the override wins over the raw idle activity, the same as the panel row and the label');
+  assert.equal(root().querySelector<HTMLElement>('.inspector-wait')!.hidden, true);
 });
 
-test('AC6: "Your turn" with no waitMinutes renders exactly once, not in both the header and the wait line (P7 fix)', (t) => {
-  const { card, selection, root } = makeCard(t);
-  const noWait: AgentInfo = { id: 'idle-2', name: 'idle-2', activity: 'idle', extras: { attention: 'your-turn', waitMinutes: undefined } };
-  card.render([noWait]);
-  selection.select('idle-2');
-  assert.equal(root().querySelectorAll('.inspector-activity, .inspector-wait').length, 2, 'both elements still exist');
-  const occurrences = [...root().querySelectorAll('.inspector-activity, .inspector-wait')]
-    .filter((el) => !(el as HTMLElement).hidden).map((el) => el.textContent).join('|');
-  assert.equal((occurrences.match(/Your turn/g) ?? []).length, 1, '"Your turn" appears exactly once among the visible elements');
-  assert.equal(root().querySelector<HTMLElement>('.inspector-wait')!.hidden, true, 'the wait line has nothing to add, so it stays hidden rather than repeat the header');
-});
+// Issue #216 follow-up (Sally, IDE usability review): the duplicate-text bug was never
+// specific to 'your-turn' with no waitMinutes — AC6 only ever tested that one case. Every
+// attention state built the same sentence twice (header bare, wait line the same sentence
+// plus a time suffix), so the two lines always shared an identical leading phrase. One test
+// per state below, covering both the "no waitMinutes" and the "has waitMinutes" shape for
+// each: the wait line must stay hidden and empty in every one, since the header alone now
+// carries the complete sentence.
+for (const [label, attention, waitMinutes, expectedActivity] of [
+  ['your-turn, no wait', 'your-turn', undefined, 'Your turn'],
+  ['your-turn, with wait', 'your-turn', 5, 'Your turn · 5 min'],
+  ['waiting, no wait', 'waiting', undefined, 'Waiting for you'],
+  ['waiting, with wait', 'waiting', 40, 'Waiting for you · 40 min'],
+] as const) {
+  test(`AC6 (#216 follow-up): "${label}" renders its sentence exactly once, never in both the header and the wait line`, (t) => {
+    const { card, selection, root } = makeCard(t);
+    const agent: AgentInfo = { id: 'state-1', name: 'state-1', activity: 'idle', extras: { attention, waitMinutes } };
+    card.render([agent]);
+    selection.select('state-1');
+    assert.equal(root().querySelectorAll('.inspector-activity, .inspector-wait').length, 2, 'both elements still exist');
+    assert.equal(root().querySelector('.inspector-activity')!.textContent, expectedActivity);
+    const wait = root().querySelector<HTMLElement>('.inspector-wait')!;
+    assert.equal(wait.hidden, true, 'the wait line never repeats the header, with or without an elapsed time');
+    assert.equal(wait.textContent, '', 'and carries no text while hidden');
+    const occurrences = [...root().querySelectorAll('.inspector-activity, .inspector-wait')]
+      .filter((el) => !(el as HTMLElement).hidden).map((el) => el.textContent).join('|');
+    const phrase = attention === 'your-turn' ? 'Your turn' : 'Waiting for you';
+    assert.equal((occurrences.match(new RegExp(phrase, 'g')) ?? []).length, 1, `"${phrase}" appears exactly once among the visible elements`);
+  });
+}
 
 // --- Issue #170 review: labels have pointer-events none, so a hover title there never shows.
 // The card's status line is the always-reachable fallback. ---
@@ -295,7 +313,7 @@ test('a poll updates the open card in place', (t) => {
   assert.equal(root(), before);
   assert.equal(before.hidden, false);
   assert.equal(text('.inspector-name'), 'fix login v2');
-  assert.equal(text('.inspector-wait'), 'Waiting for you · 40 min');
+  assert.equal(text('.inspector-activity'), 'Waiting for you · 40 min', 'the header picks up the new waitMinutes on the next poll');
   assert.equal(text('.inspector-band'), 'aging');
 });
 

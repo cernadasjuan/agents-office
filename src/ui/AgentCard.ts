@@ -435,18 +435,21 @@ export class AgentCard {
     const extras = agent.extras ?? {};
     // Issue #168: the header line reads the same words as the panel row and the floating
     // label for the same agent at the same time — attention overrides the raw activity text
-    // here too, not just in the separate wait line below it (which keeps the minutes; the
-    // header line here never did, so it stays short next to the band).
+    // here too. It also carries the elapsed time now (see the #216 follow-up fix below), so it
+    // is the one complete rendering of this agent's attention state on the card.
     const activityText = activityLabel(agent);
     this.name.textContent = agent.name;
-    this.activity.textContent = attentionLine(activityText, extras.attention, undefined);
-    // P7 fix (duplicate "Your turn"): the wait line only adds the elapsed time to the header's
-    // sentence. Without a `waitMinutes` there is nothing to add, and `attentionLine` would
-    // return the exact same text as the header a second time — so the line stays hidden rather
-    // than repeat it.
-    const showsWait = extras.attention !== undefined && extras.waitMinutes !== undefined;
-    this.wait.textContent = showsWait ? attentionLine(activityText, extras.attention, extras.waitMinutes) : '';
-    this.wait.hidden = !showsWait;
+    // P7/AC6 fix, widened per Sally's issue #216 follow-up: the duplicate was never specific to
+    // 'your-turn' with no waitMinutes — every attention state built the same sentence twice,
+    // once bare in the header and once again (plus a time suffix) in the separate wait line
+    // below it, so the two lines always shared an identical leading phrase ("Waiting for you",
+    // "Your turn"). The header now carries the complete sentence itself, elapsed time included
+    // (the same single-line shape `StickFigure.ts`'s floating label already uses), so there is
+    // only ever one place on the card this text can appear. The wait line adds nothing it could
+    // ever say that the header does not already say, so it stays hidden for every state.
+    this.activity.textContent = attentionLine(activityText, extras.attention, extras.waitMinutes);
+    this.wait.textContent = '';
+    this.wait.hidden = true;
     const beaconOn = callsForYou({ attention: extras.attention, waitMinutes: extras.waitMinutes, orchestrating: extras.orchestrating });
     this.beaconHint.textContent = beaconOn ? BEACON_HINT : '';
     this.beaconHint.hidden = !beaconOn;
