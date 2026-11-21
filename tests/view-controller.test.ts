@@ -15,7 +15,7 @@ const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { ViewController } = await import('../src/scene/ViewController.js');
 const { SelectionState } = await import('../src/scene/Selection.js');
 const { STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
-const { EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
+const { EYE_HEIGHT, setSurfaceHeightProvider, setFreeCameraLook } = await import('../src/scene/FreeCamera.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -32,6 +32,7 @@ interface SetupExtras {
   roomAt?: (x: number, z: number) => { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null;
   idleTimeoutSeconds?: number;
   crosshair?: HTMLElement | null;
+  surfaceHeightAt?: (x: number, z: number) => number | null;
 }
 
 function setup(
@@ -121,6 +122,43 @@ test('key H flies to the desk pose, in a short fly, not an instant cut', () => {
   assert.ok(camera.position.distanceTo(desk.position) > 0.01, 'still mid-flight, not an instant cut');
   for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
   assert.ok(camera.position.distanceTo(desk.position) < 1e-6, 'lands exactly at the desk pose');
+});
+
+test('issue #249: toggling H while standing on an elevated surface (the hex walkway deck) returns to that surface\'s height, not y=0 plus eye height', () => {
+  const desk = fixtureDeskView();
+  const DECK_HEIGHT = 6.6; // WALKWAY_HEIGHT, the elevated surface this bug was found on
+  const { view, camera } = setup('', undefined, undefined, {
+    deskView: () => desk,
+    surfaceHeightAt: () => DECK_HEIGHT, // every x/z on the deck reads the same height
+  });
+  // Stand on the deck before toggling desk view: the old code reset to `currentEyeHeight()`
+  // alone on the way back, silently dropping the deck's own height from under the camera.
+  camera.position.y = DECK_HEIGHT + EYE_HEIGHT;
+  // `view.toggleDesk()` directly, not `press('KeyH')`: every test in this file shares one
+  // JSDOM `window` as `keys`, and `ViewController` never removes its own keydown listener —
+  // a real key dispatch here would also fire every still-attached listener from an earlier
+  // H-toggle test, each driving its own (unrelated) view and, through it, the same
+  // module-level `FreeCamera` floor-height singleton this test depends on reading cleanly.
+  view.toggleDesk();
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60); // settle into desk mode
+  assert.equal(view.mode, 'desk');
+
+  view.toggleDesk(); // back to first person, at the saved deck position
+  for (let i = 0; i < 60; i++) view.update(2 + i / 60, 1 / 60); // settle the fly back
+  assert.equal(view.mode, 'first-person');
+  assert.ok(
+    Math.abs(camera.position.y - (DECK_HEIGHT + EYE_HEIGHT)) < 1e-6,
+    `landed at y=${camera.position.y}, expected the deck height (${DECK_HEIGHT}) plus eye height (${EYE_HEIGHT}), not eye height alone`,
+  );
+
+  // `FreeCamera`'s floor height is a module-level singleton (one ground-walk at a time), not
+  // per-`ViewController` — left at the deck height, it would silently leak into every test
+  // that runs after this one in the same process (any of their own flight landings would
+  // read this stale height as their fallback). `setFreeCameraLook` snaps it directly, no
+  // easing to wait out.
+  setSurfaceHeightProvider(() => 0);
+  setFreeCameraLook(camera, camera.position, camera.position.clone().add(new THREE.Vector3(0, 0, -1)));
+  setSurfaceHeightProvider(null);
 });
 
 test('key H without a desk to show is a no-op (graceful degradation, no deskView option at all)', () => {

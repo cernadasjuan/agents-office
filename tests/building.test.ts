@@ -923,6 +923,30 @@ test('roomAt finds a mission room by its own rect, not just building rooms', () 
   assert.deepEqual([hit.bounds.min.x, hit.bounds.max.x, hit.bounds.min.z, hit.bounds.max.z], [rect.minX, rect.maxX, rect.minZ, rect.maxZ]);
 });
 
+// --- roomAt over the hex structure (issue #249: a double-click in isometric over the Hub or
+// Office did nothing — roomAt only ever scanned the rect rooms above) ---
+
+test('roomAt finds the hex Hub and Office too, not just the rect rooms', () => {
+  const { layout } = setup();
+  const hubCenter = layout.roomView('hub')!.bounds.getCenter(new THREE.Vector3());
+  const hub = layout.roomAt(hubCenter.x, hubCenter.z);
+  assert.ok(hub, 'a point inside the hub finds it');
+  assert.deepEqual(hub, layout.roomView('hub'));
+
+  const officeCenter = layout.roomView('hex-office')!.bounds.getCenter(new THREE.Vector3());
+  const hexOffice = layout.roomAt(officeCenter.x, officeCenter.z);
+  assert.ok(hexOffice, 'a point inside the hex office finds it');
+  assert.deepEqual(hexOffice, layout.roomView('hex-office'));
+});
+
+test('roomAt between the hub and the hex office (on the walkway, not inside either hex) still returns null', () => {
+  const { layout } = setup();
+  const hubCenter = layout.roomView('hub')!.bounds.getCenter(new THREE.Vector3());
+  const officeCenter = layout.roomView('hex-office')!.bounds.getCenter(new THREE.Vector3());
+  const midpoint = hubCenter.clone().add(officeCenter).multiplyScalar(0.5);
+  assert.equal(layout.roomAt(midpoint.x, midpoint.z), null, 'between the two hex rooms is not inside either');
+});
+
 // --- Library and librarians ---
 
 test('the Librarian persona badge reaches the Library room before the hall shelves (issue #128)', () => {

@@ -32,6 +32,7 @@ import {
   hexWallSegments,
   hexWallColliders,
   hexSurfaceHeightAt,
+  pointInPolygon,
   type HexOfficeLayout,
   type HexRoomGeometry,
   HEX_WALL_HEIGHT,
@@ -196,6 +197,10 @@ export interface BuiltHexOffice {
   /** `#room=hub` / `#room=hex-office` (issue #242 review). Unknown names return null, the
    * same contract `BuildingLayout.roomView` already keeps for a rect room. */
   roomView(name: string): { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null;
+  /** The hex room (if any) whose floor contains this world point (issue #249: a double-click
+   * in isometric only ever checked the rect rooms, so clicking a hex room floor did nothing).
+   * The same contract `BuildingLayout.roomAt` already keeps for a rect room. */
+  roomAt(x: number, z: number): { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null;
 }
 
 /** Builds the Hub and Office hex rooms and the walkway/stair between them, merged into one
@@ -274,6 +279,12 @@ export function buildHexOffice(): BuiltHexOffice {
       const query = name.trim().toLowerCase();
       if (query === 'hub') return hexRoomView(layout.hub);
       if (query === 'hex-office') return hexRoomView(layout.office);
+      return null;
+    },
+    roomAt: (x: number, z: number) => {
+      const point = { x, z };
+      if (pointInPolygon(point, layout.hub.corners)) return hexRoomView(layout.hub);
+      if (pointInPolygon(point, layout.office.corners)) return hexRoomView(layout.office);
       return null;
     },
   };

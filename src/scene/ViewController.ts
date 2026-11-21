@@ -188,7 +188,10 @@ export class ViewController {
       // structure, deliberately clear of the rect building). Without this, the very next
       // `retrack()` (fired by the first agent poll's `sceneChanged()`, moments after this
       // framing) would clamp `target` straight back to the rect building, undoing the flight.
-      this.isometric.pinTarget(target);
+      // Review round 2: pins the room's own bounds, not just its center point — a wheel tick
+      // or a drag right after landing here must still clamp to this room, not the plain
+      // default bounds (`pan`/`shiftTarget` read the same pin `retrack` does).
+      this.isometric.pinBounds(room.bounds);
       this.isometric.halfHeight = THREE.MathUtils.clamp(
         framedHalfHeight(room.bounds, this.aspect()),
         this.isometric.minHalfHeight,
@@ -352,7 +355,23 @@ export class ViewController {
           // when the flight was built: crouching or standing up during the 0.6 s flight would
           // otherwise leave the landing height stale, popping to the live one a frame later,
           // the same class of bug this round's own fix already closed for the common case.
-          this.flight.end.position.y = currentEyeHeight();
+          // Issue #249: that eye height alone assumed the floor is always `y = 0` — true
+          // everywhere before the hex walkway/deck existed, false now. Toggling desk view (H)
+          // while standing on the elevated deck, then leaving desk mode, used to land at
+          // `currentEyeHeight()` with no floor offset at all, well below the deck. Adding the
+          // surface height at the landing x/z (the same source `FreeCamera`'s own per-frame
+          // easing reads) fixes it for the deck and for every future elevated surface, not
+          // just this one case.
+          //
+          // `setFreeCameraLook` itself re-derives the floor height, but from `FreeCamera`'s
+          // own module-level provider, which the ground-walk branch below only ever syncs —
+          // never run yet on the very first flight of a session (straight into a flight, no
+          // ground-walk frame before it). Sync it here first, so the snap below is correct in
+          // one step instead of landing on a stale floor height and visibly re-easing toward
+          // the right one over the next second.
+          setSurfaceHeightProvider(this.options.surfaceHeightAt ?? null);
+          const floor = this.options.surfaceHeightAt?.(this.flight.end.position.x, this.flight.end.position.z) ?? 0;
+          this.flight.end.position.y = floor + currentEyeHeight();
           setFreeCameraLook(camera, this.flight.end.position, this.flight.end.lookAt);
         }
         this.flight = null;
@@ -468,7 +487,6 @@ export class ViewController {
       // PR #200 review round: a drag is direct manipulation, not a flight — responsive even
       // mid-correction, even right after a flight-type change (a selection, a start parameter).
       this.isometricFollowRates = DIRECT_FOLLOW_RATES;
-      this.isometric.clearPin();
       const dx = point.x - this.dragPoint.x;
       const dy = point.y - this.dragPoint.y;
       this.isometric.drag(dx, dy, canvas.clientHeight || 1);
@@ -517,7 +535,6 @@ export class ViewController {
       this.flight = null;
       // PR #200 review round: the wheel is direct manipulation, not a flight.
       this.isometricFollowRates = DIRECT_FOLLOW_RATES;
-      this.isometric.clearPin();
       // Zoom toward the cursor (issue #87, AC1), not toward the room center: the point
       // under the pointer stays under it. Falls back to a plain zoom while the canvas has
       // no on-screen size yet (e.g. a test or a hidden tab), when NDC is undefined.
@@ -695,7 +712,6 @@ export class ViewController {
     if (right === 0 && forward === 0) return;
     // PR #200 review round: WASD is direct manipulation, not a flight.
     this.isometricFollowRates = DIRECT_FOLLOW_RATES;
-    this.isometric.clearPin();
     const fast = this.panKeys.has('ShiftLeft') || this.panKeys.has('ShiftRight') ? FAST_MULTIPLIER : 1;
     const step = this.zoomDistance * PAN_SPEED_PER_DISTANCE * fast * delta;
     this.isometric.pan(right * step, forward * step);
