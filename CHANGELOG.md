@@ -13,6 +13,7 @@
 
 ### Fixes
 
+- The isometric view's pan and zoom limits now follow the building as it grows or shrinks and the window is resized, without ever jumping the camera: one goal pose every input (wheel, drag, cursor zoom, a selection, a bounds change) edits, and one damped follower that eases the live camera toward it every frame, with no tween to go stale when the goal changes again mid-chase
 - Each session reads its own transcript; sessions in the same folder no longer share one activity
 - Subagents show once, under the session that started them
 - Agents without a free seat of their type stand on an overflow spot instead of piling up at the origin or taking a seat of another type

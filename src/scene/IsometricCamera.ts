@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { easeInOutCubic } from './OverviewCamera.js';
 
 /** The classic isometric angle: about 35.26 degrees above the floor. */
 export const ISO_ELEVATION = Math.atan(1 / Math.SQRT2);
@@ -13,6 +12,17 @@ const MAX_ZOOM_OUT = 1.5;
 export const ISO_FOCUS_HALF_HEIGHT = 7;
 const MIN_HALF_HEIGHT = 1.5;
 const WHEEL_ZOOM_RATE = 0.0015;
+/**
+ * Issue #113 redesign: the live camera's pan speed, in world units per second per unit of
+ * `halfHeight` (the zoom) at the moment of the step. Panning at a wide zoom covers more
+ * visible ground than the same speed at a tight one, the same scaling `panWithKeys` already
+ * used for its own speed, so the catch-up always reads at the same relative pace.
+ */
+const FOLLOW_PAN_RATE = 7;
+/** The live camera's zoom speed, as a fraction of `halfHeight` closed per second. */
+const FOLLOW_ZOOM_RATE = 4.5;
+/** The floor under the pan/zoom speed's own `halfHeight` reference, so a tight focus zoom never stalls the follower to a crawl. */
+const MIN_FOLLOW_REFERENCE = 5;
 
 /** Unit vector from the looked-at point toward the isometric camera. */
 export function isometricDirection(): THREE.Vector3 {
@@ -71,16 +81,37 @@ export class IsometricController {
   halfHeight = 20;
   minHalfHeight = MIN_HALF_HEIGHT;
   maxHalfHeight = 30;
+  /** How far the near/far planes reach past the framed bounds; read by `applyIsometricState` so the far plane always covers them. */
+  reach = 40;
   private bounds = new THREE.Box3(new THREE.Vector3(-15, 0, -13), new THREE.Vector3(15, 0, 13));
-  private reach = 40;
 
-  /** Center the box and zoom so that every corner is on screen. */
+  /** Center the box and zoom so that every corner is on screen: the one-shot framing a fresh entry into the view uses. */
   frame(bounds: THREE.Box3, aspect: number): void {
     const box = bounds.clone();
     box.max.y = Math.max(box.max.y, box.min.y + MIN_FRAME_HEIGHT);
     this.target.copy(box.getCenter(new THREE.Vector3()));
     this.halfHeight = framedHalfHeight(box, aspect);
-    this.maxHalfHeight = this.halfHeight * MAX_ZOOM_OUT;
+    this.applyBounds(box, aspect);
+  }
+
+  /**
+   * Issue #113: re-derive the pan/zoom limits for new bounds or a new aspect (a room added or
+   * removed, a window resize), without moving `target`/`halfHeight` unless the current goal now
+   * falls outside the new limits. Only the goal is clamped here — the live camera the follower
+   * is chasing is never touched directly, so a bounds change alone never jumps it; the follower
+   * simply eases toward wherever the reclamped goal now sits.
+   */
+  retrack(bounds: THREE.Box3, aspect: number): void {
+    const box = bounds.clone();
+    box.max.y = Math.max(box.max.y, box.min.y + MIN_FRAME_HEIGHT);
+    this.applyBounds(box, aspect);
+    this.halfHeight = THREE.MathUtils.clamp(this.halfHeight, this.minHalfHeight, this.maxHalfHeight);
+    this.target.x = THREE.MathUtils.clamp(this.target.x, this.bounds.min.x, this.bounds.max.x);
+    this.target.z = THREE.MathUtils.clamp(this.target.z, this.bounds.min.z, this.bounds.max.z);
+  }
+
+  private applyBounds(box: THREE.Box3, aspect: number): void {
+    this.maxHalfHeight = framedHalfHeight(box, aspect) * MAX_ZOOM_OUT;
     this.bounds = box.clone();
     this.reach = box.getBoundingSphere(new THREE.Sphere()).radius * 2 + 10;
   }
@@ -124,16 +155,11 @@ export class IsometricController {
 
   /** The perspective camera distance (vertical field of view `fovDeg`) that shows things at the same screen size. */
   equivalentDistance(fovDeg: number): number {
-    return this.halfHeight / Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
+    return distanceForHalfHeight(this.halfHeight, fovDeg);
   }
 
   state(): IsometricState {
     return { target: this.target.clone(), halfHeight: this.halfHeight };
-  }
-
-  setState(state: IsometricState): void {
-    this.target.copy(state.target);
-    this.halfHeight = state.halfHeight;
   }
 
   /**
@@ -142,22 +168,7 @@ export class IsometricController {
    * behind it, so nothing in the building is clipped at any zoom.
    */
   applyTo(camera: THREE.OrthographicCamera, aspect: number, fovDeg: number): void {
-    const standoff = this.equivalentDistance(fovDeg);
-    camera.position.copy(this.target).addScaledVector(isometricDirection(), standoff);
-    camera.up.set(0, 1, 0);
-    camera.lookAt(this.target);
-    const halfWidth = this.halfHeight * aspect;
-    const near = -this.reach;
-    const far = standoff + this.reach;
-    if (camera.top === this.halfHeight && camera.right === halfWidth && camera.near === near && camera.far === far && camera.zoom === 1) return;
-    camera.left = -halfWidth;
-    camera.right = halfWidth;
-    camera.top = this.halfHeight;
-    camera.bottom = -this.halfHeight;
-    camera.near = near;
-    camera.far = far;
-    camera.zoom = 1;
-    camera.updateProjectionMatrix();
+    applyIsometricState(this.state(), this.reach, camera, aspect, fovDeg);
   }
 }
 
@@ -190,22 +201,79 @@ export function zoomTowardCursor(view: IsometricController, ndcX: number, ndcY: 
   view.shiftTarget(before.x - after.x, before.z - after.z);
 }
 
-/** A flight of the isometric camera: target and zoom ease together. */
-export class IsometricTween {
-  private elapsed = 0;
+/**
+ * Move a value toward `to` by at most `maxStep`, landing exactly on it once within reach
+ * (issue #113 redesign). No elapsed time, no start pose: recomputed fresh from the current
+ * live and goal values alone, so retargeting the goal mid-chase (another wheel tick, a second
+ * bounds shrink) never leaves a stale tween to jump out of — there is no tween to go stale.
+ */
+function stepScalar(from: number, to: number, maxStep: number): number {
+  const diff = to - from;
+  return Math.abs(diff) <= maxStep ? to : from + Math.sign(diff) * maxStep;
+}
 
-  constructor(private from: IsometricState, private to: IsometricState, private duration = 0.6) {}
+function stepVector(from: THREE.Vector3, to: THREE.Vector3, maxStep: number): THREE.Vector3 {
+  const offset = to.clone().sub(from);
+  const distance = offset.length();
+  return distance <= maxStep || distance < 1e-9 ? to.clone() : from.clone().addScaledVector(offset, maxStep / distance);
+}
 
-  get done(): boolean {
-    return this.elapsed >= this.duration;
-  }
+/**
+ * The one damped follower (issue #113 redesign): moves `live` toward `goal` by a step capped
+ * to a fixed world speed (pan) and a fixed fraction of the current zoom (halfHeight) per
+ * second, frame-rate independent. Every input — the wheel, a cursor-anchored zoom, a drag, a
+ * selection, a bounds clamp — edits only the goal (`IsometricController`'s own target and
+ * halfHeight); this is the only place that ever moves the live pose, and it never restarts or
+ * cancels: called again next frame, it just keeps closing whatever gap remains.
+ */
+export function followIsometric(live: IsometricState, goal: IsometricState, delta: number): IsometricState {
+  const reference = Math.max(live.halfHeight, goal.halfHeight, MIN_FOLLOW_REFERENCE);
+  return {
+    target: stepVector(live.target, goal.target, FOLLOW_PAN_RATE * reference * delta),
+    halfHeight: stepScalar(live.halfHeight, goal.halfHeight, FOLLOW_ZOOM_RATE * reference * delta),
+  };
+}
 
-  advance(delta: number): IsometricState {
-    this.elapsed = Math.min(this.duration, this.elapsed + delta);
-    const t = easeInOutCubic(this.duration > 0 ? this.elapsed / this.duration : 1);
-    return {
-      target: this.from.target.clone().lerp(this.to.target, t),
-      halfHeight: THREE.MathUtils.lerp(this.from.halfHeight, this.to.halfHeight, t),
-    };
-  }
+/** True once a follower step has closed the gap: the live pose equals the goal, nothing left to chase. */
+export function isometricAtRest(live: IsometricState, goal: IsometricState): boolean {
+  return live.target.equals(goal.target) && live.halfHeight === goal.halfHeight;
+}
+
+/**
+ * Put an orthographic camera on a live pose. Distance rules (labels, signs, animation sleep)
+ * read `IsometricController.equivalentDistance`, which is always the GOAL's own distance, not
+ * the live one chasing it — those thresholds should react to what the camera is headed toward,
+ * not lag a frame behind it. The far plane is the one thing both states share: it follows
+ * `goalDistance` (issue #113 redesign review, defect 4) so a correction never clips the
+ * building while the live camera is still mid-chase toward a goal that is itself closer.
+ */
+export function applyIsometricState(
+  live: IsometricState,
+  reach: number,
+  camera: THREE.OrthographicCamera,
+  aspect: number,
+  fovDeg: number,
+  goalDistance: number = Number.NEGATIVE_INFINITY,
+): void {
+  const standoff = distanceForHalfHeight(live.halfHeight, fovDeg);
+  camera.position.copy(live.target).addScaledVector(isometricDirection(), standoff);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(live.target);
+  const halfWidth = live.halfHeight * aspect;
+  const near = -reach;
+  const far = Math.max(standoff, goalDistance) + reach;
+  if (camera.top === live.halfHeight && camera.right === halfWidth && camera.near === near && camera.far === far && camera.zoom === 1) return;
+  camera.left = -halfWidth;
+  camera.right = halfWidth;
+  camera.top = live.halfHeight;
+  camera.bottom = -live.halfHeight;
+  camera.near = near;
+  camera.far = far;
+  camera.zoom = 1;
+  camera.updateProjectionMatrix();
+}
+
+/** The perspective camera distance (vertical field of view `fovDeg`) that shows a given half height at the same screen size. */
+export function distanceForHalfHeight(halfHeight: number, fovDeg: number): number {
+  return halfHeight / Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
 }
