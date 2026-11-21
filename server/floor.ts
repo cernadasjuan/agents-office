@@ -8,25 +8,41 @@ export const GENERAL_FLOOR = 'general';
 const MAX_WALK_DEPTH = 40;
 const MAX_CACHED_DIRS = 500;
 
-/** Same token shape `server/seam.ts`'s `REPO_SHORT` whitelists: a floor name is always a short
- * repo name, or `GENERAL_FLOOR`, so it survives the projection boundary unchanged. */
-const FLOOR_NAME = /^[A-Za-z0-9_.-]{1,40}$/;
+/**
+ * One floor-name segment: the same short token shape `server/seam.ts`'s `REPO_SHORT`
+ * whitelists. A floor name is one segment (`GENERAL_FLOOR`, or a repo with no distinguishing
+ * parent directory), or two segments joined by a slash — the repo's own immediate parent
+ * directory name, then the repo name (review: two differently-rooted repos that happen to
+ * share a leaf folder name, for example two separate `project-management` checkouts under
+ * different organizations, must not collapse onto the same floor). Never `.` or `..`.
+ */
+const SEGMENT = /^[A-Za-z0-9_.-]{1,40}$/;
+
+function validSegment(name: string): boolean {
+  return name !== '.' && name !== '..' && SEGMENT.test(name);
+}
 
 /**
- * The main repository name from a worktree `.git` file (`gitdir: <main>/.git/worktrees/<name>`).
- * Duplicated from `plugins/peek/transcript.ts`'s own `worktreeMain` (same shape): a core
- * enricher must not import from an opt-in plugin, and the plugin must not import from core
- * for one helper either, so each keeps its own small copy.
+ * The main repository's own absolute directory from a worktree `.git` file
+ * (`gitdir: <main>/.git/worktrees/<name>`, resolved against `worktreeDir` when the gitdir
+ * value itself is relative, for example `../../.git/worktrees/x`). Returns the directory,
+ * not its name, so the caller can still qualify it with its own parent directory. Duplicated
+ * from `plugins/peek/transcript.ts`'s own `worktreeMain` (there it goes straight to a short
+ * name, since the peek plugin has no floor-qualifying rule to apply): a core enricher must
+ * not import from an opt-in plugin, and the plugin must not import from core for one helper
+ * either, so each keeps its own small copy.
  */
-function worktreeMain(gitFile: string): string | undefined {
+function worktreeMainDir(gitFile: string, worktreeDir: string): string | undefined {
   let fd: number | undefined;
   try {
     fd = fs.openSync(gitFile, 'r');
     const buffer = Buffer.alloc(1024);
     const bytes = fs.readSync(fd, buffer, 0, buffer.length, 0);
     const gitdir = /^gitdir:\s*(.+)$/m.exec(buffer.subarray(0, bytes).toString('utf8'))?.[1].trim();
-    const main = gitdir ? /^(.*)[\\/]\.git[\\/]worktrees[\\/]/.exec(gitdir)?.[1] : undefined;
-    return main ? path.basename(main) : undefined;
+    if (!gitdir) return undefined;
+    const absoluteGitdir = path.isAbsolute(gitdir) ? gitdir : path.resolve(worktreeDir, gitdir);
+    const main = /^(.*)[\\/]\.git[\\/]worktrees[\\/]/.exec(absoluteGitdir)?.[1];
+    return main || undefined;
   } catch {
     return undefined;
   } finally {
@@ -35,13 +51,28 @@ function worktreeMain(gitFile: string): string | undefined {
 }
 
 /**
- * Resolves a working directory to the short name of the git repository that holds it (a
- * worktree maps to its main repository, the same rule `plugins/peek/transcript.ts`'s
- * `repoOf` uses), walking up at most `MAX_WALK_DEPTH` directories. A directory with no
- * repository, or whose name does not fit the whitelist, resolves to `GENERAL_FLOOR` (scope
- * item 2), never left undefined. Caches by directory, capped at `MAX_CACHED_DIRS` (cleared
- * wholesale past the cap, the same bound `PeekReader.repoByDir` uses) so a busy office does
- * not re-walk the filesystem for the same session on every 3 s poll.
+ * A repository's own floor name: its directory name, qualified by its immediate parent
+ * directory's name when that parent exists and fits the whitelist too (review: the org
+ * separation fix). `GENERAL_FLOOR` when the repo's own directory name itself does not fit
+ * the whitelist (never half a floor name, and never a crash).
+ */
+function qualifiedFloorName(repoDir: string): string {
+  const repoName = path.basename(repoDir);
+  if (!validSegment(repoName)) return GENERAL_FLOOR;
+  const parentDir = path.dirname(repoDir);
+  const parentName = parentDir === repoDir ? '' : path.basename(parentDir);
+  return parentName && validSegment(parentName) ? `${parentName}/${repoName}` : repoName;
+}
+
+/**
+ * Resolves a working directory to the floor name of the git repository that holds it (a
+ * worktree maps to its main repository), walking up at most `MAX_WALK_DEPTH` directories. A
+ * relative `cwd` (review: never meaningful to resolve against the office server's own
+ * working directory), a directory with no repository, or an unreadable or malformed
+ * worktree `.git` file (review: never falls back to naming the worktree's own directory),
+ * resolves to `GENERAL_FLOOR`, never left undefined. Caches by directory, capped at
+ * `MAX_CACHED_DIRS` (cleared wholesale past the cap, the same bound `PeekReader.repoByDir`
+ * uses) so a busy office does not re-walk the filesystem for the same session on every 3 s poll.
  */
 export class FloorResolver {
   private cache = new Map<string, string>();
@@ -57,13 +88,15 @@ export class FloorResolver {
   }
 
   private resolveUncached(cwd: string): string {
+    if (!path.isAbsolute(cwd)) return GENERAL_FLOOR;
     let current = path.resolve(cwd);
     for (let depth = 0; depth < MAX_WALK_DEPTH; depth++) {
       const git = path.join(current, '.git');
       try {
         const stat = fs.lstatSync(git);
-        const name = stat.isFile() ? worktreeMain(git) ?? path.basename(current) : path.basename(current);
-        return name !== '.' && name !== '..' && FLOOR_NAME.test(name) ? name : GENERAL_FLOOR;
+        if (!stat.isFile()) return qualifiedFloorName(current);
+        const mainDir = worktreeMainDir(git, current);
+        return mainDir ? qualifiedFloorName(mainDir) : GENERAL_FLOOR;
       } catch {
         const parent = path.dirname(current);
         if (parent === current) return GENERAL_FLOOR;

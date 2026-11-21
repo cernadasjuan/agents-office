@@ -1,7 +1,8 @@
 /**
- * Floor data model (issue #118). A floor is a whitelisted short repo name, or the shared
- * `'general'` floor for a session with no resolvable repo (`server/floor.ts` resolves it;
- * `server/seam.ts`'s `projectAgents` is the only place that field crosses to the browser).
+ * Floor data model (issue #118). A floor is a whitelisted short repo name (one segment, or
+ * two joined by a slash when an org-qualifying parent directory applies, `server/floor.ts`'s
+ * own rule), or the shared `'general'` floor for a session with no resolvable repo
+ * (`server/seam.ts`'s `projectAgents` is the only place that field crosses to the browser).
  * This module is pure: no scene, no DOM, so it is cheap to unit test and safe for both
  * `main.ts` (choosing the floor to focus) and `AgentPoller`/`BuildingLayout` (filtering and
  * per-floor storage) to import.
@@ -11,11 +12,15 @@
 export const GENERAL_FLOOR = 'general';
 
 /**
- * The one floor today's single building's room list migrates to at cutover (the floors
- * design document: "the repo this session's data already belongs to, confirmed by the 10
- * `mission` rooms currently live").
+ * No filter: every agent shows, from every floor, the office's original single-building
+ * behavior (review: a cold start, or an explicit choice, must never silently hide every
+ * waiting agent on another floor from the one place meant to catch them). This is the
+ * default until the user picks a specific floor. `BuildingLayout`'s own storage key for this
+ * state is the legacy bare key (`floorStorageKey`'s `floor` argument stays unset for it) —
+ * the same room list the single building already used before floors existed, so choosing
+ * "All floors" costs no migration and loses no data: it already is today's behavior.
  */
-export const MIGRATION_FLOOR = 'agents-office';
+export const ALL_FLOORS = 'all';
 
 /**
  * The legacy, pre-floors room-kind-list storage key. Duplicated from
@@ -28,12 +33,18 @@ export const LEGACY_ROOMS_KEY = 'agents-office.building.rooms';
 /** Where the last-focused floor is remembered, the same pattern `src/layout/registry.ts` uses for the layout choice. */
 export const FOCUSED_FLOOR_KEY = 'agents-office.floor';
 
-/** Same token shape `server/seam.ts`'s `REPO_SHORT` whitelists: a short name, no slash, 1-40 characters. */
-const FLOOR_NAME_RE = /^[A-Za-z0-9_.-]{1,40}$/;
+/**
+ * One floor-name segment, the same shape `server/seam.ts`'s `FLOOR_SEGMENT` whitelists: a
+ * short name, no slash, 1-40 characters, never `.` or `..`. A floor name is one segment, or
+ * two joined by a single slash (the org-qualifying case); never more than one slash.
+ */
+const SEGMENT = '[A-Za-z0-9_.-]{1,40}';
+const FLOOR_NAME_RE = new RegExp(`^${SEGMENT}(?:/${SEGMENT})?$`);
 
-/** Whether a string is a well-shaped floor name (never `.` or `..`, never empty, never over 40 characters). */
+/** Whether a string is a well-shaped floor name: one segment, or two joined by one slash, never `.` or `..` in either. */
 export function isFloorName(value: string): boolean {
-  return FLOOR_NAME_RE.test(value) && value !== '.' && value !== '..';
+  if (!FLOOR_NAME_RE.test(value)) return false;
+  return !value.split('/').some((segment) => segment === '.' || segment === '..');
 }
 
 /** A floor's own room-kind-list storage key (`BuildingLayout.floorStorageKey` builds the same string). */
@@ -46,7 +57,7 @@ function floorOf(agent: { floor?: string }): string {
   return agent.floor && isFloorName(agent.floor) ? agent.floor : GENERAL_FLOOR;
 }
 
-/** `#floor=<name>` from the URL hash, or null without one or with a malformed name. */
+/** `#floor=<name>` from the URL hash, or null without one or with a malformed name. `#floor=all` resolves to `ALL_FLOORS`, a well-shaped name like any other. */
 export function floorFromHash(hash: string): string | null {
   const match = /(?:^|[?&#])floor=([^&]+)/.exec(hash);
   if (!match) return null;
@@ -65,22 +76,7 @@ export interface FloorStorage {
   removeItem(key: string): void;
 }
 
-/**
- * One-time migration (floors design document): today's single building's room list moves to
- * the `agents-office` floor's own key; the legacy key is removed, never kept as a dual-read
- * path. A storage with nothing at the legacy key, or a target key that already has data (a
- * migration that already ran), is a no-op — the second call never overwrites real data with
- * a stale copy.
- */
-export function migrateLegacyRooms(storage: FloorStorage): void {
-  const legacy = storage.getItem(LEGACY_ROOMS_KEY);
-  if (legacy === null) return;
-  const targetKey = floorRoomsStorageKey(MIGRATION_FLOOR);
-  if (storage.getItem(targetKey) === null) storage.setItem(targetKey, legacy);
-  storage.removeItem(LEGACY_ROOMS_KEY);
-}
-
-/** Every floor with at least one tracked session right now, sorted, `'general'` always last. */
+/** Every floor with at least one tracked session right now, sorted, `'general'` always last. Never includes `ALL_FLOORS`: that is a view choice, not a floor a session can be on. */
 export function knownFloors(agents: ReadonlyArray<{ floor?: string }>): string[] {
   const floors = new Set<string>([GENERAL_FLOOR]);
   for (const agent of agents) floors.add(floorOf(agent));
@@ -91,34 +87,15 @@ export function knownFloors(agents: ReadonlyArray<{ floor?: string }>): string[]
   });
 }
 
-/** The floor with the most tracked sessions right now. Ties keep the alphabetically-first floor. Null with no agents at all. */
-function busiestFloor(agents: ReadonlyArray<{ floor?: string }>): string | null {
-  if (agents.length === 0) return null;
-  const counts = new Map<string, number>();
-  for (const agent of agents) {
-    const floor = floorOf(agent);
-    counts.set(floor, (counts.get(floor) ?? 0) + 1);
-  }
-  let best: string | null = null;
-  let bestCount = -1;
-  for (const floor of [...counts.keys()].sort()) {
-    const count = counts.get(floor)!;
-    if (count > bestCount) {
-      best = floor;
-      bestCount = count;
-    }
-  }
-  return best;
-}
-
 /**
  * The floor to focus: `#floor=` in the URL first (an explicit link always wins, the same
  * URL-first order `chooseViewMode`/`chooseLayoutId` already use), then the last floor the
- * user visited, then the floor with the most tracked sessions right now, else the shared
- * general floor (the brief's default order).
+ * user visited, else `ALL_FLOORS` (review: a fresh page load has not polled any agent yet,
+ * so there is no "busiest floor" to compute a default from before the first poll answers —
+ * showing everything, same as today, is the only safe default at that point; the
+ * floor-switch menu surfaces a specific floor for the user to choose once agents are known).
  */
 export function defaultFloor(
-  agents: ReadonlyArray<{ floor?: string }>,
   storage: Pick<FloorStorage, 'getItem'> | undefined,
   hash: string,
 ): string {
@@ -126,7 +103,7 @@ export function defaultFloor(
   if (fromHash) return fromHash;
   const stored = storage?.getItem(FOCUSED_FLOOR_KEY);
   if (stored && isFloorName(stored)) return stored;
-  return busiestFloor(agents) ?? GENERAL_FLOOR;
+  return ALL_FLOORS;
 }
 
 export function rememberFloor(floor: string, storage: Pick<FloorStorage, 'setItem'> | undefined): void {
@@ -146,16 +123,22 @@ export interface FloorSwitchLocation {
  * `reloadForLayoutSwitch`, `src/layout/registry.ts`, uses for a layout switch: a live
  * teardown-and-rebuild of the whole building, mid-session, risks the render budget and the
  * static-merge zones far more than a reload the user already expects from the one other
- * full-scene switch this office has). A hash that already names this floor reloads in
- * place; otherwise it navigates to the new hash.
+ * full-scene switch this office has). Always reloads (review fix: the previous version only
+ * called `location.reload()` when the hash already named the target floor — the branch the
+ * select's own change handler never reaches, since it skips calling this at all when the
+ * floor does not change — so picking a different floor updated the address bar and
+ * `localStorage` but left the page's in-memory state on the old floor until a manual
+ * refresh). Setting the hash through `assign()` updates the URL and the browser's history
+ * before the reload, same as a normal navigation would; `location.hash = ...` is not used
+ * here since the injectable `FloorSwitchLocation` keeps the same two methods
+ * `reloadForLayoutSwitch` already relies on, not a settable property.
  */
 export function reloadForFloorSwitch(location: FloorSwitchLocation, floor: string): void {
   const nextHash = `#floor=${floor}`;
-  if (location.hash === nextHash) {
-    location.reload();
-    return;
+  if (location.hash !== nextHash) {
+    const url = new URL(location.href);
+    url.hash = nextHash;
+    location.assign(url.toString());
   }
-  const url = new URL(location.href);
-  url.hash = nextHash;
-  location.assign(url.toString());
+  location.reload();
 }

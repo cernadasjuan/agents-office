@@ -1,15 +1,16 @@
-import { knownFloors } from '../floors/FloorRegistry.js';
+import { ALL_FLOORS, knownFloors } from '../floors/FloorRegistry.js';
 
 export interface FloorSwitchOptions {
   onSelect(floor: string): void;
 }
 
 /**
- * The floor-switch menu (issue #118 AC3): a plain `<select>` in the panel header, listing
- * every floor with a tracked session right now, plus the focused floor itself (so a floor
- * with zero sessions right after a switch still shows as the chosen option), general always
- * last (`knownFloors`, `src/floors/FloorRegistry.ts`). All text through `textContent` (S5);
- * a floor name is already the whitelisted short token `server/seam.ts` projects, never raw.
+ * The floor-switch menu (issue #118 AC3): a plain `<select>` in the panel header. `ALL_FLOORS`
+ * ("All floors", review: the default, no-filter state) always lists first, then every floor
+ * with a tracked session right now, plus the focused floor itself (so a floor with zero
+ * sessions right after a switch still shows as the chosen option), general always last
+ * (`knownFloors`, `src/floors/FloorRegistry.ts`). All text through `textContent` (S5); a
+ * floor name is already the whitelisted short token `server/seam.ts` projects, never raw.
  *
  * A physical lobby control (an elevator panel, a directory sign) is Sally's own vote in the
  * floors design document, deferred by Gabriel for later refinement. This is the "support
@@ -33,10 +34,11 @@ export class FloorSwitch {
     this.render([]);
   }
 
-  /** Rebuilds the option list from every floor known right now (after each poll). */
+  /** Rebuilds the option list from every floor known right now (after each poll). `ALL_FLOORS` is never a real agent floor, so it is prepended here, not derived from `knownFloors`. */
   render(agents: ReadonlyArray<{ floor?: string }>): void {
     const doc = this.root.ownerDocument;
-    const floors = knownFloors([...agents, { floor: this.focused }]);
+    const known = knownFloors([...agents, { floor: this.focused }]).filter((floor) => floor !== ALL_FLOORS);
+    const floors = [ALL_FLOORS, ...known];
     this.select.textContent = '';
     for (const floor of floors) {
       const option = doc.createElement('option');

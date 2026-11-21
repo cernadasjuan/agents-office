@@ -80,13 +80,18 @@ test('an issue card keeps only a cleaned short repository token', () => {
   ]);
 });
 
-test('floor keeps only a cleaned short token, the same whitelist an issue card repo uses (issue #118)', () => {
+test('floor keeps a cleaned single-segment or org-qualified two-segment token, never a path with more than one slash (issue #118)', () => {
   const floorOf = (floor: unknown) => projectAgents([observation({ display: { floor: floor as string } })], publicId)[0].floor;
 
   assert.equal(floorOf('agents-office'), 'agents-office');
   assert.equal(floorOf('general'), 'general');
+  assert.equal(floorOf('gabriel-amyot/agents-office'), 'gabriel-amyot/agents-office');
+  assert.equal(floorOf('grp-beklever-com/project-management'), 'grp-beklever-com/project-management');
+  assert.equal(floorOf('a/b/c'), undefined, 'more than one slash is never kept, not even shortened to its tail');
   assert.equal(floorOf('<img src=x>'), undefined);
   assert.equal(floorOf('..'), undefined);
+  assert.equal(floorOf('a/..'), undefined);
+  assert.equal(floorOf('../a'), undefined);
   assert.equal(floorOf('x'.repeat(41)), undefined);
   assert.equal(floorOf(undefined), undefined);
 });

@@ -20,7 +20,7 @@ import { FreshnessFooter } from './ui/freshness.js';
 import { Legend } from './ui/Legend.js';
 import { handleTriageKey } from './ui/TriageKeys.js';
 import { FloorSwitch } from './ui/FloorSwitch.js';
-import { defaultFloor, migrateLegacyRooms, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
+import { ALL_FLOORS, defaultFloor, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
 import { focusedFloor, setFocusedFloor } from './floors/floorState.js';
 
 // Setup scene
@@ -39,18 +39,20 @@ const layoutId = chooseLayoutId(window.location.search, window.localStorage);
 rememberLayoutId(layoutId, window.localStorage);
 
 // Floors (issue #118): meaningful only for the building layout (the flat activity layout is
-// one shared office, P8, no floors). A one-time migration of today's single building, then
-// the floor to focus: `#floor=` in the URL, the last visited floor, else general — on this
-// fresh page load no agent has been polled yet, so the "busiest floor" tie-break in
-// `defaultFloor` never has data to act on here; the floor-switch menu surfaces it instead,
-// once the first poll answers.
-const focusFloor = layoutId === 'building' ? (() => {
-  migrateLegacyRooms(window.localStorage);
-  const floor = defaultFloor([], window.localStorage, window.location.hash);
+// one shared office, P8, no floors). The floor to focus: `#floor=` in the URL, the last
+// visited floor, else `ALL_FLOORS` (review: a fresh page load has not polled any agent yet,
+// so there is nothing to pick a "busiest floor" default from before the first poll answers;
+// showing everything, same as today, is the only safe default at that point — the
+// floor-switch menu lets the user narrow to one floor once agents are known).
+const chosenFloor = layoutId === 'building' ? (() => {
+  const floor = defaultFloor(window.localStorage, window.location.hash);
   setFocusedFloor(floor);
   rememberFloor(floor, window.localStorage);
   return floor;
 })() : undefined;
+// `ALL_FLOORS` means no filter: `AgentPoller`/`BuildingLayout` only know about an actual
+// floor name or "unset", never the sentinel itself, so it is normalized away right here.
+const focusFloor = chosenFloor !== undefined && chosenFloor !== ALL_FLOORS ? chosenFloor : undefined;
 window.addEventListener('keydown', (event) => {
   if (!isLayoutSwitchKey(event) || document.pointerLockElement) return;
   const next = confirmLayoutSwitch(layoutId, (question) => window.confirm(question));
@@ -113,8 +115,8 @@ setupPanelCollapse(document.getElementById('ui-panel')!, document.getElementById
 // for a layout switch): a live teardown-and-rebuild of the whole building risks the render
 // budget and the static-merge zones far more than a reload the user already expects.
 const floorSwitchContainer = document.getElementById('floor-switch-container');
-const floorSwitch = focusFloor !== undefined && floorSwitchContainer
-  ? new FloorSwitch(floorSwitchContainer, focusFloor, {
+const floorSwitch = chosenFloor !== undefined && floorSwitchContainer
+  ? new FloorSwitch(floorSwitchContainer, chosenFloor, {
     onSelect: (floor) => {
       rememberFloor(floor, window.localStorage);
       reloadForFloorSwitch(window.location, floor);
