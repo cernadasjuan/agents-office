@@ -164,31 +164,40 @@
       font: 15px/1.4 'Segoe UI', system-ui, sans-serif;
       letter-spacing: 0.02em;
     }
-    /* Issue #239: the library scene's own wall index and door-back-to-office button are real
-       DOM elements inside the CSS2D layer (`SceneSetup.ts` sets that whole layer's own
-       `pointer-events: none` so it never blocks the canvas drag/look everywhere else this app
-       uses it) — these two re-enable it on purpose, since clicking them is the entire point. */
-    .library-index, .library-back-door, .library-ask-librarian {
+    /* Issue #245 review: the room title, the wall index and the door back to the office used
+       to be three CSS2D objects stacked at the same world position — they overlapped at any
+       real viewing distance (a CSS2D label never shrinks with distance; the *gap* between two
+       labels does). A fixed on-screen panel, the same pattern `#ui-panel` already uses, has no
+       such distance at all, and gives the index a real, bounded, scrollable height — it scales
+       to the server's own 100-section cap without ever running off-screen. The librarian's own
+       "ask" button (issue #248) is a real DOM element too, inside the CSS2D layer
+       (`SceneSetup.ts` sets that whole layer's own `pointer-events: none`) — re-enabled here on
+       purpose, since clicking it is the entire point. */
+    #library-panel {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      background: rgba(20, 20, 40, 0.9);
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 12px;
+      padding: 16px;
+      color: #e0e0ff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      min-width: 240px;
+      max-width: 320px;
+      backdrop-filter: blur(8px);
+      z-index: 100;
+    }
+    .library-ask-librarian {
       pointer-events: auto;
     }
-    .library-plaque, .library-title {
-      background: rgba(90, 74, 58, 0.9);
-      color: #f5f0e8;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font: 600 13px system-ui, sans-serif;
-      white-space: nowrap;
-    }
-    .library-title { font-size: 20px; padding: 4px 12px; }
+    #library-panel h2 { font-size: 16px; color: #fff; margin-bottom: 8px; }
     .library-index {
-      background: rgba(247, 243, 234, 0.95);
-      color: #2a2a3e;
-      padding: 10px 14px;
-      border-radius: 8px;
-      font: 13px system-ui, sans-serif;
-      min-width: 220px;
+      max-height: 40vh;
+      overflow-y: auto;
+      margin-bottom: 10px;
     }
-    .library-index h3 { margin: 0 0 6px; font-size: 13px; }
     .library-index-line {
       display: block;
       width: 100%;
@@ -197,19 +206,36 @@
       border: none;
       border-radius: 4px;
       padding: 4px 6px;
-      color: #2a2a3e;
+      color: #e0e0ff;
       font: inherit;
       cursor: pointer;
     }
-    .library-index-line:hover { background: rgba(58, 111, 90, 0.18); }
+    .library-index-line:hover { background: rgba(120, 120, 255, 0.18); }
     .library-back-door, .library-ask-librarian {
       background: rgba(58, 111, 90, 0.9);
       color: #f5f0e8;
       border: none;
       border-radius: 6px;
-      padding: 6px 12px;
+      padding: 8px 12px;
       font: 600 13px system-ui, sans-serif;
       cursor: pointer;
+      white-space: nowrap;
+    }
+    /* `.library-back-door` lives inside `#library-panel`'s own flow (issue #245 review); fill
+       its width there. `.library-ask-librarian` is its own freestanding CSS2D object in the
+       3D world (issue #248, beside the NPC), never inside that panel — sized to its own text. */
+    .library-back-door {
+      display: block;
+      width: 100%;
+    }
+    /* A section room's own name tag (issue #245 review: the only CSS2D label left in this
+       scene — one per room, so it never shares a world position with anything else). */
+    .library-plaque {
+      background: rgba(90, 74, 58, 0.9);
+      color: #f5f0e8;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font: 600 13px system-ui, sans-serif;
       white-space: nowrap;
     }
     /* Issue #248: a brief highlight when the librarian NPC points back at the wall index,

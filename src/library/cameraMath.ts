@@ -35,8 +35,69 @@ export function forwardFromYawPitch(yaw: number, pitch: number): Vec3 {
   return { x: Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch) };
 }
 
-/** Ground movement ignores pitch (looking down does not tip you into the floor): `forward`
- * and `right` on the XZ plane only, for WASD. */
+/** A wall's 2D floor footprint (same shape `src/layout/LayoutStrategy.ts`'s own `WallRect` —
+ * duplicated rather than imported so this module stays THREE-and-office-free, the same
+ * reasoning `plugins/floor-library/client.ts`'s own `shelfPoint` duplicates `RoomFrame`). */
+export interface WallRect {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+/**
+ * Review (issue #245): the library scene's own ground-walk had no wall collision at all —
+ * holding a movement key walked the camera straight through a section room's own walls and
+ * off the map. The same stepped, axis-separated algorithm `src/scene/FreeCamera.ts` already
+ * uses for the office (never ported as a shared export, since that module's own version is
+ * tangled with its module-level pointer-lock state; this is the same algorithm, a fresh pure
+ * copy, not the same singleton): a wall's blocked zone is padded by `WALL_MARGIN` on both
+ * faces, and each axis advances in steps no bigger than that margin, so a slow frame's larger
+ * `delta` can never jump clean across a thin wall in one move (tunneling).
+ */
+const WALL_MARGIN = 0.3;
+
+function blockedAt(walls: WallRect[], x: number, z: number): boolean {
+  for (const wall of walls) {
+    if (x > wall.minX - WALL_MARGIN && x < wall.maxX + WALL_MARGIN && z > wall.minZ - WALL_MARGIN && z < wall.maxZ + WALL_MARGIN) return true;
+  }
+  return false;
+}
+
+function stepAxis(current: number, target: number, blocked: (value: number) => boolean): number {
+  let position = current;
+  while (position !== target) {
+    const remaining = target - position;
+    const step = Math.abs(remaining) <= WALL_MARGIN ? remaining : Math.sign(remaining) * WALL_MARGIN;
+    const next = position + step;
+    if (blocked(next)) return position;
+    position = next;
+  }
+  return position;
+}
+
+/** `dx`/`dz` applied to `(x, z)` with wall collision, each axis independently (sliding along a
+ * wall hit at an angle, instead of sticking) — `src/scene/FreeCamera.ts`'s own
+ * `moveWithCollision`, as a pure function over a plain position instead of a mutated
+ * `THREE.Vector3` and a module-level wall list. */
+export function moveWithCollision(x: number, z: number, dx: number, dz: number, walls: WallRect[]): { x: number; z: number } {
+  const nextX = dx !== 0 ? stepAxis(x, x + dx, (value) => blockedAt(walls, value, z)) : x;
+  const nextZ = dz !== 0 ? stepAxis(z, z + dz, (value) => blockedAt(walls, nextX, value)) : z;
+  return { x: nextX, z: nextZ };
+}
+
+/**
+ * Ground movement ignores pitch (looking down does not tip you into the floor): `forward`
+ * and `right` on the XZ plane only, for WASD.
+ *
+ * Review (issue #245): this used `(cos(yaw), -sin(yaw))` for `right` — the correct "turn the
+ * compass bearing 90° clockwise" vector in isolation, but not what actually reads as
+ * screen-right once `camera.lookAt` builds the camera's own orientation from this same
+ * `forward` (`bootLibrary.ts`'s `applyLook`). Verified directly (a `THREE.PerspectiveCamera`
+ * aimed with `forwardFromYawPitch`, then projecting a point offset along the old `right`
+ * landed at a *negative* screen X — screen-left, confirming the reviewer's D-moves-left bug).
+ * Negated here, the same vector now projects to positive screen X.
+ */
 export function groundAxes(yaw: number): { forward: Vec3; right: Vec3 } {
-  return { forward: { x: Math.sin(yaw), y: 0, z: Math.cos(yaw) }, right: { x: Math.cos(yaw), y: 0, z: -Math.sin(yaw) } };
+  return { forward: { x: Math.sin(yaw), y: 0, z: Math.cos(yaw) }, right: { x: -Math.cos(yaw), y: 0, z: Math.sin(yaw) } };
 }
