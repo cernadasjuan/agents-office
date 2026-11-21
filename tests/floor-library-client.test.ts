@@ -6,6 +6,11 @@ import type { World, WorldLibrary } from '../src/extensions.js';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
 Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true, writable: true });
+// Issue #248: client.ts now builds a StickFigure (the librarian NPC), which paints a toon
+// gradient onto a real 2D canvas context (`src/utils/Materials.ts`) at import time — jsdom
+// itself implements no canvas backend, the same stub every other figure-touching test file
+// already installs (`tests/library-plugin.test.ts`, for one).
+dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, { get: () => () => undefined, set: () => true })) as never;
 const { FloorLibraryOfficeExtension } = await import('../plugins/floor-library/client.js');
 const { ALL_FLOORS } = await import('../src/floors/FloorRegistry.js');
 const { setFocusedFloor } = await import('../src/floors/floorState.js');
@@ -142,6 +147,10 @@ test('pick targets (issue #221 AC2): one per plaque, one per shown entry line, o
     librarySectionId('pm-lib', 0), libraryEntryId('pm-lib', 0, 0),
     librarySectionId('pm-lib', 1), libraryEntryId('pm-lib', 1, 0),
     librarySectionId('pm-lib', 2), libraryEntryId('pm-lib', 2, 0), libraryIndexId('pm-lib'),
+    // The librarian NPC (issue #248): its own click target, always last, opening the same
+    // index card the "+N more" sign above already does — a second door to the same room,
+    // never a second source of truth.
+    libraryIndexId('pm-lib'),
   ], 'the 4th section is never reachable as a shelf, but its own id still surfaces through the index, never dropped');
   for (const target of extension.pickTargets()) assert.ok(target.object instanceof THREE.Object3D);
 });
@@ -244,4 +253,52 @@ test('issue #221 FAIL round: in "all floors" with two libraries, the "+N more" s
 
   const moreSignId = extension.pickTargets().find((target) => target.id.startsWith('lib-index:'))?.id;
   assert.equal(moreSignId, libraryIndexId('lib-a'), 'the overflow is library A\'s own 4th section, so the sign must open A\'s index, never B\'s — B never even got a slot to overflow from');
+});
+
+// --- Issue #248: the librarian NPC ---
+
+test('the librarian NPC mounts once a library room and a library both exist, clickable into that library\'s own index card', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
+
+  assert.deepEqual(extension.npcFigures().length, 1, 'one NPC figure, drawn through the shared figure batch');
+  const npcGroup = extension.npcFigures()[0]!;
+  assert.ok(npcGroup.parent === scene, 'the NPC\'s own figure root is actually in the scene (figure-batch sync requires this)');
+
+  const targets = extension.pickTargets();
+  const npcTarget = targets[targets.length - 1]!;
+  assert.equal(npcTarget.id, libraryIndexId('pm-lib'));
+  assert.notEqual(npcTarget.object, npcGroup, 'the NPC\'s own pick target is its own hit box, not the figure root the figure batch already manages');
+});
+
+test('the librarian NPC never mounts without the library room (graceful degradation), and unmounts if the library disappears', () => {
+  setFocusedFloor('pm-floor');
+  const scene = new THREE.Scene(); // no room-1-library
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
+  assert.deepEqual(extension.npcFigures(), []);
+
+  const withRoom = sceneWithLibraryRoom();
+  const extensionWithRoom = new FloorLibraryOfficeExtension();
+  extensionWithRoom.start(withRoom);
+  extensionWithRoom.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
+  assert.equal(extensionWithRoom.npcFigures().length, 1);
+  extensionWithRoom.worldChanged(world([])); // the library disappears
+  assert.deepEqual(extensionWithRoom.npcFigures(), [], 'the NPC leaves when there is no catalog left for him to show');
+});
+
+test('the librarian NPC is the same figure instance across an ordinary poll with no real changes (no churn)', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  const sections: WorldLibrary['sections'] = [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }];
+  extension.worldChanged(world([library('pm-floor', sections, 'pm-lib')]));
+  const first = extension.npcFigures()[0];
+  extension.worldChanged(world([library('pm-floor', sections, 'pm-lib')]));
+  assert.equal(extension.npcFigures()[0], first);
 });

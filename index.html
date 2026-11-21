@@ -168,7 +168,7 @@
        DOM elements inside the CSS2D layer (`SceneSetup.ts` sets that whole layer's own
        `pointer-events: none` so it never blocks the canvas drag/look everywhere else this app
        uses it) — these two re-enable it on purpose, since clicking them is the entire point. */
-    .library-index, .library-back-door {
+    .library-index, .library-back-door, .library-ask-librarian {
       pointer-events: auto;
     }
     .library-plaque, .library-title {
@@ -202,7 +202,7 @@
       cursor: pointer;
     }
     .library-index-line:hover { background: rgba(58, 111, 90, 0.18); }
-    .library-back-door {
+    .library-back-door, .library-ask-librarian {
       background: rgba(58, 111, 90, 0.9);
       color: #f5f0e8;
       border: none;
@@ -211,6 +211,12 @@
       font: 600 13px system-ui, sans-serif;
       cursor: pointer;
       white-space: nowrap;
+    }
+    /* Issue #248: a brief highlight when the librarian NPC points back at the wall index,
+       instead of opening a second copy of the same catalog in its own card. */
+    .library-index-highlight {
+      box-shadow: 0 0 0 3px rgba(58, 111, 90, 0.85);
+      transition: box-shadow 0.2s ease-out;
     }
     #legend {
       position: fixed;

@@ -8,6 +8,8 @@ import { isDebugMode } from '../scene/RenderScheduler.js';
 import { getToonMaterial } from '../utils/Materials.js';
 import { buildCeiling, buildWalls, doorFrame, RoomFrame, WALL_HEIGHT } from '../addons/building/rooms.js';
 import { HALL, ROOM_SIZE, type RoomSlot } from '../addons/building/RoomPlanner.js';
+import { createDesk } from '../furniture/Desk.js';
+import { StickFigure } from '../characters/StickFigure.js';
 import { sectionRoomLayouts, shelfPlacement, type SectionRoomLayout } from './libraryLayout.js';
 import { clampPitch, forwardFromYawPitch, groundAxes, yawPitchFromLookAt, type Vec3 } from './cameraMath.js';
 import { officeReturnUrl, type SceneNavLocation } from './sceneNav.js';
@@ -193,6 +195,107 @@ function buildEntrance(scene: THREE.Scene, sections: SectionRoomLayout[]): { ind
   return { indexElement };
 }
 
+/**
+ * The librarian's own corner (issue #248, Gabriel's own words: "he's gonna have his desk...
+ * if a session starts a sub agent that is a librarian he's gonna pop up and go there"). A
+ * desk near the entrance (not inside any section room — this is the librarian's own spot, not
+ * a shelf), the NPC standing beside it ("doesn't do much... you can interact with him"), and a
+ * name tag above him — a plain DOM click target, the same pattern every other clickable thing
+ * in this scene already uses (no 3D raycasting added just for one NPC).
+ */
+// Review: a corner near the HALL's own side wall sat well outside the entrance's own forward
+// view (spawn looks straight down -Z from z = HALL.maxZ - 2) — the same mistake the back door
+// made before it moved onto the index's own forward column. A few units to the right of that
+// column, not behind the camera and not off to the side, keeps the whole corner in view on
+// arrival without a single extra click.
+const CORNER_X = 3;
+const CORNER_Z = 8;
+const NPC_COLOR = 0x5a4a3a;
+const LIBRARIAN_AGENT_COLOR = 0x4a6a8e;
+/** Real librarian-persona agents (issue #248) stand in a row beside the desk, one slot each,
+ * spaced wide enough that two stick figures never overlap. */
+const LIBRARIAN_SLOT_GAP = 0.8;
+const MAX_LIBRARIAN_FIGURES = 6;
+
+function buildLibrarianCorner(scene: THREE.Scene, onAskLibrarian: () => void): void {
+  const desk = createDesk(false);
+  desk.position.set(CORNER_X, 0, CORNER_Z);
+  desk.rotation.y = Math.PI; // face the hall's own center, the same way every desk faces its room
+  markStatic(desk, { zone: 'library-rooms', castShadow: false });
+  scene.add(desk);
+
+  const npc = new StickFigure('Prospero', new THREE.Color(NPC_COLOR));
+  const npcPosition = new THREE.Vector3(CORNER_X - 1, 0, CORNER_Z);
+  npc.teleportTo(npcPosition, new THREE.Vector3(0, 0, 0));
+  scene.add(npc.group);
+
+  const askButton = document.createElement('button');
+  askButton.type = 'button';
+  askButton.className = 'library-ask-librarian';
+  askButton.textContent = 'Prospero, the librarian — see the catalog';
+  const askObject = new CSS2DObject(askButton);
+  askObject.position.set(npcPosition.x, 2.1, npcPosition.z);
+  scene.add(askObject);
+  askButton.addEventListener('click', onAskLibrarian);
+}
+
+/** The one field this scene reads off `/api/agents` (issue #248): the same badge-based
+ * signal `plugins/library/index.ts`'s own enricher now sets for any librarian-persona agent,
+ * real session or subagent alike, never a name match. */
+interface AgentRoleInfo {
+  id: string;
+  name: string;
+  role?: string;
+}
+
+/** Keeps one `StickFigure` per currently-live librarian-persona agent, standing in a row
+ * beside the desk (issue #248: "he's gonna pop up and go there"). Capped at
+ * `MAX_LIBRARIAN_FIGURES` — a physical row this short has no more room anyway, and the office
+ * scene's own library room (issue #128) already shows the rest. Never a dead loop without a
+ * document: on fetch failure, the existing figures simply stay as they were until the next
+ * successful poll, the same graceful-degradation rule the shelves themselves follow.
+ */
+class LibrarianDesk {
+  private figures = new Map<string, StickFigure>();
+
+  constructor(private readonly scene: THREE.Scene) {}
+
+  get count(): number {
+    return this.figures.size;
+  }
+
+  async poll(): Promise<void> {
+    let agents: AgentRoleInfo[];
+    try {
+      const response = await fetch('/api/agents', { signal: AbortSignal.timeout(5000) });
+      if (!response.ok) return;
+      agents = (await response.json()) as AgentRoleInfo[];
+    } catch {
+      return;
+    }
+    const librarians = agents.filter((agent) => agent.role === 'librarian').slice(0, MAX_LIBRARIAN_FIGURES);
+    const seen = new Set(librarians.map((agent) => agent.id));
+    for (const [id, figure] of this.figures) {
+      if (!seen.has(id)) {
+        figure.group.removeFromParent();
+        this.figures.delete(id);
+      }
+    }
+    librarians.forEach((agent, index) => {
+      if (this.figures.has(agent.id)) return;
+      // Its own name (issue #248 review: a figure named after its own public id read as an
+      // opaque hash on the floating label, not as a real session) and a color distinct from
+      // the NPC's own, so the real agent and Prospero himself are never visually the same
+      // figure twice over.
+      const figure = new StickFigure(agent.name, new THREE.Color(LIBRARIAN_AGENT_COLOR));
+      const position = new THREE.Vector3(CORNER_X + 1 + index * LIBRARIAN_SLOT_GAP, 0, CORNER_Z);
+      figure.teleportTo(position, new THREE.Vector3(CORNER_X, 0, CORNER_Z - 2));
+      this.scene.add(figure.group);
+      this.figures.set(agent.id, figure);
+    });
+  }
+}
+
 function buildSectionRoom(scene: THREE.Scene, section: SectionRoomLayout, entries: WorldLibraryEntry[], shelfPositions: THREE.Vector3[], shelfColors: THREE.Color[]): Standing {
   const { slot } = section;
   const group = new THREE.Group();
@@ -287,6 +390,18 @@ export async function bootLibraryScene(): Promise<void> {
     if (standing) rig.teleport(standing);
   });
 
+  // The librarian (issue #248): "doesn't do much... maybe he shows you the catalog" — a click
+  // teleports back to the entrance (where the wall index always lives) and gives it a brief
+  // highlight, rather than opening a second copy of the same list in a new kind of card.
+  buildLibrarianCorner(scene, () => {
+    rig.teleport(entranceStanding);
+    indexElement.classList.add('library-index-highlight');
+    window.setTimeout(() => indexElement.classList.remove('library-index-highlight'), 1200);
+  });
+  const librarianDesk = new LibrarianDesk(scene);
+  void librarianDesk.poll();
+  window.setInterval(() => void librarianDesk.poll(), 5000);
+
   new StaticBatch(scene).update();
 
   let lastTime = performance.now();
@@ -308,6 +423,7 @@ export async function bootLibraryScene(): Promise<void> {
         drawCalls: () => countDrawCalls(scene, camera),
         sections: sections.length,
         shelves: shelfPositions.length,
+        librarianFigures: () => librarianDesk.count,
       },
     });
   }

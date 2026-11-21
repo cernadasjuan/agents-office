@@ -24,6 +24,15 @@ test('subagents of a librarian type get the librarian role, and only subagents',
   assert.deepEqual(list.map((o) => o.display.role), ['librarian', undefined, undefined]);
 });
 
+test('issue #248 review: a top-level session carrying the librarian persona badge gets the role too, not only a subagent of a configured agent type', async () => {
+  const topLevel: Observation = { ...observation('main-session'), display: { badges: ['librarian'] } };
+  const subagentNoType: Observation = { ...observation('sub', undefined, 'main-session'), display: { badges: ['librarian'] } };
+  const notLibrarian: Observation = { ...observation('other'), display: { badges: ['architect'] } };
+  const list = [topLevel, subagentNoType, notLibrarian];
+  await libraryPlugin(parseLibrarianTypes(undefined)).enrichers![0].enrich(list);
+  assert.deepEqual(list.map((o) => o.display.role), ['librarian', 'librarian', undefined]);
+});
+
 test('the librarian types are configurable and validated', () => {
   assert.deepEqual(parseLibrarianTypes('Explore, bad type!,bibliotheque-librarian'), ['Explore', 'bibliotheque-librarian']);
   assert.deepEqual(parseLibrarianTypes(''), ['bibliotheque-librarian']);

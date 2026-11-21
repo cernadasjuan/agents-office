@@ -333,7 +333,14 @@ const frameLoop = new FrameLoop({
     })));
     for (const extension of activeExtensions(scene)) extension.update?.(elapsed, delta);
   },
-  figures: () => agentManager.getAgents().map((managed) => managed.figure.group),
+  // Issue #248: the library's own NPC (and any other extension's) decorative figures draw
+  // through the exact same instanced batch real agents do, at the same near-zero marginal
+  // draw-call cost — never their own unbatched meshes, which the office's own tight budget
+  // (430, no headroom to spare) could not otherwise absorb.
+  figures: () => [
+    ...agentManager.getAgents().map((managed) => managed.figure.group),
+    ...activeExtensions(scene).flatMap((extension) => extension.npcFigures?.() ?? []),
+  ],
   mode: () => view.mode,
   animating: () => selectedAgentId() !== null,
   events: window,

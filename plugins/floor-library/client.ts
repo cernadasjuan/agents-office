@@ -6,6 +6,7 @@ import { focusedFloor } from '../../src/floors/floorState.js';
 import { ROOM_SIZE, slotFor, type Door, type Rect, type Side } from '../../src/addons/building/RoomPlanner.js';
 import type { PickTarget } from '../../src/scene/Selection.js';
 import { libraryEntryId, libraryIndexId, librarySectionId } from '../../src/ui/LibraryCard.js';
+import { StickFigure } from '../../src/characters/StickFigure.js';
 
 /**
  * Library shelves (issue #191 AC1, #119; issue #221 AC1/AC2/AC4): a self-contained extension
@@ -191,6 +192,20 @@ function matchedSections(libraries: WorldLibrary[], floor: string): MatchedSecti
 const ENTRY_HIT_GEOMETRY = new THREE.BoxGeometry(1.0, 0.22, 0.2);
 const SECTION_HIT_GEOMETRY = new THREE.BoxGeometry(1.2, 0.32, 0.2);
 const HIT_MATERIAL = new THREE.MeshBasicMaterial({ visible: false });
+/** A standing figure's own hit box: tall and narrow, not the shelf signs' wide-and-flat shape. */
+const NPC_HIT_GEOMETRY = new THREE.BoxGeometry(0.7, 1.7, 0.5);
+
+/**
+ * The librarian NPC (issue #248, Gabriel's own words: "doesn't do much... you can interact
+ * with him, maybe he shows you the catalog"). Near the door, clear of the shelf signs
+ * (`a` in `[-1.3, 0, 1.3]`, `d = SIGN_DEPTH`) and the room's own furnishing (`furnishing.ts`'s
+ * `furnishLibrary`, off-center at `a = +/-2.2` and `+/-3.9`): `a = 4.8` sits just past that
+ * outer shelf column, close to the door (`d = 2`) so Gabriel sees him on the way in, not
+ * tucked against the far wall with the shelves themselves.
+ */
+const NPC_A = 4.8;
+const NPC_D = 2;
+const NPC_COLOR = 0x5a4a3a;
 
 export class FloorLibraryOfficeExtension implements OfficeExtension {
   readonly id = 'floor-library-shelves';
@@ -200,13 +215,22 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
   private picks: PickTarget[] = [];
   private signature = '';
   private slot: { rect: Rect; door: Door } | null = null;
+  private npc: StickFigure | null = null;
+  private npcHit: THREE.Mesh | null = null;
+  private npcLibraryId: string | null = null;
 
   start(scene: THREE.Scene): void {
     this.scene = scene;
   }
 
   pickTargets(): PickTarget[] {
-    return this.picks;
+    return this.npcHit ? [...this.picks, { id: libraryIndexId(this.npcLibraryId!), object: this.npcHit }] : this.picks;
+  }
+
+  /** Issue #248: the librarian NPC draws through the shared figure batch, same as a real
+   * agent, at the same near-zero marginal draw-call cost. */
+  npcFigures(): THREE.Object3D[] {
+    return this.npc ? [this.npc.group] : [];
   }
 
   worldChanged(world: World): void {
@@ -215,6 +239,7 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     const matched = matchedSections(world.libraries ?? [], floor);
     const roomIndex = findLibraryRoomIndex(this.scene);
     this.slot = roomIndex === undefined ? null : slotFor(roomIndex);
+    this.syncNpc(matched[0]?.libraryId);
     const sections = this.slot ? matched.slice(0, MAX_SECTIONS_SHOWN) : [];
     // Review (issue #221 FAIL round): with more than one library visible at once (`ALL_FLOORS`
     // combining them), the hidden-sections count used to be the *global* overflow across every
@@ -310,6 +335,43 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     for (const object of this.mounted) object.removeFromParent();
     this.mounted = [];
     this.picks = [];
+  }
+
+  /**
+   * The librarian NPC itself (issue #248): mounted once a library room and at least one
+   * library's own catalog exist, torn down the moment either goes away (another layout, the
+   * room not grown yet, or no library configured at all — the same graceful-degradation rule
+   * every other part of this extension already follows). Never rebuilt on every section
+   * remount: `worldChanged` calls this every poll regardless of the shelf `signature` gate, so
+   * the figure stays the same `StickFigure` instance (and so the same figure-batch identity)
+   * across ordinary polls, only actually changing hands when the room or the library itself
+   * appears or disappears.
+   */
+  private syncNpc(libraryId: string | undefined): void {
+    const shouldExist = this.slot !== null && libraryId !== undefined;
+    if (!shouldExist) {
+      if (this.npc) {
+        this.npc.group.removeFromParent();
+        this.npcHit?.removeFromParent();
+        this.npc = null;
+        this.npcHit = null;
+        this.npcLibraryId = null;
+      }
+      return;
+    }
+    this.npcLibraryId = libraryId;
+    if (this.npc) return; // already mounted; its position never needs to move once placed
+    const { rect, door } = this.slot!;
+    const position = shelfPoint(rect, door, NPC_A, NPC_D, 0);
+    const lookAt = shelfPoint(rect, door, NPC_A, NPC_D + 4, 0);
+    const npc = new StickFigure('Prospero', new THREE.Color(NPC_COLOR));
+    npc.teleportTo(new THREE.Vector3(...position), new THREE.Vector3(...lookAt));
+    this.scene!.add(npc.group);
+    this.npc = npc;
+    const hit = new THREE.Mesh(NPC_HIT_GEOMETRY, HIT_MATERIAL);
+    hit.position.set(position[0], position[1] + 0.85, position[2]);
+    this.scene!.add(hit);
+    this.npcHit = hit;
   }
 }
 
