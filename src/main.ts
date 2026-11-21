@@ -39,8 +39,12 @@ const { scene, camera, renderer, labelRenderer } = createScene();
 
 // Issue #239: a brief "welcome back" overlay, shown only right after the library's own back
 // door navigated here (`consumeReturningFromLibrary` clears the flag so an ordinary reload
-// never replays it) — never added to every ordinary office load.
-if (consumeReturningFromLibrary()) {
+// never replays it) — never added to every ordinary office load. Issue #245 round 3 review:
+// the same flag also tells `ViewController` the camera is starting out already standing
+// inside the library room (`#room=library`, this door's own landing hash) rather than having
+// just walked into it, so it never bounces straight back in on arrival.
+const returningFromLibrary = consumeReturningFromLibrary();
+if (returningFromLibrary) {
   const overlay = showTransition('Welcome back.');
   window.setTimeout(() => removeTransition(overlay), 420);
 }
@@ -144,6 +148,7 @@ const view = new ViewController({
       });
     };
   })(),
+  startedInLibraryRoom: returningFromLibrary,
 });
 
 // --- Triage list (side panel) ---

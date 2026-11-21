@@ -101,3 +101,15 @@ export function moveWithCollision(x: number, z: number, dx: number, dz: number, 
 export function groundAxes(yaw: number): { forward: Vec3; right: Vec3 } {
   return { forward: { x: Math.sin(yaw), y: 0, z: Math.cos(yaw) }, right: { x: -Math.cos(yaw), y: 0, z: Math.sin(yaw) } };
 }
+
+/**
+ * Review (issue #245 round 3): shelves had no collision footprint at all — walking through a
+ * section room passed straight through them. `buildShelfMesh` only ever translates each shelf
+ * instance, never rotates one, so every shelf's own floor footprint is axis-aligned the same
+ * way regardless of which side of its room the door is on. `halfWidth`/`halfDepth` are the
+ * shelf geometry's own half extents (`SHELF_GEOMETRY`'s x/z, halved), passed in rather than
+ * hard-coded here so this stays free of any one caller's own box size.
+ */
+export function shelfFootprint(center: Vec3, halfWidth: number, halfDepth: number): WallRect {
+  return { minX: center.x - halfWidth, maxX: center.x + halfWidth, minZ: center.z - halfDepth, maxZ: center.z + halfDepth };
+}

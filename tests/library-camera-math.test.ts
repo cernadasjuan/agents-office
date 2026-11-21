@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
-import { clampPitch, forwardFromYawPitch, groundAxes, moveWithCollision, yawPitchFromLookAt } from '../src/library/cameraMath.js';
+import { clampPitch, forwardFromYawPitch, groundAxes, moveWithCollision, shelfFootprint, yawPitchFromLookAt } from '../src/library/cameraMath.js';
 
 function close(a: number, b: number, eps = 1e-9): void {
   assert.ok(Math.abs(a - b) < eps, `${a} !~ ${b}`);
@@ -92,4 +92,20 @@ test('moveWithCollision never moves an axis when its own delta is already zero (
   const { x, z } = moveWithCollision(0, 0, 0, 0, [wall]);
   close(x, 0);
   close(z, 0);
+});
+
+// --- Issue #245 round 3 review: shelves had no collision footprint at all ---
+
+test('shelfFootprint is a small axis-aligned box centered on the shelf, regardless of which way the room faces', () => {
+  const rect = shelfFootprint({ x: 10, y: 0.55, z: -4 }, 0.3, 0.13);
+  close(rect.minX, 9.7);
+  close(rect.maxX, 10.3);
+  close(rect.minZ, -4.13);
+  close(rect.maxZ, -3.87);
+});
+
+test('a shelf footprint actually blocks movement straight through where the shelf stands', () => {
+  const shelf = shelfFootprint({ x: 2, y: 0.55, z: 0 }, 0.3, 0.13);
+  const { x } = moveWithCollision(0, 0, 5, 0, [shelf]); // walking straight at the shelf
+  assert.ok(x < 2, `stopped short of the shelf instead of walking through it, got x=${x}`);
 });
