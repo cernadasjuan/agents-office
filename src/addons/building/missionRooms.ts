@@ -141,13 +141,20 @@ export function canvasBoard(width: number, height: number): { mesh: THREE.Mesh; 
  * (`Selection.ts`'s `pickAgent`), so a clickable board sharing an object with others here would
  * make a click anywhere on any of them wrongly resolve to the clickable one too. `buildMissionRoom`
  * keeps the issues board on its own plain `canvasBoard` for exactly this reason.
+ *
+ * Review fix: each spec gets `canvasBoard`'s own pixel sizing (a fixed 512 px width, height
+ * scaled to the spec's own aspect ratio), not one `PX_PER_UNIT` shared across every spec. A
+ * single shared density (the first version of this function) packs a narrower board (docs,
+ * 2.4 wide) into fewer pixels than its old dedicated canvas gave it — `drawBoardContent`'s line
+ * capacity is `Math.floor((h - 70) / 28)`, so the docs board silently dropped from 9 lines to 5,
+ * truncating any mission with 6-9 documents, not just drawing them smaller. Keeping each spec's
+ * own 512-px-wide density preserves its exact old line capacity and text size.
  */
-function combinedBoard(specs: ReadonlyArray<{ width: number; height: number; position: THREE.Vector3; rotationY: number }>): {
+export function combinedBoard(specs: ReadonlyArray<{ width: number; height: number; position: THREE.Vector3; rotationY: number }>): {
   mesh: THREE.Mesh;
   draw: (index: number, title: string, lines: string[]) => void;
 } {
-  const PX_PER_UNIT = 140;
-  const pixelSizes = specs.map((spec) => ({ w: Math.round(spec.width * PX_PER_UNIT), h: Math.round(spec.height * PX_PER_UNIT) }));
+  const pixelSizes = specs.map((spec) => ({ w: 512, h: Math.round(512 * (spec.height / spec.width)) }));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(...pixelSizes.map((size) => size.w));
   canvas.height = pixelSizes.reduce((sum, size) => sum + size.h, 0);

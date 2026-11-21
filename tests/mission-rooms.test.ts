@@ -10,7 +10,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   get: () => () => undefined,
   set: () => true,
 })) as never;
-const { buildMissionRoom, MAX_TOMBSTONES } = await import('../src/addons/building/missionRooms.js');
+const { buildMissionRoom, MAX_TOMBSTONES, canvasBoard, combinedBoard } = await import('../src/addons/building/missionRooms.js');
 const { MAX_DESK_SLOTS } = await import('../src/addons/building/warRoomFurnishing.js');
 const { tombstoneNameBatchFor } = await import('../src/addons/building/tombstoneNames.js');
 
@@ -365,4 +365,39 @@ test('issue #123 review round 2: the kanban board sits flush against a side wall
     const distanceToNearestWall = Math.min(Math.abs(position.z - rect.minZ), Math.abs(position.z - rect.maxZ));
     assert.ok(distanceToNearestWall < 0.2, `room ${index}: kanban board at z=${position.z} is ${distanceToNearestWall.toFixed(2)}m from the nearest side wall (rect ${JSON.stringify(rect)})`);
   }
+});
+
+// --- combinedBoard preserves each spec's own resolution (review, #244 round 2) ---
+
+test('combinedBoard gives each spec canvasBoard\'s own pixel sizing, not one shared density — a narrower board (docs) keeps its old line capacity', () => {
+  // Same specs buildMissionRoom passes: statement (3.6x1.6), docs (2.4x1.6), kanban (3.6x1.8).
+  const specs = [
+    { width: 3.6, height: 1.6, position: new THREE.Vector3(0, 1.7, 0), rotationY: 0 },
+    { width: 2.4, height: 1.6, position: new THREE.Vector3(0, 1.7, 0), rotationY: 0 },
+    { width: 3.6, height: 1.8, position: new THREE.Vector3(0, 1.7, 0), rotationY: 0 },
+  ];
+  const combined = combinedBoard(specs);
+  const atlas = (combined.mesh.material as THREE.MeshBasicMaterial).map!.image as HTMLCanvasElement;
+  // Each spec's own canvasBoard would be 512 wide, height round(512 * h/w): 228, 341, 256 — a
+  // shared PX_PER_UNIT (the first version of this fix) instead packed every spec by physical
+  // width, giving the narrower docs board only 224 px (floor((224-70)/28) = 5 lines instead of
+  // its old 9: a silent truncation, not just a size change). A uniform-density regression
+  // would shrink this sum; this asserts the full, undiminished total.
+  const expectedHeight = [
+    Math.round(512 * (1.6 / 3.6)),
+    Math.round(512 * (1.6 / 2.4)),
+    Math.round(512 * (1.8 / 3.6)),
+  ].reduce((sum, h) => sum + h, 0);
+  assert.equal(atlas.width, 512, 'every spec keeps canvasBoard\'s own fixed 512px width');
+  assert.equal(atlas.height, expectedHeight, `expected the atlas to stack each spec's own canvasBoard height (${expectedHeight}), got ${atlas.height} — a shared density would shrink this`);
+
+  // The docs board (index 1) on its own, standalone canvasBoard, for a direct before/after.
+  const standaloneDocs = canvasBoard(2.4, 1.6);
+  const docsCanvas = (standaloneDocs.mesh.material as THREE.MeshBasicMaterial).map!.image as HTMLCanvasElement;
+  const docsLineCapacity = Math.floor((docsCanvas.height - 70) / 28);
+  assert.equal(docsLineCapacity, 9, 'sanity check: the standalone docs board fits 9 lines');
+  // The merged atlas gives region 1 (docs) the same height as its standalone board would.
+  const docsRegionHeight = Math.round(512 * (1.6 / 2.4));
+  const mergedDocsLineCapacity = Math.floor((docsRegionHeight - 70) / 28);
+  assert.equal(mergedDocsLineCapacity, docsLineCapacity, 'the merged docs region must keep the same line capacity as its old standalone board, not truncate to 5');
 });
