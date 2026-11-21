@@ -83,6 +83,15 @@ export interface LayoutStrategy {
    * other optional method here.
    */
   wallColliders?(): WallRect[];
+  /**
+   * The walking height at a ground position (issue #218 step 3): a room floor, a walkway
+   * deck, a stair's ramp, or `null` off any surface. Without it (a layout that implements no
+   * `surfaceHeightAt`), `FreeCamera` keeps the old flat floor at `y = 0` — the same graceful
+   * degradation every other optional method here follows. `null` is a safety fallback for a
+   * position walls should already keep the camera out of, not a normal case: `FreeCamera`
+   * holds its last known height there rather than snapping to 0.
+   */
+  surfaceHeightAt?(x: number, z: number): number | null;
 }
 
 /** A wall's 2D floor footprint, world space (issue #194). The same shape `FreeCamera`'s own `WallRect` and `BuildingLayout`'s `wallRects` use; kept here too so a layout can implement `wallColliders` without importing an addon module. */

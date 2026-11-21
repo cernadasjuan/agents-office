@@ -28,6 +28,7 @@ import { createStool } from '../../furniture/Stool.js';
 import type { PickTarget } from '../../scene/Selection.js';
 import { FIGURE_EYE_HEIGHT } from '../../characters/StickFigureParts.js';
 import { createMissionsBoard, placeMissionsBoard, type MissionBoardEntry } from './missionsBoard.js';
+import { buildHexOffice } from './HexRooms.js';
 
 /**
  * Work that happens at the agent's own desk. Everything else is a trip. Planning,
@@ -179,8 +180,12 @@ export class BuildingLayout implements LayoutStrategy {
   private lastMissionsBoardRefresh = -Infinity;
   private missionBoardEntries: MissionBoardEntry[] = [];
   private missionsBoard = createMissionsBoard();
+  /** Issue #218 steps 2/3: the hex Hub and Office, built side by side with the rect rooms
+   * above, which keep working unconverted until a later step migrates them. */
+  private hexOffice = buildHexOffice();
 
   constructor(private scene: THREE.Scene, private stations: Map<string, Station>, options: BuildingOptions = {}) {
+    this.scene.add(this.hexOffice.group);
     this.now = options.now ?? (() => performance.now());
     this.wallClock = options.wallClock ?? (() => Date.now());
     this.dwellMs = options.dwellMs ?? DEFAULT_DWELL_MS;
@@ -381,7 +386,18 @@ export class BuildingLayout implements LayoutStrategy {
     if (this.missionRooms.size > 0) {
       colliders.push(...wallRects(missionCorridorRect(this.missionRooms.size), this.missionCorridorDoors()));
     }
+    colliders.push(...this.hexOffice.wallColliders);
     return colliders;
+  }
+
+  /**
+   * Issue #218 step 3: the walking height at a ground position. The rect building's own
+   * floor is always flat (`0`); the hex Hub/Office/walkway/stair (`hexOffice`) is the one
+   * part of the building that is not, so it gets first say — `null` there falls through to
+   * the rect building's flat floor rather than `FreeCamera`'s own last-known-height fallback.
+   */
+  surfaceHeightAt(x: number, z: number): number {
+    return this.hexOffice.surfaceHeightAt(x, z) ?? 0;
   }
 
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {

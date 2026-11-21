@@ -180,7 +180,15 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // add to the margin left by the last one. 3 points of headroom remain against the 430 cap
   // — the next addition should still trim an existing item kind before asking for more
   // budget (Gabriel: raise the cap only after measuring his own laptop).
-  assert.ok(after.total <= 427, `worst case ${after.total} exceeds the pinned baseline (424) + 3`);
+  //
+  // Issue #218 steps 2/3: the hex Hub and Office (always built, not opt-in, side by side with
+  // this fixture's own rect rooms) add 5 more merged draw calls — hex walls (1 material),
+  // hex floors (2, a deliberate Hub/Office two-tone), the walkway deck plus both stair ramps
+  // (1 material), and the Hub's placeholder elevator/kitchen/play corner (1 material). None
+  // of the new geometry casts a shadow, so this is a main-pass-only cost. New pin: 429, only
+  // 1 point of headroom left against the 430 cap — the next PR in this plan (step 4, the
+  // Library) cannot add anything without trimming first; flagged back to the team.
+  assert.ok(after.total <= 429, `worst case ${after.total} exceeds the pinned baseline (429, issue #218 steps 2/3)`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -212,7 +220,10 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // across all 8 runs — the fixture's own seeded names (`tests/real-size-office.ts`) never
   // change which hair style, face state or equipped item an agent lands on between runs, and
   // the tool crib is one fixed static piece.
-  assert.deepEqual([...totals], [424], `expected every one of 8 runs to measure 424, got ${[...totals]}`);
+  // 424 became 429 with issue #218 steps 2/3: the hex Hub and Office build unconditionally
+  // (not behind a flag), so this fixture's own scene carries them too — see the baseline
+  // comment in the test above for the +5 breakdown.
+  assert.deepEqual([...totals], [429], `expected every one of 8 runs to measure 429, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

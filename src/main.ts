@@ -91,6 +91,7 @@ const view = new ViewController({
   deskView: () => layout.deskView?.() ?? null,
   roomAt: (x, z) => layout.roomAt?.(x, z) ?? null,
   wallColliders: () => layout.wallColliders?.() ?? [],
+  surfaceHeightAt: (x, z) => layout.surfaceHeightAt?.(x, z) ?? null,
   keys: window,
   hint: document.getElementById('pointer-hint'),
   crosshair: document.getElementById('crosshair-dot'),

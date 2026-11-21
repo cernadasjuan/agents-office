@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
-import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, setWallColliders, updateFreeCamera } from './FreeCamera.js';
+import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, setSurfaceHeightProvider, setWallColliders, updateFreeCamera } from './FreeCamera.js';
 import { DIRECT_FOLLOW_RATES, FLIGHT_FOLLOW_RATES, IsometricController, applyIsometricState, followIsometric, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricFollowRates, type IsometricState } from './IsometricCamera.js';
 import { PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
 import type { RoomView, WallRect } from '../layout/LayoutStrategy.js';
@@ -66,6 +66,8 @@ export interface ViewControllerOptions {
   idleTimeoutSeconds?: number;
   /** Issue #194: every wall in the active layout, as a flat 2D collision list, so first-person ground-walk stops at a wall instead of walking through it. Without it, walls stay unobstructed — the old behavior. */
   wallColliders?: () => WallRect[];
+  /** Issue #218 step 3: the walking height at a ground position, from the active layout. Without it, first person keeps the old flat floor at `y = 0`. */
+  surfaceHeightAt?: (x: number, z: number) => number | null;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -353,6 +355,7 @@ export class ViewController {
       // miss any wall added after it. Cheap: a flat array the layout already keeps, not a
       // scene walk.
       setWallColliders(this.options.wallColliders?.() ?? []);
+      setSurfaceHeightProvider(this.options.surfaceHeightAt ?? null);
       updateFreeCamera(camera, delta);
     }
 
