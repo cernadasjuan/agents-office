@@ -43,7 +43,10 @@ test('a mission record becomes room walls: statement, docs, issues, kanban and p
   assert.equal(mission.state, 'open');
   assert.equal(mission.statement, 'Every slice merged.');
   assert.deepEqual(mission.docs, ['Design explainer']);
-  assert.deepEqual(mission.issues, [{ number: 46, title: 'Roadmap parent', state: 'open' }, { number: 11, title: 'Fixes', state: 'closed' }]);
+  assert.deepEqual(mission.issues, [
+    { repo: 'owner/repo', number: 46, title: 'Roadmap parent', state: 'open' },
+    { repo: 'owner/repo', number: 11, title: 'Fixes', state: 'closed' },
+  ]);
   assert.deepEqual(mission.kanban.map((c) => [c.column, c.cards.map((card) => card.number)]), [['Needs you', [2]], ['Open', [1]], ['Done', [3]]]);
   assert.deepEqual(mission.sleepers, [{ id: 'J-1', endedAt: '2026-11-18T19:40:00Z' }, { id: 'J-2' }]);
 });
@@ -51,6 +54,33 @@ test('a mission record becomes room walls: statement, docs, issues, kanban and p
 test('a session entry with no id does not become a tombstone', () => {
   const mission = summarizeMission('no-id', { title: 'No id', status: 'active', journey: [{ kind: 'session' }, { id: 'J-1', kind: 'session' }] });
   assert.deepEqual(mission?.sleepers, [{ id: 'J-1' }]);
+});
+
+// --- Issue #146: link each war-room issue to its real GitHub issue ---
+
+test('AC: "owner/repo#46" keeps the repo and the number', () => {
+  const mission = summarizeMission('x', { members: [{ kind: 'gh', ref: 'gabriel-amyot/agents-office#46', title: 'Roadmap' }] });
+  assert.deepEqual(mission?.issues, [{ repo: 'gabriel-amyot/agents-office', number: 46, title: 'Roadmap', state: 'open' }]);
+});
+
+test('AC: a bare "#46" gives no repo and no link', () => {
+  const mission = summarizeMission('x', { members: [{ kind: 'gh', ref: '#46', title: 'Local only' }] });
+  assert.deepEqual(mission?.issues, [{ number: 46, title: 'Local only', state: 'open' }]);
+  assert.ok(!('repo' in mission!.issues[0]));
+});
+
+test('a full GitHub issue URL also keeps the repo and the number', () => {
+  const mission = summarizeMission('x', { members: [{ kind: 'gh', ref: 'https://github.com/gabriel-amyot/agents-office/issues/46', title: 'By URL' }] });
+  assert.deepEqual(mission?.issues, [{ repo: 'gabriel-amyot/agents-office', number: 46, title: 'By URL', state: 'open' }]);
+});
+
+test('the mission\'s root issue appears first in the issue list', () => {
+  const mission = summarizeMission('x', {
+    root_issue: { number: 122, url: 'https://github.com/gabriel-amyot/agentic-engeneering-settings/issues/122' },
+    members: [{ kind: 'gh', ref: 'gabriel-amyot/agents-office#46', title: 'Roadmap' }],
+  });
+  assert.deepEqual(mission?.issues[0], { repo: 'gabriel-amyot/agentic-engeneering-settings', number: 122, title: 'Root issue', state: 'open' });
+  assert.equal(mission?.issues.length, 2);
 });
 
 test('a done mission is a locked room, and folders that are not missions are skipped', () => {

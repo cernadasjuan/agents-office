@@ -3,13 +3,21 @@ import { getToonMaterial } from '../utils/Materials.js';
 import { Colors } from '../utils/Colors.js';
 
 /**
- * `color` lets a room give its shelves a distinct finish (issue #128: the library-knowledge
- * shelves render white, so an agent never confuses them with an ordinary bookshelf).
+ * `shelfColor` lets a room give its shelves a distinct finish (issue #128: the
+ * library-knowledge shelves render white, so an agent never confuses them with an
+ * ordinary bookshelf). `rand`: a seeded [0,1) generator. A caller that needs the same
+ * bookshelf on every reload (a war room, issue #125 AC2) passes one; without it,
+ * `Math.random` keeps the existing behavior. `colors`: which book colors to cycle
+ * through, default every one.
  */
-export function createBookshelf(color: number | THREE.Color = Colors.bookshelf) {
+export function createBookshelf(
+  shelfColor: number | THREE.Color = Colors.bookshelf,
+  rand: () => number = Math.random,
+  colors: readonly (THREE.Color | number)[] = Colors.books,
+) {
   const group = new THREE.Group();
 
-  const shelfMat = getToonMaterial(color);
+  const shelfMat = getToonMaterial(shelfColor);
 
   // Back panel
   const backGeo = new THREE.BoxGeometry(1.6, 2.0, 0.04);
@@ -44,12 +52,12 @@ export function createBookshelf(color: number | THREE.Color = Colors.bookshelf) 
   for (let shelf = 0; shelf < 3; shelf++) {
     const y = 0.04 + shelf * 0.5;
     let x = -0.65;
-    const bookCount = 5 + Math.floor(Math.random() * 4);
+    const bookCount = 5 + Math.floor(rand() * 4);
     for (let b = 0; b < bookCount && x < 0.6; b++) {
-      const w = 0.06 + Math.random() * 0.06;
-      const h = 0.3 + Math.random() * 0.14;
-      const d = 0.2 + Math.random() * 0.1;
-      const color = Colors.books[b % Colors.books.length];
+      const w = 0.06 + rand() * 0.06;
+      const h = 0.3 + rand() * 0.14;
+      const d = 0.2 + rand() * 0.1;
+      const color = colors[b % colors.length];
       const bookGeo = new THREE.BoxGeometry(w, h, d);
       const book = new THREE.Mesh(bookGeo, getToonMaterial(color));
       book.position.set(x + w / 2, y + h / 2, 0);

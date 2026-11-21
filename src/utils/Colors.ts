@@ -54,4 +54,15 @@ export const Colors = {
   pot: new THREE.Color(0xb5651d),
   plant: new THREE.Color(0x2d7a3a),
   plantLight: new THREE.Color(0x4caf50),
+
+  /**
+   * Mission color pairs (issue #125 part 3): each entry names two indices into
+   * `accents` above, never index 6 (orange) — that color already means "waits
+   * for you". Pairs, not raw hex: a mission's figures reuse the same cached
+   * accent materials every other agent already costs, so the draw-call budget
+   * never pays for a mission's own color twice.
+   */
+  missionPalettes: [
+    [1, 2], [0, 7], [4, 5], [2, 4], [0, 1], [5, 7], [3, 7],
+  ] as const,
 };
