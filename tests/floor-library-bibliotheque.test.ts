@@ -91,9 +91,32 @@ test('a section whose own index has no table-row entries is dropped, not shown e
   assert.deepEqual(library, { sections: [] });
 });
 
-test('an oversized top INDEX.md reads as no library, not a crash', () => {
-  write('too-big/documentation/bibliotheque/INDEX.md', 'x'.repeat(200_001));
-  assert.equal(readBibliotheque(path.join(root, 'too-big')), undefined);
+test('an oversized top INDEX.md reads as its own capped prefix, not as no library: the real Klever one is 287 KB with its section links around line 31', () => {
+  // The same shape the real file has: a long prose preamble, section links early (within the
+  // cap even once it is 300 KB), then another ~290 KB of per-vendor prose after them.
+  const preambleLines = Array.from({ length: 30 }, (_, i) => `Preamble line ${i} about the wiki, long enough to look like real prose.`);
+  const sectionLinks = [
+    '| [vendors/INDEX.md](vendors/INDEX.md) | Vendors |',
+    '| [domain/INDEX.md](domain/INDEX.md) | Domain |',
+  ];
+  const trailingBulk = 'x'.repeat(300_000);
+  write('too-big/documentation/bibliotheque/INDEX.md', [...preambleLines, ...sectionLinks, trailingBulk].join('\n'));
+  write('too-big/documentation/bibliotheque/vendors/INDEX.md', '| [Placer.ai](placer.md) | Foot traffic |');
+  const library = readBibliotheque(path.join(root, 'too-big'));
+  assert.deepEqual(library, {
+    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', archived: false }], truncated: false }],
+  }, 'the section link, well within the first 200,000 bytes, still parses even though the whole file does not fit');
+});
+
+test('readCapped never hands the parser a partial trailing line: the cut lands on the last full newline within the cap', () => {
+  const line = 'y'.repeat(99);
+  // 2021 full lines of 100 bytes (99 + \n) = 202,100 bytes, past MAX_INDEX_BYTES (200,000):
+  // the 2001st line (byte offset 200,000) would start mid-line without the last-full-line cut.
+  const lines = Array.from({ length: 2021 }, (_, i) => (i === 10 ? '| [vendors/INDEX.md](vendors/INDEX.md) | Vendors |'.padEnd(99) : line));
+  write('cut-boundary/documentation/bibliotheque/INDEX.md', lines.join('\n'));
+  write('cut-boundary/documentation/bibliotheque/vendors/INDEX.md', '| [Placer.ai](placer.md) | Foot traffic |');
+  const library = readBibliotheque(path.join(root, 'cut-boundary'));
+  assert.deepEqual(library?.sections.map((s) => s.name), ['vendors'], 'the link found near the top parses cleanly regardless of where the cap lands further down');
 });
 
 test('a section directory symlinked outside the bibliotheque root contributes nothing (review: checking only the leaf INDEX.md\'s own lstat missed a symlinked parent directory escaping the root)', () => {
