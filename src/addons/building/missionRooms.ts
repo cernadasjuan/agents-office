@@ -6,48 +6,92 @@ import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
 import type { PickTarget } from '../../scene/Selection.js';
 import type { WorldRoom } from '../../extensions.js';
-import { ROOM_SIZE, type Rect, type RoomSlot } from './RoomPlanner.js';
+import { ROOM_SIZE, type Door, type Rect, type RoomSlot, type Side } from './RoomPlanner.js';
 import { buildCeiling, buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
 import { sceneOf, setTombstoneName, tombstoneNameBatchFor, tombstoneNameplate } from './tombstoneNames.js';
 import { furnishWarRoom, WAR_ROOM_WIDTH, type WarRoomCounts } from './warRoomFurnishing.js';
 
 /**
- * The mission wing: war rooms north of the hall, behind its back wall, two per
- * row. Doors open between the whiteboards. Further rows open into the row before.
+ * The mission wing: war rooms north of the hall, behind its back wall, two columns either
+ * side of the mission corridor, stacked further north one row at a time.
  *
- * Issue #193: a war room's door-wall width is `WAR_ROOM_WIDTH` (18), wider than a generic
+ * Issue #123 review: before this, only row 0 opened directly onto the hall; every row after
+ * it chained onto the room in front of it through `extraDoors` (`BuildingLayout.syncWorldRooms`),
+ * so a deep room was reachable only by crossing another room's closed door. Fixed by running
+ * the mission corridor (`missionCorridorRect`) up the old shared boundary between the two
+ * columns (x = -9) and giving every row's room a door straight onto it, on the column's own
+ * outward-facing side wall — never on the wall it shares with the row before or after it. The
+ * corridor itself opens into the hall once, at its own south end (`MISSION_CORRIDOR_DOOR`), so
+ * the hall still reads as the one place every wing ultimately connects back to.
+ *
+ * Issue #193: a war room's door-wall length is `WAR_ROOM_WIDTH` (18), wider than a generic
  * room's `ROOM_SIZE` (12, which stays its depth), so the desk grid fits 6-8 desks instead of
- * 4. Review of #196 PR 196: the first version grew both columns outward from their old
- * shared boundary, which pushed column 1's east edge past x = 15 — straight into the
- * east-side rented ring (`RoomPlanner.ts`'s `slotFor`, ring 0 index 2 and every ring beyond
- * it, all at that same x >= 15, z in [-18, -6] band, for any room count) — and moved its
- * door into the hall's own second whiteboard (`Office.ts`, `wb2` at x = 5).
- *
- * Fixed by growing away from the hall instead: column 1's east edge stays pinned at x = 9,
- * the same value the original, un-widened design used (margin 6 from the rented ring's own
- * x = 15 start, for any ring count — the east and west rented rings never move closer to the
- * hall than their ring-0 positions, so a fixed margin here is permanent, not size-dependent).
- * Column 0 grows entirely westward from the shared boundary at x = -9. Its own far edge
- * (x = -27) lands exactly on the west-side rented ring's own x = -27, but that ring sits at
- * z in [-11, 13] (always; its own rings shift only in x), never overlapping a war room's
- * z <= -13 — safe at any room count by construction, not because of a chosen margin. Column
- * 0's door moves out from -10 to -13.5 to clear its own column's much-wider new middle: still
- * inside the hall's own wall (-15..15, margin 1.5) and clear of its whiteboard (`wb1`, x = -5).
- * Column 1's door goes back to x = 0 (its original position, centered in the new column too),
- * clear of both whiteboards with room to spare.
+ * 4. Issue #123 review (blocking defect 1): that door-wall length is the rect's extent
+ * *parallel* to the door, not always the rect's x-span — now the door sits on the east/west
+ * wall, `WAR_ROOM_WIDTH` is each row's own z-span (the wing's growth direction), and the
+ * rect's x-span (the depth from the door to the far wall) is `ROOM_SIZE`, same as any other
+ * room's depth. Column 1's east edge (x <= `CORRIDOR_MAX_X + ROOM_SIZE`, well under 15) stays
+ * clear of the east-side rented ring (`RoomPlanner.ts`'s `slotFor`, ring 0 index 2, x >= 15, z
+ * in [-18, -6]) at any room count — the corridor only ever grows north (more negative z),
+ * never widens, so this margin never erodes. Column 0's west edge is unconstrained by the
+ * west-side rented ring: that ring sits at z in [-11, 13], never overlapping a war room's
+ * z <= -13, by construction (`tests/mission-wing-overlap.test.ts`).
  */
-const WING_COLUMNS = [
-  { minX: -9 - WAR_ROOM_WIDTH, maxX: -9, door: -13.5 },
-  { minX: -9, maxX: -9 + WAR_ROOM_WIDTH, door: 0 },
+export const MISSION_CORRIDOR_WIDTH = 5;
+const CORRIDOR_CENTER_X = -9;
+const CORRIDOR_MIN_X = CORRIDOR_CENTER_X - MISSION_CORRIDOR_WIDTH / 2;
+const CORRIDOR_MAX_X = CORRIDOR_CENTER_X + MISSION_CORRIDOR_WIDTH / 2;
+
+/** The mission corridor's own door into the hall (issue #123): fixed, since the corridor's south
+ * frontage never moves as the wing grows north — only its far (north) end ever extends. */
+export const MISSION_CORRIDOR_DOOR: Door = { side: 'south', at: CORRIDOR_CENTER_X };
+/** The hall's own matching door for `MISSION_CORRIDOR_DOOR` (the wall it shares with the corridor). */
+export const MISSION_CORRIDOR_HALL_DOOR: Door = { side: 'north', at: CORRIDOR_CENTER_X };
+
+// Issue #123 review (blocking defect 1): a war room's door-wall length (the `a` axis every
+// desk-grid/furniture position in `warRoomFurnishing.ts` is authored against) is `WAR_ROOM_WIDTH`,
+// not `ROOM_SIZE` — true when the door sat on the north/south wall (that wall's own length is
+// the rect's x-span), and still true now the door sits on the east/west wall instead (that
+// wall's own length is the rect's z-span). So each row's rect runs `WAR_ROOM_WIDTH` along z
+// (parallel to its door, the wing's growth direction) and only `ROOM_SIZE` along x (the depth
+// from the door to the far wall) — the two dimensions from the pre-#123 room, kept on the same
+// meaning they always had, just carried by the other world axis now that the door moved.
+const WING_COLUMNS: Array<{ minX: number; maxX: number; side: Side }> = [
+  { minX: CORRIDOR_MIN_X - ROOM_SIZE, maxX: CORRIDOR_MIN_X, side: 'east' },
+  { minX: CORRIDOR_MAX_X, maxX: CORRIDOR_MAX_X + ROOM_SIZE, side: 'west' },
 ];
 
 export function missionSlot(index: number): RoomSlot {
   const column = WING_COLUMNS[index % WING_COLUMNS.length];
   const row = Math.floor(index / WING_COLUMNS.length);
-  const maxZ = -13 - row * ROOM_SIZE;
-  const rect = { minX: column.minX, maxX: column.maxX, minZ: maxZ - ROOM_SIZE, maxZ };
-  const at = row === 0 ? column.door : (column.minX + column.maxX) / 2;
-  return { rect, door: { side: 'south', at }, outward: 'north', ring: row };
+  const maxZ = -13 - row * WAR_ROOM_WIDTH;
+  const rect = { minX: column.minX, maxX: column.maxX, minZ: maxZ - WAR_ROOM_WIDTH, maxZ };
+  // Issue #123: every row's door opens onto its own frontage on the mission corridor, never
+  // onto the row before or after it.
+  const at = (rect.minZ + rect.maxZ) / 2;
+  return { rect, door: { side: column.side, at }, outward: 'north', ring: row };
+}
+
+/**
+ * The mission corridor's own rect (issue #123): the one shared frontage every war room's door
+ * opens directly onto. Its south end is fixed, flush against the hall's own back wall; its
+ * north end grows one `WAR_ROOM_WIDTH` further out each time a new row is rented (the row's
+ * own height, issue #123 review defect 1), so there is no room-count cap on the wing it serves.
+ */
+export function missionCorridorRect(roomCount: number): Rect {
+  const rows = Math.max(1, Math.ceil(roomCount / WING_COLUMNS.length));
+  return { minX: CORRIDOR_MIN_X, maxX: CORRIDOR_MAX_X, minZ: -13 - rows * WAR_ROOM_WIDTH, maxZ: -13 };
+}
+
+/** The mission corridor's own floor (issue #123), the same open-mission tint every war room's
+ * floor starts in, so the corridor reads as part of the same wing, not a separate room. */
+export function missionCorridorFloor(rect: Rect): THREE.Mesh {
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(rect.maxX - rect.minX, rect.maxZ - rect.minZ), getToonMaterial(FLOOR_OPEN));
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set((rect.minX + rect.maxX) / 2, 0.005, (rect.minZ + rect.maxZ) / 2);
+  floor.receiveShadow = true;
+  floor.userData.floor = true;
+  return floor;
 }
 
 export const MAX_TOMBSTONES = 12;
@@ -130,6 +174,13 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   const key = (n: number) => `mission${index}_seat_${n}`;
   const type = `room:${room.id}`;
 
+  // Issue #123 review round 2: the door-wall's own length (the `a` axis every along-the-wall
+  // mount, the kanban board and the closed-door slab both included, is authored against) is
+  // the rect's x-span for a north/south door, its z-span for an east/west one — same rule
+  // `RoomFrame` uses for depth, just the complementary dimension.
+  const doorIsNorthSouth = slot.door.side === 'north' || slot.door.side === 'south';
+  const doorWallLength = doorIsNorthSouth ? slot.rect.maxX - slot.rect.minX : slot.rect.maxZ - slot.rect.minZ;
+
   // Issue #193: a war room's own width (`WAR_ROOM_WIDTH`) is wider than its depth
   // (`ROOM_SIZE`, unchanged), so the floor is the slot's real rect, not a square.
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(slot.rect.maxX - slot.rect.minX, slot.rect.maxZ - slot.rect.minZ), getToonMaterial(FLOOR_OPEN));
@@ -179,7 +230,11 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   mount(boards.statement.mesh, 0, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
   mount(boards.docs.mesh, -3.6, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
   mount(boards.issues.mesh, 3.6, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
-  mount(boards.kanban.mesh, (slot.rect.maxX - slot.rect.minX) / 2 - 0.12, 6, 1.7, frame.faceDoor - Math.PI / 2);
+  // Issue #123 review round 2: this used the rect's x-span unconditionally, left over from
+  // when the door wall always ran along x — once the corridor fix moved war room doors onto
+  // the east/west wall, the door-wall's real length became the rect's z-span instead, and the
+  // board floated 3+ meters off the side wall it is meant to sit flush against.
+  mount(boards.kanban.mesh, doorWallLength / 2 - 0.12, 6, 1.7, frame.faceDoor - Math.PI / 2);
 
   // Issue #124: the title and lock signs sit on the far wall, over the statement board, not
   // near the door frame (the narration: "they are in the door frames so it's kind of weird").
@@ -194,7 +249,19 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   // `TombstoneNameBatch` draws every tombstone's name in a single call regardless of count.
   const tombstones = new Map<string, { object: THREE.Object3D; nameplate: THREE.Object3D; name?: string }>();
   const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.4, 0.1), getToonMaterial(0x5a4a3a));
-  door.position.copy(frame.point(slot.door.at - (slot.rect.minX + slot.rect.maxX) / 2, 0.02, 1.2));
+  // Issue #123 review (blocking defect 2): `door.at` is a z-coordinate for an east/west door
+  // (the gap axis `wallPieces` uses for that side), not always an x-coordinate — subtracting
+  // the rect's x-center unconditionally put the closed-door slab in the wrong spot once the
+  // corridor fix moved war room doors onto the east/west wall.
+  const doorAlongCenter = doorIsNorthSouth
+    ? (slot.rect.minX + slot.rect.maxX) / 2
+    : (slot.rect.minZ + slot.rect.maxZ) / 2;
+  door.position.copy(frame.point(slot.door.at - doorAlongCenter, 0.02, 1.2));
+  // The slab's own width (2.4) runs along its local x axis; it only lines up with the door
+  // wall's own length (the rect's x-span) for a north/south door. An east/west door's wall
+  // runs along z instead, so the slab needs a quarter turn to stay flush with it, not poke
+  // 1.2 m out the room's side wall (issue #123 review, found while fixing blocking defect 2).
+  door.rotation.y = doorIsNorthSouth ? 0 : Math.PI / 2;
   door.visible = false;
   // The closed door stands in the doorway: it drops with the walls in the overview
   markCutaway(door);
