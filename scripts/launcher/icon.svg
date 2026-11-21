@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Agents Office launcher icon (issue #205): a simple office/building motif in the app's
+       own palette (index.html), drawn as plain shapes, no downloaded brand assets. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#242450"/>
+      <stop offset="1" stop-color="#15152a"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="200" fill="url(#bg)"/>
+  <rect x="32" y="32" width="960" height="960" rx="200" fill="none" stroke="rgba(120,120,255,0.35)" stroke-width="10"/>
+
+  <!-- Building body -->
+  <rect x="232" y="300" width="560" height="560" rx="18" fill="#4a5bd9"/>
+  <rect x="232" y="300" width="560" height="560" rx="18" fill="none" stroke="rgba(224,224,255,0.25)" stroke-width="6"/>
+
+  <!-- Roof -->
+  <rect x="192" y="260" width="640" height="56" rx="16" fill="#6a7bf0"/>
+
+  <!-- Windows, 3x4, lit in the app's accent blue -->
+  <g fill="#e0e0ff">
+    <rect x="288" y="360" width="88" height="88" rx="10"/>
+    <rect x="468" y="360" width="88" height="88" rx="10"/>
+    <rect x="648" y="360" width="88" height="88" rx="10"/>
+    <rect x="288" y="480" width="88" height="88" rx="10" fill="#9fe0c0"/>
+    <rect x="468" y="480" width="88" height="88" rx="10"/>
+    <rect x="648" y="480" width="88" height="88" rx="10" fill="#ffb199"/>
+    <rect x="288" y="600" width="88" height="88" rx="10"/>
+    <rect x="468" y="600" width="88" height="88" rx="10" fill="#f3dc85"/>
+    <rect x="648" y="600" width="88" height="88" rx="10"/>
+  </g>
+
+  <!-- Door -->
+  <rect x="452" y="720" width="120" height="140" rx="10" fill="#15152a"/>
+
+  <!-- A small agent figure walking up, the "agents" half of the motif -->
+  <g fill="#ffb199">
+    <circle cx="512" cy="150" r="34"/>
+    <rect x="486" y="190" width="52" height="86" rx="20"/>
+  </g>
+</svg>
