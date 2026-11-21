@@ -70,6 +70,20 @@ test('a single large-delta frame (a dropped frame, running) does not tunnel thro
   setWallColliders([]);
 });
 
+test('round 7 (#214, raised walk/run speed): an actual double-tap run plus a long dropped frame still does not tunnel', () => {
+  // Same thin wall, but this time drive the real double-tap-W run toggle (issue #174's
+  // mechanism), so the move uses the new RUN_MULTIPLIER (2.6x walk), then a single 3-second
+  // frame — far longer than the new top speed needs to cross the gap to the wall.
+  setWallColliders([{ minX: -2, maxX: 2, minZ: -4, maxZ: -3.85 }]);
+  const { camera } = setup();
+  press('KeyW');
+  release('KeyW');
+  press('KeyW'); // second tap within the double-tap window engages running
+  updateFreeCamera(camera, 3); // one huge delta at run speed
+  release('KeyW');
+  assert.ok(camera.position.z > -4, `camera tunneled through the wall while running (z = ${camera.position.z})`);
+});
+
 test('a door (a gap in the wall rect list) stays passable', () => {
   // Two wall segments with a 2-wide gap at x = -1..1, directly ahead.
   setWallColliders([

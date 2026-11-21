@@ -641,6 +641,13 @@ test('a mission sign shows only when you zoom in or hover; the past sessions sig
   assert.equal(signVisible({ hovered: false, distance: far, hoverOnly: true }, view({ mode: 'all' })), true);
 });
 
+test('#214: maxDistance overrides FIRST_PERSON_SIGN_DISTANCE for a sign meant to read from across its room', () => {
+  const beyondDefault = { hovered: false, distance: FIRST_PERSON_SIGN_DISTANCE + 5, hoverOnly: false };
+  assert.equal(signVisible(beyondDefault, view({ viewMode: 'first-person' })), false, 'without an override, the default distance still applies');
+  assert.equal(signVisible({ ...beyondDefault, maxDistance: 20 }, view({ viewMode: 'first-person' })), true, 'a larger maxDistance keeps it visible further out');
+  assert.equal(signVisible({ ...beyondDefault, maxDistance: 1 }, view({ viewMode: 'first-person' })), false, 'a smaller maxDistance can also tighten it');
+});
+
 test('war room signs are marked as detail signs with their room', () => {
   const room = buildMissionRoom(missionRoom('Roadmap', 2), 0);
   const signs = room.group.children.filter((child): child is CSS2DObject => child instanceof CSS2DObject);

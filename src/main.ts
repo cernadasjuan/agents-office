@@ -162,7 +162,9 @@ const offscreenMarkers = new OffscreenMarkers({
   },
 });
 
-// Keyboard triage (issue #85): N the next agent in queue, F recenters and pulses Focus, / the filter field.
+// Keyboard triage (issue #85, F behavior walked back on #214): N the next agent in
+// queue, F recenters and runs the ready herdr focus directly (falls back to a pulse
+// when no ready action exists), / the filter field.
 window.addEventListener('keydown', (event) => {
   handleTriageKey(event, {
     next: () => {
@@ -180,7 +182,7 @@ window.addEventListener('keydown', (event) => {
         if (!next) return;
         selectAgent(next.id); // flies there and opens the card through the normal selection path
       }
-      agentCard.pulseFocus();
+      void agentCard.triageFocus();
     },
     filter: () => {
       expandPanel(document.getElementById('ui-panel')!, document.getElementById('ui-panel-toggle')!, window.localStorage);

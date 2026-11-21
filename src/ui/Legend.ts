@@ -62,7 +62,7 @@ const SECTIONS: LegendSection[] = [
       { sign: 'V', meaning: 'Switch the labels between smart and all.' },
       { sign: 'Shift+L', meaning: 'Switch the layout.' },
       { sign: 'N', meaning: 'Select the next agent that needs you, in queue order.' },
-      { sign: 'F', meaning: 'Ready the selected agent for herdr focus. A click on the card’s Focus button still sends the request.' },
+      { sign: 'F', meaning: 'Focus the selected agent in herdr, no click needed. Recenters the camera too.' },
       { sign: '/', meaning: 'Give the panel’s filter field the focus, so typing shows only the matching rows.' },
       { sign: 'Esc', meaning: 'Release the camera, then clear the selection. While this legend is open, Esc closes only the legend.' },
       { sign: '?', meaning: 'Open or close this legend.' },

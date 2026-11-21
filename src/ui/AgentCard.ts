@@ -257,12 +257,13 @@ export class AgentCard {
   }
 
   /**
-   * Key F (issue #85, fixed under the decision on #85): highlight the shown
-   * agent's ready action button (today only "Focus in herdr") for `PULSE_MS`,
-   * so the keystroke has a visible effect. Never moves DOM focus onto the
-   * button (Enter would then send the request) and never calls `runAction`:
-   * S7 keeps a write action behind a click. A silent no-op without a ready
-   * action (no selection, or no action available for the shown agent).
+   * Key F (issue #85, superseded by #214): highlight the shown agent's ready
+   * action button (today only "Focus in herdr") for `PULSE_MS`, so the
+   * keystroke has a visible effect. Never moves DOM focus onto the button
+   * (Enter would then send the request) and never calls `runAction`. Kept as
+   * the fallback `triageFocus` uses when no ready action is available —
+   * S7 ("nothing happens in herdr without a click") still applies then,
+   * there is simply nothing to run.
    */
   pulseFocus(): void {
     const button = this.actionRow.querySelector<HTMLButtonElement>('button');
@@ -270,6 +271,21 @@ export class AgentCard {
     button.classList.add('pulse');
     clearTimeout(this.pulseTimer);
     this.pulseTimer = setTimeout(() => button.classList.remove('pulse'), PULSE_MS);
+  }
+
+  /**
+   * Key F (round 7, #214, walks back the S7 limit from #85): run the shown
+   * agent's ready action directly, the same request the button's click
+   * sends. Gabriel wants herdr to flicker to front on "next, next, next, F"
+   * with no click and no mouse. Falls back to the old pulse-only behavior
+   * when no ready action is available (herdr focus not configured for this
+   * agent, or no agent selected).
+   */
+  async triageFocus(): Promise<void> {
+    const button = this.actionRow.querySelector<HTMLButtonElement>('button');
+    const actionId = button?.dataset.action;
+    if (!actionId) return;
+    await this.runAction(actionId);
   }
 
   /** Run a card action on the shown agent (the button click). */
