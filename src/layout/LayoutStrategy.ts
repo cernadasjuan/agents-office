@@ -24,6 +24,12 @@ export type Posture = 'seated' | 'standing';
 export interface RoomView {
   bounds: THREE.Box3;
   standing: { position: THREE.Vector3; lookAt: THREE.Vector3 };
+  /** The room's own kind (`'library'`, `'office'`, ...), when the layout tracks one (issue
+   * #239): lets a caller special-case a room kind (the library door swaps to its own scene
+   * instead of a first-person teleport) without the caller needing to know building-specific
+   * room-kind types itself. Absent for a layout, or a room, that carries no kind (a mission
+   * room, the flat activity layout). */
+  kind?: string;
 }
 
 /** A seat change the layout decides on its own, applied by the manager. */

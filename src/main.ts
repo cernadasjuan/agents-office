@@ -24,9 +24,31 @@ import { FloorSwitch } from './ui/FloorSwitch.js';
 import { ViewSwitch } from './ui/ViewSwitch.js';
 import { ALL_FLOORS, defaultFloor, floorsWithStoredRooms, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
 import { focusedFloor, setFocusedFloor } from './floors/floorState.js';
+import { isLibrarySceneSearch, libraryEntryUrl } from './library/sceneNav.js';
+import { consumeReturningFromLibrary, navigateAfterTransition, removeTransition, showTransition } from './library/transition.js';
+
+/**
+ * Issue #239: the library stopped being a room inside this scene; it is its own scene now
+ * (Gabriel's "different dimension" idea). `?scene=library` in the URL is the one seam
+ * (`src/library/sceneNav.ts`) that decides which of the two boots runs; this file's own
+ * office bootstrap (everything below) is otherwise unchanged from before that scene existed.
+ */
+function bootOffice(): void {
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
+
+// Issue #239: a brief "welcome back" overlay, shown only right after the library's own back
+// door navigated here (`consumeReturningFromLibrary` clears the flag so an ordinary reload
+// never replays it) — never added to every ordinary office load. Issue #245 round 3 review:
+// the same flag also tells `ViewController` the camera is starting out already standing
+// inside the library room (`#room=library`, this door's own landing hash) rather than having
+// just walked into it, so it never bounces straight back in on arrival.
+const returningFromLibrary = consumeReturningFromLibrary();
+if (returningFromLibrary) {
+  const overlay = showTransition('Welcome back.');
+  window.setTimeout(() => removeTransition(overlay), 420);
+}
 
 // Build office and get stations
 const stations = createOffice(scene);
@@ -118,6 +140,26 @@ const view = new ViewController({
     viewSwitch?.setActive(mode);
   },
   figureShiftPx: () => agentCard.cameraShiftPx(),
+  // Issue #239/#245: double-clicking the library room in isometric, or simply walking into it
+  // in first person (`ViewController.ts`'s own per-frame `roomAt` check), both swap to its own
+  // scene instead of the normal first-person teleport every other room kind gets. Walking in
+  // fires every frame the camera stands inside the room, not just once — the `entering` guard
+  // keeps a held-down W key from stacking a second transition overlay and a second navigation
+  // on top of the first one already in flight.
+  onEnterLibrary: (() => {
+    let entering = false;
+    return () => {
+      if (entering) return;
+      entering = true;
+      navigateAfterTransition('Entering the library…', () => {
+        // Issue #245 review: the library scene's own catalog must follow the active floor,
+        // not always the first configured library — `focusFloor` is already the office's own
+        // normalized "a real floor, or nothing for ALL_FLOORS" value (`defaultFloor`, above).
+        window.location.assign(libraryEntryUrl(window.location, focusFloor));
+      });
+    };
+  })(),
+  startedInLibraryRoom: returningFromLibrary,
 });
 
 // View switch (issue #231): a small, visible alternative to the footer's keyboard hint. Each
@@ -344,3 +386,10 @@ const frameLoop = new FrameLoop({
 });
 if (stats) Object.assign(window, { __officeStats: Object.assign(stats, { drawCalls: () => frameLoop.drawCalls(), cameraPosition: () => view.activeCamera.position.toArray(), viewMode: () => view.mode }) });
 frameLoop.start((callback) => requestAnimationFrame(callback));
+}
+
+if (isLibrarySceneSearch(window.location.search)) {
+  void import('./library/bootLibrary.js').then((module) => module.bootLibraryScene());
+} else {
+  bootOffice();
+}
