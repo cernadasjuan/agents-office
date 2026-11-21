@@ -348,6 +348,24 @@ test('double-clicking the library room calls onEnterLibrary instead of teleporti
   assert.ok(camera.position.distanceTo(before) < 1e-6, 'the camera never moves toward the room\'s own standing pose');
 });
 
+test('issue #245 review: walking into the library room in first person calls onEnterLibrary too, not only double-clicking it from the isometric view', () => {
+  const room = { bounds: new THREE.Box3(), standing: { position: new THREE.Vector3(1, 1, 1), lookAt: new THREE.Vector3() }, kind: 'library' };
+  let entered = 0;
+  const { view } = setup('', undefined, undefined, { roomAt: () => room, onEnterLibrary: () => { entered++; } });
+  assert.equal(view.mode, 'first-person', 'the default view, where walking (not double-clicking) is how you actually enter a room');
+  view.update(1, 1 / 60);
+  assert.equal(entered, 1);
+});
+
+test('walking around first person never calls onEnterLibrary while roomAt reports anything other than the library (no false trigger every frame)', () => {
+  const office = { bounds: new THREE.Box3(), standing: { position: new THREE.Vector3(1, 1, 1), lookAt: new THREE.Vector3() }, kind: 'office' };
+  let entered = 0;
+  const { view } = setup('', undefined, undefined, { roomAt: () => office, onEnterLibrary: () => { entered++; } });
+  view.update(1, 1 / 60);
+  view.update(2, 1 / 60);
+  assert.equal(entered, 0);
+});
+
 test('double-clicking the library room without an onEnterLibrary option does nothing (graceful degradation)', () => {
   const room = { bounds: new THREE.Box3(), standing: { position: new THREE.Vector3(1, 1, 1), lookAt: new THREE.Vector3() }, kind: 'library' };
   const { view, canvas, press } = setup('', undefined, undefined, { roomAt: () => room });

@@ -125,13 +125,25 @@ const view = new ViewController({
     agentManager.setDeskTalker(mode === 'desk' ? selectedAgentId() : null);
   },
   figureShiftPx: () => agentCard.cameraShiftPx(),
-  // Issue #239: double-clicking the library room swaps to its own scene instead of the normal
-  // first-person teleport every other room kind gets.
-  onEnterLibrary: () => {
-    navigateAfterTransition('Entering the library…', () => {
-      window.location.assign(libraryEntryUrl(window.location));
-    });
-  },
+  // Issue #239/#245: double-clicking the library room in isometric, or simply walking into it
+  // in first person (`ViewController.ts`'s own per-frame `roomAt` check), both swap to its own
+  // scene instead of the normal first-person teleport every other room kind gets. Walking in
+  // fires every frame the camera stands inside the room, not just once — the `entering` guard
+  // keeps a held-down W key from stacking a second transition overlay and a second navigation
+  // on top of the first one already in flight.
+  onEnterLibrary: (() => {
+    let entering = false;
+    return () => {
+      if (entering) return;
+      entering = true;
+      navigateAfterTransition('Entering the library…', () => {
+        // Issue #245 review: the library scene's own catalog must follow the active floor,
+        // not always the first configured library — `focusFloor` is already the office's own
+        // normalized "a real floor, or nothing for ALL_FLOORS" value (`defaultFloor`, above).
+        window.location.assign(libraryEntryUrl(window.location, focusFloor));
+      });
+    };
+  })(),
 });
 
 // --- Triage list (side panel) ---

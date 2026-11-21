@@ -362,6 +362,12 @@ export class ViewController {
       // scene walk.
       setWallColliders(this.options.wallColliders?.() ?? []);
       updateFreeCamera(camera, delta);
+      // Issue #245 review: walking into the library room in first person used to do nothing —
+      // only the isometric double-click (above) ever called `onEnterLibrary`, so the room
+      // existed in this scene for exactly one interaction path. Checked every frame, the same
+      // way the wall colliders just above are: walking through the doorway (not only
+      // double-clicking it from above) now swaps to the library's own scene too.
+      if (this.options.roomAt?.(camera.position.x, camera.position.z)?.kind === 'library') this.options.onEnterLibrary?.();
     }
 
     // Idle default (issue #161): any camera input resets this in `listen()`; without one for
