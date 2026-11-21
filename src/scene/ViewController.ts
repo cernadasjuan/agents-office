@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
 import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, setWallColliders, updateFreeCamera } from './FreeCamera.js';
-import { IsometricController, IsometricTween, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
+import { DIRECT_FOLLOW_RATES, FLIGHT_FOLLOW_RATES, IsometricController, applyIsometricState, followIsometric, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricFollowRates, type IsometricState } from './IsometricCamera.js';
 import { PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
 import type { RoomView, WallRect } from '../layout/LayoutStrategy.js';
 import { SelectionMarker } from './SelectionMarker.js';
@@ -76,10 +76,23 @@ function isFormField(target: EventTarget | null): boolean {
  */
 export class ViewController {
   private currentMode: ViewMode = 'first-person';
+  /** The isometric view's goal pose (issue #113 redesign): every input — wheel, drag, cursor zoom, a selection, a bounds retrack — edits this and only this. */
   private isometric = new IsometricController();
+  /** The isometric view's live pose: what the camera actually shows. `update()` eases it toward `isometric`'s goal every frame; nothing else ever writes it. */
+  private liveIsometric: IsometricState = this.isometric.state();
+  /**
+   * PR #200 review round: the one knob a goal edit sets, not a tween. Direct manipulation
+   * (the wheel, a drag, WASD) sets `DIRECT_FOLLOW_RATES` right before it edits the goal, so the
+   * live pose keeps feeling like it is under the pointer. A flight-type change (a selection,
+   * `refocus`/F, an off-screen marker click, the `#zoom=`/`#room=` start framing) sets
+   * `FLIGHT_FOLLOW_RATES` instead, so it still reads as a flight. Read fresh by `update()` every
+   * frame — nothing here is "remembered" past the next input that changes it.
+   */
+  private isometricFollowRates: IsometricFollowRates = DIRECT_FOLLOW_RATES;
+  /** Issue #113: a room added/removed or a window resize invalidates the isometric pan/zoom limits; re-derived lazily in `update()`, not on every tick. */
+  private isometricBoundsDirty = true;
   private isometricCamera: THREE.OrthographicCamera;
   private flight: { tween: PoseTween; end: CameraPose } | null = null;
-  private isometricFlight: IsometricTween | null = null;
   private savedFirstPerson: CameraPose | null = null;
   private hiddenFromAbove: THREE.Object3D[] = [];
   private panKeys = new Set<string>();
@@ -120,6 +133,9 @@ export class ViewController {
     this.pendingStartZoom = start.focus !== null ? start.zoom : null;
 
     setPointerLockFilter((event) => this.currentMode === 'first-person' && this.pickAt(event.clientX, event.clientY) === null);
+    // Issue #113: a resize can change the aspect ratio the isometric pan/zoom limits were framed
+    // for; `sceneChanged()` covers a room added or removed, this covers the window shape.
+    options.keys.addEventListener('resize', () => this.sceneChanged());
     this.listen();
     this.selection.onChange((agentId) => this.selectionChanged(agentId));
     this.setHint();
@@ -141,6 +157,10 @@ export class ViewController {
         this.isometric.minHalfHeight,
         this.isometric.maxHalfHeight,
       );
+      // PR #200 review round: a start parameter is a flight from the view's own default
+      // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
+      // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
+      this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
       this.applyIsometric();
     }
   }
@@ -160,6 +180,10 @@ export class ViewController {
         this.isometric.minHalfHeight,
         this.isometric.maxHalfHeight,
       );
+      // PR #200 review round: a start parameter is a flight from the view's own default
+      // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
+      // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
+      this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
       this.applyIsometric();
     } else {
       this.applyPose(room.standing);
@@ -208,7 +232,6 @@ export class ViewController {
     const from = this.currentPose();
     if (previous === 'first-person') this.savedFirstPerson = from;
     this.currentMode = mode;
-    this.isometricFlight = null;
     this.idleSeconds = 0;
     // The camera changes kind when the isometric view starts or ends: cut, do not fly. Desk
     // is the one exception (review, defect 3): it is a fresh destination, never a "resume",
@@ -244,6 +267,11 @@ export class ViewController {
     if (mode === 'isometric') {
       this.flight = null;
       this.frameIsometric();
+      // Entering the isometric view cuts, it never flies (the camera changes kind): the live
+      // pose starts exactly on the freshly framed goal, with nothing left for the follower to
+      // close on the next tick.
+      this.liveIsometric = this.isometric.state();
+      this.isometricBoundsDirty = false;
       this.applyIsometric();
     } else if (mode === 'desk') {
       this.flyTo(from, deskPose!, fly);
@@ -251,6 +279,16 @@ export class ViewController {
       this.flyTo(from, explicitPose ?? this.savedFirstPerson ?? from, fly);
     }
     this.options.modeChanged?.(mode);
+  }
+
+  /**
+   * Issue #113: call after the scene's floor content changes (a room added or removed, a
+   * floor switch) so the isometric pan/zoom limits catch up. Cheap and idempotent: it only
+   * flags the limits dirty, the actual bounds box recomputes once, lazily, in `update()` —
+   * not on every poll, and never on a frame where nothing changed.
+   */
+  sceneChanged(): void {
+    this.isometricBoundsDirty = true;
   }
 
   /**
@@ -272,12 +310,15 @@ export class ViewController {
   update(elapsed: number, delta: number): void {
     const camera = this.options.camera;
     if (this.currentMode === 'isometric') {
-      if (this.isometricFlight) {
-        this.isometric.setState(this.isometricFlight.advance(delta));
-        if (this.isometricFlight.done) this.isometricFlight = null;
-      } else {
-        this.panWithKeys(delta);
+      // Issue #113: bounds retrack only clamps the goal (never the live pose below), so a room
+      // change or a resize mid-drag never jumps the camera — the follower just has a new goal
+      // to close the gap toward, like any other goal edit.
+      if (this.isometricBoundsDirty) {
+        this.isometricBoundsDirty = false;
+        this.isometric.retrack(overviewBounds(this.options.scene), this.aspect());
       }
+      this.panWithKeys(delta);
+      this.liveIsometric = followIsometric(this.liveIsometric, this.isometric.state(), delta, this.isometricFollowRates);
       this.applyIsometric();
     } else if (this.flight) {
       const pose = this.flight.tween.advance(delta);
@@ -383,7 +424,9 @@ export class ViewController {
       if (isClick(this.pressPoint, point)) return;
       this.dragged = true;
       this.flight = null;
-      this.isometricFlight = null;
+      // PR #200 review round: a drag is direct manipulation, not a flight — responsive even
+      // mid-correction, even right after a flight-type change (a selection, a start parameter).
+      this.isometricFollowRates = DIRECT_FOLLOW_RATES;
       const dx = point.x - this.dragPoint.x;
       const dy = point.y - this.dragPoint.y;
       this.isometric.drag(dx, dy, canvas.clientHeight || 1);
@@ -420,7 +463,8 @@ export class ViewController {
       this.markActive();
       event.preventDefault();
       this.flight = null;
-      this.isometricFlight = null;
+      // PR #200 review round: the wheel is direct manipulation, not a flight.
+      this.isometricFollowRates = DIRECT_FOLLOW_RATES;
       // Zoom toward the cursor (issue #87, AC1), not toward the room center: the point
       // under the pointer stays under it. Falls back to a plain zoom while the canvas has
       // no on-screen size yet (e.g. a test or a hidden tab), when NDC is undefined.
@@ -493,7 +537,13 @@ export class ViewController {
     this.pendingStartZoom = null;
     this.pendingZoomTarget = null;
     if (this.currentMode === 'isometric') {
-      const from: IsometricState = this.isometric.state();
+      // Issue #113 redesign: a selection just edits the goal, the same as a wheel tick or a
+      // drag. The follower in `update()` eases the live pose there; there is no flight object
+      // to build, so a second selection before the first one arrives simply moves the goal
+      // again, with nothing stale left over from the first. PR #200 review round: a selection
+      // (also reached from `refocus`/F and an off-screen marker click) is a flight-type
+      // change, not direct manipulation — the slower rate, so it still reads as a flight.
+      this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
       this.isometric.focusOn(point);
       if (startZoom !== null) {
         this.isometric.halfHeight = THREE.MathUtils.clamp(
@@ -503,8 +553,6 @@ export class ViewController {
         );
       }
       this.isometric.pan(this.cardShiftPx() * this.isometric.unitsPerPixel(this.options.canvas.clientHeight), 0);
-      this.isometricFlight = new IsometricTween(from, this.isometric.state(), FLIGHT_SECONDS);
-      this.isometric.setState(from);
       return;
     }
     const from = this.currentPose();
@@ -567,9 +615,16 @@ export class ViewController {
     this.isometric.frame(overviewBounds(this.options.scene), this.aspect());
   }
 
-  /** Put the orthographic camera on the isometric state; it follows the canvas size. */
+  /**
+   * Put the orthographic camera on the isometric view's live pose; it follows the canvas size.
+   * The far plane follows the max of the live and the goal distance (issue #113 redesign,
+   * review defect 4): whichever is farther decides, so a camera mid-chase toward a closer goal
+   * never clips the building it is still passing, and a goal that just moved farther away
+   * never clips it either before the live pose catches up.
+   */
   private applyIsometric(): void {
-    this.isometric.applyTo(this.isometricCamera, this.aspect(), this.options.camera.fov);
+    const goalDistance = this.isometric.equivalentDistance(this.options.camera.fov);
+    applyIsometricState(this.liveIsometric, this.isometric.reach, this.isometricCamera, this.aspect(), this.options.camera.fov, goalDistance);
   }
 
   private aspect(): number {
@@ -585,6 +640,8 @@ export class ViewController {
     if (this.panKeys.has('KeyD') || this.panKeys.has('ArrowRight')) right += 1;
     if (this.panKeys.has('KeyA') || this.panKeys.has('ArrowLeft')) right -= 1;
     if (right === 0 && forward === 0) return;
+    // PR #200 review round: WASD is direct manipulation, not a flight.
+    this.isometricFollowRates = DIRECT_FOLLOW_RATES;
     const fast = this.panKeys.has('ShiftLeft') || this.panKeys.has('ShiftRight') ? FAST_MULTIPLIER : 1;
     const step = this.zoomDistance * PAN_SPEED_PER_DISTANCE * fast * delta;
     this.isometric.pan(right * step, forward * step);

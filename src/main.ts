@@ -226,6 +226,9 @@ function buildUI(): void {
   agentCard.render(agents.map((managed) => managed.info));
   document.title = tabTitleFor(agents.map((managed) => managed.info.extras));
   view.agentsChanged(agents);
+  // Issue #113: an agent-driven layout can grow or shrink the building (a new room seated),
+  // so the isometric pan/zoom limits may need to catch up here too, not only after `pollWorld`.
+  view.sceneChanged();
   labelDetail.sceneChanged();
   labelDetail.refresh();
   for (const extension of activeExtensions(scene)) extension.agentsChanged?.(agentManager.getAgents());
@@ -245,6 +248,7 @@ async function pollWorld(): Promise<void> {
     for (const extension of activeExtensions(scene)) extension.worldChanged?.(world);
     tombstoneCard.render(world.rooms.flatMap((room) => room.sleepers ?? []));
     missionIssuesCard.render(world.rooms.map((room) => ({ id: room.id, title: room.title, issues: room.walls.issues ?? [] })));
+    view.sceneChanged();
     labelDetail.sceneChanged();
     frameLoop.sceneChanged();
   } catch {
