@@ -98,9 +98,13 @@ test('the remote lookup caches per repo root, so two different working directori
   fs.mkdirSync(nested, { recursive: true });
   const resolver = new FloorResolver();
   const readFileSync = fs.readFileSync;
+  const ownConfig = path.join(repo, '.git', 'config');
   let configReads = 0;
   (fs as unknown as { readFileSync: typeof fs.readFileSync }).readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => {
-    if (String(args[0]).endsWith(path.join('.git', 'config'))) configReads++;
+    // Exact match on this test's own repo, not a suffix: a suffix match also counts every other
+    // concurrently-running test's own `.git/config` read (for example `tests/missions-plugin.test.ts`'s
+    // own fixture repo), which made this assertion racy against unrelated test files.
+    if (String(args[0]) === ownConfig) configReads++;
     return readFileSync(...args);
   }) as typeof fs.readFileSync;
   try {
