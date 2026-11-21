@@ -120,6 +120,15 @@ export class FloorResolver {
    * (issue #191 revision): several sessions, and several directories inside one of them, share
    * one repo root, and must not each pay their own `.git/config` read for the same answer. */
   private remoteCache = new Map<string, string | undefined>();
+  /** The directory walk's own cache (review #249 round 2), keyed by the directory
+   * `repoDirOf` is asked about. `remoteCache` above only covers the lookup *after* a repo
+   * root is already known; the walk that finds that root was never cached at all, so
+   * `remoteOwnerRepoOf` — called once per matching transcript tool call, not once per
+   * session poll like `resolve` — re-walked the filesystem with `lstatSync` from scratch for
+   * every single Edit, even a thousand Edits in the same directory in one transcript.
+   * Capped and cleared the same way the other two caches are; a miss (no repo at this
+   * directory) caches too, same as a hit. */
+  private repoDirCache = new Map<string, string | undefined>();
 
   resolve(cwd: string | undefined): string {
     if (!cwd) return GENERAL_FLOOR;
@@ -145,7 +154,16 @@ export class FloorResolver {
    */
   private repoDirOf(dir: string): string | undefined {
     if (!path.isAbsolute(dir)) return undefined;
-    let current = path.resolve(dir);
+    const resolved = path.resolve(dir);
+    if (this.repoDirCache.has(resolved)) return this.repoDirCache.get(resolved);
+    const result = this.repoDirOfUncached(resolved);
+    if (this.repoDirCache.size >= MAX_CACHED_DIRS) this.repoDirCache.clear();
+    this.repoDirCache.set(resolved, result);
+    return result;
+  }
+
+  private repoDirOfUncached(dir: string): string | undefined {
+    let current = dir;
     for (let depth = 0; depth < MAX_WALK_DEPTH; depth++) {
       const git = path.join(current, '.git');
       try {

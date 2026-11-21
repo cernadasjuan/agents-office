@@ -265,3 +265,42 @@ test('remoteOwnerRepoOf resolves a worktree to its main repository\'s own remote
   const worktree = makeWorktree(mainRepo, 'wt-remote');
   assert.equal(new FloorResolver().remoteOwnerRepoOf(worktree), 'gabriel-amyot/worktree-main-repo');
 });
+
+test('remoteOwnerRepoOf caches its own directory walk (review #249 round 2): a repeated call for the same directory does not re-walk the filesystem', () => {
+  const repo = makeRepoWithRemote('repeated-remote-check', 'https://github.com/gabriel-amyot/repeated-remote-check.git');
+  const resolver = new FloorResolver();
+  const lstatSync = fs.lstatSync;
+  let calls = 0;
+  (fs as unknown as { lstatSync: typeof fs.lstatSync }).lstatSync = ((...args: Parameters<typeof fs.lstatSync>) => {
+    calls++;
+    return lstatSync(...args);
+  }) as typeof fs.lstatSync;
+  try {
+    resolver.remoteOwnerRepoOf(repo);
+    const callsAfterFirst = calls;
+    assert.ok(callsAfterFirst > 0, 'the first call actually walked the filesystem');
+    for (let i = 0; i < 50; i++) resolver.remoteOwnerRepoOf(repo);
+    assert.equal(calls, callsAfterFirst, 'fifty repeated calls for the same directory reused the walk cache, not one lstat per call');
+  } finally {
+    fs.lstatSync = lstatSync;
+  }
+});
+
+test('remoteOwnerRepoOf also caches a miss (no repository at this directory), not just a hit', () => {
+  const dir = path.join(root, 'nowhere', 'repeated');
+  const resolver = new FloorResolver();
+  const lstatSync = fs.lstatSync;
+  let calls = 0;
+  (fs as unknown as { lstatSync: typeof fs.lstatSync }).lstatSync = ((...args: Parameters<typeof fs.lstatSync>) => {
+    calls++;
+    return lstatSync(...args);
+  }) as typeof fs.lstatSync;
+  try {
+    resolver.remoteOwnerRepoOf(dir);
+    const callsAfterFirst = calls;
+    resolver.remoteOwnerRepoOf(dir);
+    assert.equal(calls, callsAfterFirst, 'a repeated miss also reused the cache rather than re-walking to confirm there is still nothing there');
+  } finally {
+    fs.lstatSync = lstatSync;
+  }
+});

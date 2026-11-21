@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { FloorResolver } from '../../server/floor.js';
 import type { Enricher, Observation, OfficePlugin } from '../../server/seam.js';
@@ -64,13 +65,24 @@ function filePathOf(name: string, input: Record<string, unknown>): string | unde
   return typeof file === 'string' ? file : undefined;
 }
 
+/** A `cd` target as a real filesystem path: absolute as-is, `~` or `~/...` expanded against
+ * the home directory (review #249 round 2 — a shell expands a leading `~` itself, so `cd
+ * ~/Developer/other-repo` never sees `cwd` at all; resolving it against `cwd` instead, as
+ * this used to, built the nonsense path `<cwd>/~/Developer/other-repo` and silently dropped
+ * the real second repo), else resolved against `cwd` same as before. */
+function resolveCdTarget(target: string, cwd: string | undefined): string {
+  if (path.isAbsolute(target)) return target;
+  if (target === '~' || target.startsWith('~/')) return path.join(os.homedir(), target.slice(1));
+  return cwd ? path.resolve(cwd, target) : target;
+}
+
 function dirsIn(name: string, input: Record<string, unknown>, cwd: string | undefined): string[] {
   const dirs: string[] = [];
   const file = filePathOf(name, input);
   if (file && path.isAbsolute(file)) dirs.push(path.dirname(file));
   if (name === 'Bash' && typeof input.command === 'string') {
     const target = cdTarget(input.command);
-    if (target) dirs.push(path.isAbsolute(target) ? target : cwd ? path.resolve(cwd, target) : target);
+    if (target) dirs.push(resolveCdTarget(target, cwd));
   }
   return dirs;
 }

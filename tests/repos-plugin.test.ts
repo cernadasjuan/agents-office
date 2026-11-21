@@ -71,6 +71,30 @@ test('a cd <dir> opening a Bash call adds that directory\'s repo, resolved relat
   });
 });
 
+test('a cd ~/<dir> is expanded against the home directory, not resolved as a literal "~" path segment under cwd (review #249 round 2)', async () => {
+  await withWorkspace(async (dir) => {
+    const floorRepo = path.join(dir, 'floor-repo');
+    const home = await mkdtemp(path.join(os.tmpdir(), 'repos-enricher-home-'));
+    const homeRepo = path.join(home, 'other-repo');
+    await gitRepo(floorRepo, 'gabriel-amyot/floor-repo');
+    await gitRepo(homeRepo, 'gabriel-amyot/home-repo');
+    const transcriptPath = path.join(dir, 'session.jsonl');
+    await writeFile(transcriptPath, `${toolUseLine([{ name: 'Bash', input: { command: 'cd ~/other-repo && git status' } }])}\n`);
+
+    const homedir = os.homedir;
+    (os as unknown as { homedir: typeof os.homedir }).homedir = () => home;
+    try {
+      const enricher = createReposEnricher(new FloorResolver());
+      const agents = [observation('a', transcriptPath, floorRepo, ['gabriel-amyot/floor-repo'])];
+      await enricher.enrich(agents);
+      assert.deepEqual(agents[0].display.repos, ['gabriel-amyot/floor-repo', 'gabriel-amyot/home-repo']);
+    } finally {
+      os.homedir = homedir;
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
 test('a directory with no git remote is never added, even though it is a real repo', async () => {
   await withWorkspace(async (dir) => {
     const floorRepo = path.join(dir, 'floor-repo');
