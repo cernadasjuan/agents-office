@@ -36,6 +36,29 @@ test('the real-size fixture wears BMAD hats and GitHub cards, as with the fork p
   assert.equal(new Set(github.cards.placements.map((placement) => placement.agentId)).size, REAL_SIZE.cardHolders);
 });
 
+/**
+ * Review (issue #167 round 2): a pinned total alone cannot tell a bucket that is actually
+ * built apart from one that quietly dropped out (the `code-review` loupe never won the hand
+ * slot once, despite the fixture's own comments claiming full coverage — the pinned total
+ * stayed stable because another kind's draw call happened to backfill the count). This checks
+ * every mapped hand kind and both face kinds directly, by name (`plugins/skills/items.ts`'s
+ * `group(kind, ...)`), so a future regression here fails on a readable kind name, not just a
+ * number drifting by coincidence.
+ */
+test('the real-size fixture equips every hand-item and face-item kind this catalog maps (issue #167 round 2 review)', () => {
+  const { scene } = buildRealSizeOffice();
+  const expectedHandKinds = [
+    'wrench', 'clipboard', 'gavel', 'loupe', 'stamp', 'easel-chart', 'open-book', 'magnifier', 'toolbox',
+    'terminal-screen', 'pencil', 'globe',
+  ];
+  for (const kind of expectedHandKinds) {
+    assert.ok(countNamed(scene, kind) > 0, `expected at least one agent to wear the "${kind}" hand item`);
+  }
+  for (const kind of ['glasses', 'headphones']) {
+    assert.ok(countNamed(scene, kind) > 0, `expected at least one agent to wear the "${kind}" face item`);
+  }
+});
+
 test('at the real size (25 rooms, 40 agents, hats and cards) a frame from each start view stays under the draw-call budget, shadow pass included', () => {
   const { scene, manager } = buildRealSizeOffice();
   scene.updateMatrixWorld();
@@ -146,14 +169,18 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // `tests/real-size-office.ts`'s `skillsFor`/`toolsFor`/`lastEquipSourceFor` deliberately
   // exercise every one of these kinds, not a subset that would undercount the real worst
   // case — re-measured with every change in (#209, the Hero look, and the full equipment
-  // catalog together), not a hand-picked sum, landing it at 423. Pinned here at 426, 423
-  // plus 3: real headroom above the number this fixture actually and repeatably measures,
-  // not a number nobody reproduces. Each PR gets a deliberate, reviewed addition against the
-  // 423 baseline before it must recover headroom elsewhere, not just add to the margin left
-  // by the last one. 7 points of headroom remain against the 430 cap — the next addition
-  // should still trim an existing item kind before asking for more budget (Gabriel: raise
-  // the cap only after measuring his own laptop).
-  assert.ok(after.total <= 426, `worst case ${after.total} exceeds the pinned baseline (423) + 3`);
+  // catalog together), not a hand-picked sum, landing it at 424, not 423 (review: the first
+  // `lastEquipSourceFor` alternation let `code-review`'s loupe silently never win the hand
+  // slot, since its only two non-suppressed occurrences both landed on the `tool`-wins side
+  // of an `i % 2` split; it now alternates per full lap of `SKILL_SEQUENCES` instead, so
+  // every mapped kind actually gets built at least once before this baseline is pinned).
+  // Pinned here at 427, 424 plus 3: real headroom above the number this fixture actually and
+  // repeatably measures, not a number nobody reproduces. Each PR gets a deliberate, reviewed
+  // addition against the 424 baseline before it must recover headroom elsewhere, not just
+  // add to the margin left by the last one. 3 points of headroom remain against the 430 cap
+  // — the next addition should still trim an existing item kind before asking for more
+  // budget (Gabriel: raise the cap only after measuring his own laptop).
+  assert.ok(after.total <= 427, `worst case ${after.total} exceeds the pinned baseline (424) + 3`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -180,11 +207,12 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // 400 on #209 alone; see the baseline comment above. The Hero look (issue #165 round 2)
   // adds its own 6 buckets on top of that (406), then the full skills equipment catalog
   // (issue #167: v1, the tool crib, and the raw-tool review round together) adds the rest —
-  // re-measured with everything in, not a hand-picked sum, landing it at 423. Still exactly
-  // one value across all 8 runs — the fixture's own seeded names
-  // (`tests/real-size-office.ts`) never change which hair style, face state or equipped item
-  // an agent lands on between runs, and the tool crib is one fixed static piece.
-  assert.deepEqual([...totals], [423], `expected every one of 8 runs to measure 423, got ${[...totals]}`);
+  // re-measured with everything in, not a hand-picked sum, landing it at 424 (not the
+  // first-pass undercount of 423: see the baseline comment above). Still exactly one value
+  // across all 8 runs — the fixture's own seeded names (`tests/real-size-office.ts`) never
+  // change which hair style, face state or equipped item an agent lands on between runs, and
+  // the tool crib is one fixed static piece.
+  assert.deepEqual([...totals], [424], `expected every one of 8 runs to measure 424, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

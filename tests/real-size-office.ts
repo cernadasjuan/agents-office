@@ -95,9 +95,20 @@ function toolsFor(i: number): string[] {
   return TOOL_SEQUENCES[i % TOOL_SEQUENCES.length];
 }
 
+/**
+ * Review (issue #167 round 2): alternating on `i % 2` let `code-review`'s loupe silently
+ * never win the hand slot — its only two non-suppressed occurrences (agents 4 and 30,
+ * `SKILL_SEQUENCES[4]`) both landed on the `i % 2 === 0` ("tool wins") side, so the fixture
+ * never actually equipped it despite the comment above claiming full coverage. Alternating
+ * on which full lap of `SKILL_SEQUENCES` this agent falls in, instead of on the agent's own
+ * index, guarantees every sequence's first lap (agents 0-12, repeat 0) wins the hand slot
+ * via `skill` before any `tool` override can suppress it — the fixture's worst case must
+ * equip every mapped kind at least once, not just the ones a lucky index happens to land on.
+ */
 function lastEquipSourceFor(i: number): 'skill' | 'tool' | undefined {
   if (!skillsFor(i)) return 'tool';
-  return i % 2 === 0 ? 'tool' : 'skill';
+  const lap = Math.floor(i / SKILL_SEQUENCES.length);
+  return lap % 2 === 0 ? 'skill' : 'tool';
 }
 
 /**
