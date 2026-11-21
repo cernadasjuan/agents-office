@@ -150,9 +150,13 @@ export function createRug(width: number, depth: number, color: number): THREE.Me
 export function createDecorations(): THREE.Group {
   const group = new THREE.Group();
 
-  // Corner plants (small)
+  // Corner plants (small). Review of #196: the NW corner (once plain wall) now sits right
+  // behind the widened mission wing's own hall-side door (`missionRooms.ts`'s `WING_COLUMNS`,
+  // column 0's door at x = -13.5, a gap of x = -14.7..-12.3), so that corner's plant moved out
+  // of the doorway's own entrance lane instead of staying at the other three corners' mirrored
+  // x = ±13.5. The other three corners (no door nearby) keep their original placement.
   const smallPlantPositions: [number, number, number][] = [
-    [-13.5, 0, -11.5],
+    [-10.5, 0, -12],
     [13.5, 0, -11.5],
     [-13.5, 0, 11.5],
     [13.5, 0, 11.5],

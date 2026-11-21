@@ -48,6 +48,33 @@ export function deskCameraPose(): { position: THREE.Vector3; lookAt: THREE.Vecto
   return { position, lookAt };
 }
 
+/**
+ * How far in front of the desk (toward the queue) the walk-up talk spot sits (issue #162):
+ * closer than the queue's own front row (`queueSpotWorldPositions`'s row 0, `d - 1.6`), so a
+ * selected agent visibly steps out of line to address Gabriel, but still nearer the queue than
+ * the desk itself — and, the one geometric fact this spot leans on, farther from the desk
+ * camera than either monitor (`MONITOR_D_OFFSET`, smaller than this offset): nothing can block
+ * a sightline to a point nearer the camera than itself is, so standing here can never put the
+ * agent between the camera and a monitor (`rayBlockedByQuad`, `desk-monitors.test.ts`'s own
+ * sightline check).
+ */
+export const DESK_TALK_SPOT_D_OFFSET = 1.0;
+
+/**
+ * Where a selected queued agent walks to address Gabriel directly (issue #162, desk mode
+ * only): centered on the desk, standing at floor level (review: `Seat.position` is the
+ * figure's root, not its eye point — every other standing `Seat` in this layout, `queueSpots`
+ * and the home desks, uses `frame.point`'s default height 0; `FIGURE_EYE_HEIGHT` here floated
+ * the figure's root joint at eye level instead of its feet), facing back toward the desk
+ * camera. Pure, the same "office is slot 0" assumption as the rest of this module.
+ */
+export function deskTalkSpotPose(): { position: THREE.Vector3; lookAt: THREE.Vector3 } {
+  const frame = officeFrame();
+  const position = frame.point(0, OFFICE_DESK.d - DESK_TALK_SPOT_D_OFFSET);
+  const lookAt = deskCameraPose().position;
+  return { position, lookAt };
+}
+
 /** Each monitor's own `a` offset: left negative, right positive. The one list every export below walks, so a mesh builder and a declutter/ray check can never see a different pair of monitors. */
 const MONITOR_A_OFFSETS = [-MONITOR_A_OFFSET, MONITOR_A_OFFSET] as const;
 

@@ -5,8 +5,8 @@ import { OFFICE_WALLS, type Station } from '../../scene/Office.js';
 import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, RoomView, Seat } from '../../layout/LayoutStrategy.js';
 import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type Rect, type RoomSlot } from './RoomPlanner.js';
-import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, type RoomKind } from './rooms.js';
-import { deskCameraPose, monitorWorldCorners } from './deskGeometry.js';
+import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, wallRects, type RoomKind, type WallRect } from './rooms.js';
+import { deskCameraPose, deskTalkSpotPose, monitorWorldCorners } from './deskGeometry.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
@@ -296,6 +296,26 @@ export class BuildingLayout implements LayoutStrategy {
   }
 
   /**
+   * Where a selected queued agent walks to address Gabriel directly (issue #162, desk mode
+   * only): a fixed spot in front of the desk, standing, facing the desk camera. Null without a
+   * rented office room yet — the same graceful degradation `deskView` uses.
+   */
+  deskTalkSpot(): Seat | null {
+    if (!this.rooms.some((room) => room.kind === 'office')) return null;
+    const pose = deskTalkSpotPose();
+    return { key: 'desk-talk-spot', position: pose.position, lookAt: pose.lookAt, posture: 'standing' };
+  }
+
+  /**
+   * Whether this agent currently queues in front of the user's own desk (issue #162): the only
+   * agents eligible to walk up to `deskTalkSpot`. A subagent, a war-room agent or anyone else
+   * waiting somewhere other than the queue never qualifies, even while selected.
+   */
+  isQueued(agentId: string): boolean {
+    return this.agents.get(agentId)?.target === 'queue';
+  }
+
+  /**
    * The room (building or mission) whose floor contains a world point, or null between rooms
    * or outside the building (issue #175, double-click a room in isometric). Pure rect
    * containment: cheap, and exact since rooms never overlap.
@@ -310,6 +330,31 @@ export class BuildingLayout implements LayoutStrategy {
       if (inside(room.slot.rect)) return roomViewFromSlot(room.slot);
     }
     return null;
+  }
+
+  /**
+   * Every wall in the building, as a flat 2D collision list (issue #194): the hall's own
+   * outer walls, every rented room's walls (with the doors it has grown), and every war
+   * room's walls. The same `rect`/`doors` pairs `rebuildHallWalls`, `rebuildRoomWalls` and
+   * `syncWorldRooms` already build real wall meshes from, run through `wallRects` instead
+   * of `buildWalls` — so the collision list can never drift from what actually draws.
+   * `ViewController` feeds this to `FreeCamera`'s ground-walk every frame; empty before any
+   * room exists, which `setWallColliders([])` already treats as unobstructed.
+   */
+  wallColliders(): WallRect[] {
+    const hallDoors = [
+      ...this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0),
+      ...[...this.missionRooms.values()].map((room) => room.slot).filter((slot) => slot.ring === 0),
+    ].map(matchingDoor);
+    const colliders: WallRect[] = [...wallRects(HALL, hallDoors)];
+    for (const record of this.rooms) {
+      const slot = slotFor(record.index);
+      colliders.push(...wallRects(slot.rect, [slot.door, ...record.extraDoors]));
+    }
+    for (const room of this.missionRooms.values()) {
+      colliders.push(...wallRects(room.slot.rect, [room.slot.door, ...room.extraDoors]));
+    }
+    return colliders;
   }
 
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
