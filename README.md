@@ -397,6 +397,20 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 - **Closed missions:** the room locks, its door closes and no agent goes in. The room stays.
 - Without `AGENTS_OFFICE_MISSION_ROOTS`, the plugin adds nothing. It reads files only, with a size cap.
 
+### floor-library: a floor's own shelves (issue #191 AC1, #119)
+
+The `floor-library` plugin reads one fixed path under each configured root — `documentation/bibliotheque/INDEX.md` — and, when it is there, shows that floor's own documentation as shelves in the library room.
+
+```bash
+AGENTS_OFFICE_PLUGINS=floor-library AGENTS_OFFICE_LIBRARY_ROOTS=/path/to/project-management pnpm dev:fork
+```
+
+- **One floor, one convention:** this never walks a repo looking for "a" documentation folder under any name or location. A root with no `documentation/bibliotheque/INDEX.md` gets no library room content at all (graceful degradation); a root that grows that structure later picks it up for free, with no code change.
+- **Sections come from the index, not the folder (Prospero's rule, #119 review):** a section is a top-level `<name>/INDEX.md` the top index links to, never a raw directory walk — a working folder (an inbox, a drafts area) that the top index does not link never becomes a shelf. Entries come the same way, from that section's own `INDEX.md` table rows (`| [Title](link) | Description |`); a row whose title, description or link mentions "archived" or "superseded" keeps a visible `(archived)` mark rather than being dropped.
+- **Per floor, never guessed:** each root is tagged with its own floor, the same `matchesFloor` rule `missions` and the GitHub kanban boards already use. On "all floors" nothing shows — there is no one focused floor to key "the focused floor's library" off.
+- **Shelves, not a canvas board:** the library room always exists (`BuildingLayout` rents it right after the office), so this is a self-contained extension that attaches to it, the same pattern `plugins/jira` already uses for the office's own wall board — no change to `RoomPlanner.ts`/`BuildingLayout.ts`. Each section gets a name plaque (visible near or zoomed in, like a room label) and an entry board (its own titles, visible on hover/pointed-at, like a mission room's detail signs) in the room's own clear far-wall gap. Both are `CSS2DObject` text, so they add zero draw calls.
+- Capped: top-level sections (8), entries per section (6) and shown shelves (3), sizes capped at the server (names 32 characters, titles 80).
+
 ### peek: recent lines, assets and equipment in the agent card
 
 The `peek` plugin adds three sections to the agent card: "Recent", "Assets" and "Equipment". It is off by default. `pnpm dev:fork` turns it on.
