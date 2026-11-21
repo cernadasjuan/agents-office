@@ -47,6 +47,19 @@ test('probeOffice: not reachable when the request times out (a slow office never
   assert.deepEqual(await probeOffice(5173, { timeoutMs: 20, fetchImpl }), { reachable: false, isOffice: false });
 });
 
+test('probeOffice: headers and body have independent budgets — slow headers do not eat into the body read', async () => {
+  // Headers take almost the entire headers budget to arrive; the body then reads instantly.
+  // With one shared budget this would fail (the body read starting with no time left). With
+  // the two budgets split, the body gets its own full window once the headers land, so a
+  // slow-but-live office still counts as the office for Gabriel.
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    if (init?.signal?.aborted) throw new Error('aborted before headers arrived');
+    return jsonResponse(200, OFFICE_HTML);
+  };
+  assert.deepEqual(await probeOffice(5173, { timeoutMs: 40, bodyTimeoutMs: 40, fetchImpl }), { reachable: true, isOffice: true });
+});
+
 test('probeOffice: reachable but not the office when the body read itself fails (headers arrived, the body did not)', async () => {
   const fetchImpl = (async () => ({
     status: 200,
@@ -64,6 +77,13 @@ test('probeOffice: reachable but not the office when the body read itself fails 
  * `fetch()` resolves the headers, but reading the body hangs until `probeOffice`'s own
  * `AbortController` fires. Binds to an OS-assigned port (never 5173), never writes past the
  * header line itself, and closes the raw socket in `finally` so nothing lingers.
+ *
+ * `timeoutMs` (the headers budget) is left generous and default-sized: real headers land in a
+ * single loopback write, so even full-suite CPU contention leaves it comfortable. `bodyTimeoutMs`
+ * (the body budget) is set tiny and given on its own: `probeOffice` only starts that timer once
+ * the headers above have actually arrived, so this never races header delivery against anything
+ * — it is a deterministic, injected budget for a body that never arrives, not a guess at how
+ * long the round trip might take under load.
  */
 test('probeOffice: a raw TCP server that sends headers then stalls the body counts as reachable, not down', async () => {
   const sockets: net.Socket[] = [];
@@ -78,13 +98,7 @@ test('probeOffice: a raw TCP server that sends headers then stalls the body coun
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('expected a bound TCP address');
   try {
-    // A generous, bounded timeout: the previous 100 ms raced the same budget against both
-    // "wait for the headers to land" and "declare the stalled body dead", which was comfortable
-    // in isolation but flaked under full-suite CPU contention, when the loopback write-then-read
-    // round trip can take longer than 100 ms to actually land. 2 s is still bounded — the body
-    // never arrives, so the probe always resolves well inside it — and gives that round trip
-    // enough room even when the machine is busy running the rest of the suite.
-    const result = await probeOffice(address.port, { timeoutMs: 2000 });
+    const result = await probeOffice(address.port, { bodyTimeoutMs: 50 });
     assert.deepEqual(result, { reachable: true, isOffice: false });
   } finally {
     // `server.close()` alone waits forever for a connection nobody ever ends; the stalled
