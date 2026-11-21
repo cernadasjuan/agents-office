@@ -29,7 +29,7 @@ test('the activity-layout scenario: a GitHub kanban board still shows when nothi
     const extension = new GithubOfficeExtension();
     extension.start(scene);
     extension.worldChanged({
-      plugins: ['github'], rooms: [], jiraTickets: [],
+      plugins: ['github'], rooms: [], jiraTickets: [], libraries: [],
       boards: [{ id: 'b', title: 'o/r', repo: 'o/r', columns: [{ name: 'To do', cards: [{ number: 1, title: 'x' }] }] }],
     });
     assert.equal(scene.children.filter((child) => child.name === 'github-kanban').length, 1);

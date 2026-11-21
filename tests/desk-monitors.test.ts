@@ -39,7 +39,7 @@ function managed(id: string, name: string, overrides: Partial<AgentInfo> = {}): 
 }
 
 function world(jiraTickets: WorldJiraTicket[] = []): World {
-  return { plugins: jiraTickets.length > 0 ? ['jira'] : [], rooms: [], boards: [], jiraTickets };
+  return { plugins: jiraTickets.length > 0 ? ['jira'] : [], rooms: [], boards: [], jiraTickets, libraries: [] };
 }
 
 test('without the office room in the scene, neither monitor mounts', () => {
