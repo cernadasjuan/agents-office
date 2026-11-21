@@ -24,13 +24,18 @@ import { furnishWarRoom, WAR_ROOM_WIDTH, type WarRoomCounts } from './warRoomFur
  * corridor itself opens into the hall once, at its own south end (`MISSION_CORRIDOR_DOOR`), so
  * the hall still reads as the one place every wing ultimately connects back to.
  *
- * Issue #193: a war room's door-wall width is `WAR_ROOM_WIDTH` (18), wider than a generic
+ * Issue #193: a war room's door-wall length is `WAR_ROOM_WIDTH` (18), wider than a generic
  * room's `ROOM_SIZE` (12, which stays its depth), so the desk grid fits 6-8 desks instead of
- * 4. Column 1's east edge stays pinned well clear of the east-side rented ring (`RoomPlanner.ts`'s
- * `slotFor`, ring 0 index 2, x >= 15, z in [-18, -6]) at any room count — the corridor only ever
- * grows north (more negative z), never widens, so this margin never erodes. Column 0's west
- * edge is unconstrained by the west-side rented ring: that ring sits at z in [-11, 13], never
- * overlapping a war room's z <= -13, by construction (`tests/mission-wing-overlap.test.ts`).
+ * 4. Issue #123 review (blocking defect 1): that door-wall length is the rect's extent
+ * *parallel* to the door, not always the rect's x-span — now the door sits on the east/west
+ * wall, `WAR_ROOM_WIDTH` is each row's own z-span (the wing's growth direction), and the
+ * rect's x-span (the depth from the door to the far wall) is `ROOM_SIZE`, same as any other
+ * room's depth. Column 1's east edge (x <= `CORRIDOR_MAX_X + ROOM_SIZE`, well under 15) stays
+ * clear of the east-side rented ring (`RoomPlanner.ts`'s `slotFor`, ring 0 index 2, x >= 15, z
+ * in [-18, -6]) at any room count — the corridor only ever grows north (more negative z),
+ * never widens, so this margin never erodes. Column 0's west edge is unconstrained by the
+ * west-side rented ring: that ring sits at z in [-11, 13], never overlapping a war room's
+ * z <= -13, by construction (`tests/mission-wing-overlap.test.ts`).
  */
 export const MISSION_CORRIDOR_WIDTH = 5;
 const CORRIDOR_CENTER_X = -9;
@@ -43,16 +48,24 @@ export const MISSION_CORRIDOR_DOOR: Door = { side: 'south', at: CORRIDOR_CENTER_
 /** The hall's own matching door for `MISSION_CORRIDOR_DOOR` (the wall it shares with the corridor). */
 export const MISSION_CORRIDOR_HALL_DOOR: Door = { side: 'north', at: CORRIDOR_CENTER_X };
 
+// Issue #123 review (blocking defect 1): a war room's door-wall length (the `a` axis every
+// desk-grid/furniture position in `warRoomFurnishing.ts` is authored against) is `WAR_ROOM_WIDTH`,
+// not `ROOM_SIZE` — true when the door sat on the north/south wall (that wall's own length is
+// the rect's x-span), and still true now the door sits on the east/west wall instead (that
+// wall's own length is the rect's z-span). So each row's rect runs `WAR_ROOM_WIDTH` along z
+// (parallel to its door, the wing's growth direction) and only `ROOM_SIZE` along x (the depth
+// from the door to the far wall) — the two dimensions from the pre-#123 room, kept on the same
+// meaning they always had, just carried by the other world axis now that the door moved.
 const WING_COLUMNS: Array<{ minX: number; maxX: number; side: Side }> = [
-  { minX: CORRIDOR_MIN_X - WAR_ROOM_WIDTH, maxX: CORRIDOR_MIN_X, side: 'east' },
-  { minX: CORRIDOR_MAX_X, maxX: CORRIDOR_MAX_X + WAR_ROOM_WIDTH, side: 'west' },
+  { minX: CORRIDOR_MIN_X - ROOM_SIZE, maxX: CORRIDOR_MIN_X, side: 'east' },
+  { minX: CORRIDOR_MAX_X, maxX: CORRIDOR_MAX_X + ROOM_SIZE, side: 'west' },
 ];
 
 export function missionSlot(index: number): RoomSlot {
   const column = WING_COLUMNS[index % WING_COLUMNS.length];
   const row = Math.floor(index / WING_COLUMNS.length);
-  const maxZ = -13 - row * ROOM_SIZE;
-  const rect = { minX: column.minX, maxX: column.maxX, minZ: maxZ - ROOM_SIZE, maxZ };
+  const maxZ = -13 - row * WAR_ROOM_WIDTH;
+  const rect = { minX: column.minX, maxX: column.maxX, minZ: maxZ - WAR_ROOM_WIDTH, maxZ };
   // Issue #123: every row's door opens onto its own frontage on the mission corridor, never
   // onto the row before or after it.
   const at = (rect.minZ + rect.maxZ) / 2;
@@ -62,12 +75,12 @@ export function missionSlot(index: number): RoomSlot {
 /**
  * The mission corridor's own rect (issue #123): the one shared frontage every war room's door
  * opens directly onto. Its south end is fixed, flush against the hall's own back wall; its
- * north end grows one `ROOM_SIZE` further out each time a new row is rented, so there is no
- * room-count cap on the wing it serves.
+ * north end grows one `WAR_ROOM_WIDTH` further out each time a new row is rented (the row's
+ * own height, issue #123 review defect 1), so there is no room-count cap on the wing it serves.
  */
 export function missionCorridorRect(roomCount: number): Rect {
   const rows = Math.max(1, Math.ceil(roomCount / WING_COLUMNS.length));
-  return { minX: CORRIDOR_MIN_X, maxX: CORRIDOR_MAX_X, minZ: -13 - rows * ROOM_SIZE, maxZ: -13 };
+  return { minX: CORRIDOR_MIN_X, maxX: CORRIDOR_MAX_X, minZ: -13 - rows * WAR_ROOM_WIDTH, maxZ: -13 };
 }
 
 /** The mission corridor's own floor (issue #123), the same open-mission tint every war room's
@@ -225,7 +238,20 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   // `TombstoneNameBatch` draws every tombstone's name in a single call regardless of count.
   const tombstones = new Map<string, { object: THREE.Object3D; nameplate: THREE.Object3D; name?: string }>();
   const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.4, 0.1), getToonMaterial(0x5a4a3a));
-  door.position.copy(frame.point(slot.door.at - (slot.rect.minX + slot.rect.maxX) / 2, 0.02, 1.2));
+  // Issue #123 review (blocking defect 2): `door.at` is a z-coordinate for an east/west door
+  // (the gap axis `wallPieces` uses for that side), not always an x-coordinate — subtracting
+  // the rect's x-center unconditionally put the closed-door slab in the wrong spot once the
+  // corridor fix moved war room doors onto the east/west wall.
+  const doorIsNorthSouth = slot.door.side === 'north' || slot.door.side === 'south';
+  const doorAlongCenter = doorIsNorthSouth
+    ? (slot.rect.minX + slot.rect.maxX) / 2
+    : (slot.rect.minZ + slot.rect.maxZ) / 2;
+  door.position.copy(frame.point(slot.door.at - doorAlongCenter, 0.02, 1.2));
+  // The slab's own width (2.4) runs along its local x axis; it only lines up with the door
+  // wall's own length (the rect's x-span) for a north/south door. An east/west door's wall
+  // runs along z instead, so the slab needs a quarter turn to stay flush with it, not poke
+  // 1.2 m out the room's side wall (issue #123 review, found while fixing blocking defect 2).
+  door.rotation.y = doorIsNorthSouth ? 0 : Math.PI / 2;
   door.visible = false;
   // The closed door stands in the doorway: it drops with the walls in the overview
   markCutaway(door);

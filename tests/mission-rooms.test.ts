@@ -271,3 +271,36 @@ test('the issue board is pickable, and its pick id points at this room', () => {
   assert.equal(target.id, 'issues:a');
   assert.ok(target.object instanceof THREE.Object3D);
 });
+
+// --- Issue #123 review (blocking defect 1): RoomFrame used a fixed ROOM_SIZE depth
+// regardless of door orientation, and the war room's own rect kept WAR_ROOM_WIDTH on the
+// wrong axis once the corridor fix moved the door to the east/west wall — together, these put
+// most of a war room's own furniture outside its own walls. ---
+
+/** Every wall's own thickness, and a door frame's own post width, legitimately straddle the
+ * rect boundary they sit on by half their own size — never more. A room full of furniture
+ * genuinely spilling out of its own walls (the regression this guards) measures in whole
+ * meters, not fractions of this margin. */
+const WALL_STRADDLE_TOLERANCE = 0.2;
+
+test('issue #123 review: every mesh of a built war room stays inside its own room rect, at several rows', () => {
+  const failures: string[] = [];
+  for (const index of [0, 1, 2, 3, 20]) {
+    const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index);
+    missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
+    missionRoom.group.updateMatrixWorld(true);
+    const { rect } = missionRoom.slot;
+    const bounds = new THREE.Box3(
+      new THREE.Vector3(rect.minX - WALL_STRADDLE_TOLERANCE, -1, rect.minZ - WALL_STRADDLE_TOLERANCE),
+      new THREE.Vector3(rect.maxX + WALL_STRADDLE_TOLERANCE, 10, rect.maxZ + WALL_STRADDLE_TOLERANCE),
+    );
+    missionRoom.group.traverse((object) => {
+      if (!(object as THREE.Mesh).isMesh) return;
+      const box = new THREE.Box3().setFromObject(object);
+      if (!bounds.containsBox(box)) {
+        failures.push(`room ${index}: ${object.name || object.userData.piece || '(unnamed mesh)'} at ${JSON.stringify(box)} falls outside rect ${JSON.stringify(rect)}`);
+      }
+    });
+  }
+  assert.deepEqual(failures, []);
+});
