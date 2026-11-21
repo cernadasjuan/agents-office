@@ -32,7 +32,7 @@ test('parseConfig drops an empty value, leaving the plugin at its old default', 
 
 test('defaultConfigTemplate documents every known key, commented out', () => {
   const template = defaultConfigTemplate();
-  for (const key of ['AGENTS_OFFICE_MISSION_ROOTS', 'AGENTS_OFFICE_GITHUB_REPOS', 'AGENTS_OFFICE_PORTRAIT']) {
+  for (const key of ['AGENTS_OFFICE_MISSION_ROOTS', 'AGENTS_OFFICE_GITHUB_REPOS', 'AGENTS_OFFICE_PORTRAIT', 'AGENTS_OFFICE_LIBRARY_ROOTS']) {
     assert.match(template, new RegExp(`# ${key}=`));
   }
 });

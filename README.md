@@ -48,14 +48,14 @@ scripts/install-launcher.sh
 
 This builds `Agents Office.app` into `~/Applications` (pass a folder as the one argument to
 install somewhere else) and, on the first run, creates a config file at
-`~/Library/Application Support/AgentsOffice/launcher.env` for your mission roots, GitHub
-repos and office portrait (see the file's own comments). Rerun the command after a `git pull`
-or after moving the clone, so the launcher keeps pointing at the right path.
+`~/Library/Application Support/AgentsOffice/launcher.env` for your mission roots, library
+roots, GitHub repos and office portrait (see the file's own comments). Rerun the command
+after a `git pull` or after moving the clone, so the launcher keeps pointing at the right path.
 
 Opening "Agents Office":
 - **Cold start** (nothing answers the port): starts the dev server with this fork's plugins
-  (`herdr,github,bmad,missions,library,peek,skills`, the same set as `pnpm dev:fork`) in the
-  background, then opens the office in your default browser.
+  (`herdr,github,bmad,missions,library,peek,skills,floor-library`, the same set as
+  `pnpm dev:fork`) in the background, then opens the office in your default browser.
 - **Warm start** (the office already answers the port): opens the office in your browser
   only; it never starts a second server.
 - **Port busy with another app**: something else answers the port, but it is not this office.
@@ -304,7 +304,7 @@ npx agents-office --plugin name1 --plugin name2
 
 A plugin is a folder `plugins/<name>/` with an `index.ts` (server: sources, enrichers, rooms and boards) and an optional `client.ts` (browser rendering). The server copies only whitelisted, cleaned fields to the browser.
 
-`pnpm dev:fork` starts the office with the plugins of this fork (`herdr`, `github`, `bmad`, `missions`, `library`, `peek`) and turns on herdr focus (`AGENTS_OFFICE_HERDR_FOCUS=1`).
+`pnpm dev:fork` starts the office with the plugins of this fork (`herdr`, `github`, `bmad`, `missions`, `library`, `peek`, `skills`, `floor-library`) and turns on herdr focus (`AGENTS_OFFICE_HERDR_FOCUS=1`).
 
 ### bmad: persona hats
 
@@ -405,6 +405,21 @@ AGENTS_OFFICE_MISSION_ROOTS=/path/to/project-management pnpm dev:fork
 - **Signs:** the room name is a large label above the room, like the other rooms. The small title sign shows only when you zoom in (overview camera distance 24 or less), come near it in first person (12 units), or point at the room. The past sessions count sign shows only when you point at it. `#labels=all` (key V) shows all signs. The "You" sign at your desk follows the same rule. (Each tombstone's own engraved name is not one of these signs: it is baked into the stone's own face, not a CSS2D detail sign, so it is not part of the smart/all label system at all.)
 - **Closed missions:** the room locks, its door closes and no agent goes in. The room stays.
 - Without `AGENTS_OFFICE_MISSION_ROOTS`, the plugin adds nothing. It reads files only, with a size cap.
+
+### floor-library: a floor's own shelves (issue #191 AC1, #119)
+
+The `floor-library` plugin reads one fixed path under each configured root — `documentation/bibliotheque/INDEX.md` — and, when it is there, shows that floor's own documentation as shelves in the library room.
+
+```bash
+AGENTS_OFFICE_PLUGINS=floor-library AGENTS_OFFICE_LIBRARY_ROOTS=/path/to/project-management pnpm dev:fork
+```
+
+- **One floor, one convention:** this never walks a repo looking for "a" documentation folder under any name or location. A root with no `documentation/bibliotheque/INDEX.md` gets no library room content at all (graceful degradation); a root that grows that structure later picks it up for free, with no code change.
+- **Sections come from the index, not the folder (Prospero's rule, #119 review):** a section is a top-level `<name>/INDEX.md` the top index links to, never a raw directory walk — a working folder (an inbox, a drafts area) that the top index does not link never becomes a shelf. Entries come the same way, from that section's own `INDEX.md` table rows (`| [Title](link) | Description |`); a row whose title, description or link mentions "archived" or "superseded" keeps a visible `(archived)` mark rather than being dropped.
+- **Per floor, never guessed:** each root is tagged with its own floor, the same `matchesFloor` rule `missions` and the GitHub kanban boards already use. On "all floors" (the default view every cold start lands on) there is no one focused floor to key "the focused floor's library" off: with exactly one library configured it shows anyway, rather than hiding the whole feature behind a floor switch; with more than one, every library's sections list together instead of guessing which floor matters most.
+- The launcher config file (`~/Library/Application Support/AgentsOffice/launcher.env`) can also set `AGENTS_OFFICE_LIBRARY_ROOTS`, the same comma-separated shape, so the macOS launcher app picks it up without a terminal.
+- **Shelves, not a canvas board:** the library room always exists (`BuildingLayout` rents it right after the office), so this is a self-contained extension that attaches to it, the same pattern `plugins/jira` already uses for the office's own wall board — no change to `RoomPlanner.ts`/`BuildingLayout.ts`. Each section gets a name plaque (visible near or zoomed in, like a room label) and an entry board (its own titles, visible on hover/pointed-at, like a mission room's detail signs) in the room's own clear far-wall gap. Both are `CSS2DObject` text, so they add zero draw calls.
+- Capped: top-level sections (8), entries per section (6) and shown shelves (3), sizes capped at the server (names 32 characters, titles 80).
 
 ### peek: recent lines, assets and equipment in the agent card
 
