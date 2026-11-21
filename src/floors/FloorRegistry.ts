@@ -110,6 +110,29 @@ export function rememberFloor(floor: string, storage: Pick<FloorStorage, 'setIte
   storage?.setItem(FOCUSED_FLOOR_KEY, floor);
 }
 
+/**
+ * A floor name's own trailing segment: the bare repo name, with any org-qualifying parent
+ * directory dropped (`server/floor.ts`'s own rule adds that parent only to tell apart two
+ * repos that share a leaf folder name under different organizations — a plugin tagging its
+ * own data with a repo never knows or needs that parent, see `matchesFloor` below).
+ */
+export function floorRepo(floor: string): string {
+  return floor.slice(floor.lastIndexOf('/') + 1);
+}
+
+/**
+ * Whether a repo-tagged datum (a mission war room, a GitHub kanban board, issue #191) belongs
+ * on a focused floor. A plugin's own repo tag is always the bare repo name (`server/seam.ts`'s
+ * `repoShortName`), while the focused floor may be org-qualified (`owner/repo`) — so this
+ * compares against the floor's own trailing segment, never exact string equality. A missing
+ * tag (a room or board whose own repo could not be resolved at all) never matches a specific
+ * floor: review, it must not silently guess onto whichever floor happens to be focused; it
+ * only ever shows on `ALL_FLOORS` (the caller's own job to check, not this function's).
+ */
+export function matchesFloor(floor: string, repo: string | undefined): boolean {
+  return repo !== undefined && floorRepo(floor) === repo;
+}
+
 /** The parts of `window.location` a floor switch needs; injectable for tests. */
 export interface FloorSwitchLocation {
   href: string;

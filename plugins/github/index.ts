@@ -68,7 +68,7 @@ export function createGithubPlugin(options: GithubPluginOptions = {}): OfficePlu
         const boards: BoardInput[] = [];
         for (const repo of repos) {
           const issues = cache.issues(repo);
-          if (issues) boards.push({ key: `github:${repo}`, title: repo, columns: boardColumns(issues, now()) });
+          if (issues) boards.push({ key: `github:${repo}`, title: repo, columns: boardColumns(issues, now()), repo: shortName(repo) });
         }
         return boards.length > 0 ? { boards } : {};
       },

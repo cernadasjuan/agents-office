@@ -94,6 +94,43 @@ test('the mission\'s root issue appears first in the issue list', () => {
   assert.equal(mission?.issues.length, 2);
 });
 
+// --- Issue #191: a mission tags its own repo, for the focused floor to scope its war room by ---
+
+test('a mission\'s repo comes from its root issue first, the bare short name, not owner/repo', () => {
+  const mission = summarizeMission('x', { root_issue: { number: 1, url: 'https://github.com/gabriel-amyot/agents-office/issues/1' } });
+  assert.equal(mission?.repo, 'agents-office');
+});
+
+test('without a root issue, a mission falls back to its first GitHub member\'s repo', () => {
+  const mission = summarizeMission('x', { members: [
+    { kind: 'folder', ref: 'tickets/x', title: 'Folder' },
+    { kind: 'gh', ref: 'gabriel-amyot/widget-service#9', title: 'Fix' },
+  ] });
+  assert.equal(mission?.repo, 'widget-service');
+});
+
+test('with no GitHub reference at all, a mission falls back to its own root directory\'s floor', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-missions-root-'));
+  const repoDir = path.join(fixtureRoot, 'someorg', 'project-xyz');
+  fs.mkdirSync(path.join(repoDir, '.git'), { recursive: true });
+  try {
+    const mission = summarizeMission('x', { title: 'No GH ref' }, repoDir);
+    assert.equal(mission?.repo, 'project-xyz', 'the bare repo name, its org-qualifying parent dropped for the tag');
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('with no GitHub reference and a root that resolves to no repo at all, a mission tags the general floor', () => {
+  const mission = summarizeMission('x', { title: 'No GH ref, no repo' }, root);
+  assert.equal(mission?.repo, 'general');
+});
+
+test('with no GitHub reference and no root given, a mission carries no repo tag', () => {
+  const mission = summarizeMission('x', { title: 'No GH ref, no root' });
+  assert.ok(!('repo' in mission!));
+});
+
 test('a done mission is a locked room, and folders that are not missions are skipped', () => {
   const missions = readMissions([root]);
   assert.equal(missions.find((m) => m.slug === 'old-mission')?.state, 'locked');

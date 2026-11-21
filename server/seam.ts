@@ -112,6 +112,13 @@ export interface RoomInput {
   /** For the missions board (issue #144): when a mission started, and when a closed one stopped. */
   createdAt?: string;
   closedAt?: string;
+  /** The repo this room scopes to, for the focused floor to filter by (issue #191). A bare
+   * repo short name (never `owner/repo`, `server/seam.ts`'s own `repoShortName`), matched on
+   * the client against a floor's own trailing segment (`src/floors/FloorRegistry.ts`'s
+   * `matchesFloor`) rather than compared for exact equality, since a floor may be
+   * org-qualified while this tag never is. Absent only when no repo could be resolved at all;
+   * such a room shows on `ALL_FLOORS` only, never guessed onto one specific floor. */
+  repo?: string;
   walls?: {
     statement?: string;
     docs?: string[];
@@ -125,6 +132,8 @@ export interface BoardInput {
   key: string;
   title: string;
   columns: Array<{ name: string; cards: Array<{ number: number; title: string }> }>;
+  /** The repo this board scopes to (issue #191), the same whitelist and client matching rule as `RoomInput.repo`. */
+  repo?: string;
 }
 
 /** One ticket of a personal Jira board (issue #145). `url` is the browse link built from the key. */
@@ -262,8 +271,10 @@ function isoTimestamp(value: unknown): string | undefined {
 
 const REPO_SHORT = /^[A-Za-z0-9_.-]{1,40}$/;
 
-/** The repository name after the last slash, or undefined when it is not a plain short token. */
-function repoShortName(value: unknown): string | undefined {
+/** The repository name after the last slash, or undefined when it is not a plain short token
+ * (issue #191: shared with `RoomInput`/`BoardInput`'s own `repo` tag, below, since a mission or a
+ * GitHub kanban board whitelists its repo through the exact same shape as an agent's issue card). */
+export function repoShortName(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const short = value.slice(value.lastIndexOf('/') + 1);
   return REPO_SHORT.test(short) && short !== '.' && short !== '..' ? short : undefined;
@@ -519,6 +530,7 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         const story = projectStory(entry?.story);
         return [{ id: publicId(`sleeper:${room.key}:${rawId}`), ...(endedAt ? { endedAt } : {}), ...(name ? { name } : {}), ...(story ? { story } : {}) }];
       });
+    const repo = repoShortName(room.repo);
     return {
       id: publicId(`room:${room.key}`),
       kind: room.kind === 'workspace' ? 'workspace' : 'mission',
@@ -527,6 +539,7 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
       ...(sleepers.length > 0 ? { sleepers } : {}),
       ...(isoTimestamp(room.createdAt) ? { createdAt: isoTimestamp(room.createdAt) } : {}),
       ...(isoTimestamp(room.closedAt) ? { closedAt: isoTimestamp(room.closedAt) } : {}),
+      ...(repo ? { repo } : {}),
       walls: {
         ...(walls.statement ? { statement: displayText(walls.statement, 240) } : {}),
         ...(Array.isArray(walls.docs) ? { docs: walls.docs.slice(0, 8).map((doc) => displayText(doc, 60)) } : {}),
@@ -555,6 +568,7 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         .map((card) => ({ number: wholeNumber(card.number, 10_000_000), title: displayText(card.title, 60) }))
         .filter((card) => card.number !== undefined),
     })),
+    ...(repoShortName(board.repo) ? { repo: repoShortName(board.repo) } : {}),
   }));
   const jiraTickets = parts.flatMap((part) => part.jiraTickets ?? []).slice(0, 50)
     .map(jiraTicket).filter((ticket): ticket is NonNullable<ReturnType<typeof jiraTicket>> => ticket !== undefined);

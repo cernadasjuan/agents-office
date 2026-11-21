@@ -128,6 +128,15 @@ test('the board has To do, In progress and Done columns derived from state, assi
   assert.deepEqual(columns, { 'To do': [1], 'In progress': [2, 3, 4, 38], Done: [5] });
 });
 
+// --- Issue #191: a board scopes to its own repo, for the focused floor to filter by ---
+
+test('a board carries its own repo short name, for the focused floor to scope by', async () => {
+  const { plugin: p } = plugin('gabriel-amyot/agents-office');
+  const { boards } = projectWorld(await world(p), ['github'], (raw) => `h(${raw})`);
+
+  assert.equal(boards[0].repo, 'agents-office');
+});
+
 test('Done keeps closed issues of the last 7 days, newest first, at most 8', () => {
   const closed = Array.from({ length: 12 }, (_, i) => ({ number: i + 1, title: `c${i + 1}`, open: false,
     inProgressLabel: false, assigned: false, updatedAt: NOW - (i + 1) * 3_600_000 }));

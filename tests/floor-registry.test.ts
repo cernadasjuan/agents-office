@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  ALL_FLOORS, defaultFloor, floorFromHash, floorRoomsStorageKey, GENERAL_FLOOR, isFloorName,
-  knownFloors, LEGACY_ROOMS_KEY, reloadForFloorSwitch, rememberFloor,
+  ALL_FLOORS, defaultFloor, floorFromHash, floorRepo, floorRoomsStorageKey, GENERAL_FLOOR, isFloorName,
+  knownFloors, LEGACY_ROOMS_KEY, matchesFloor, reloadForFloorSwitch, rememberFloor,
 } from '../src/floors/FloorRegistry.js';
 
 function memoryStorage(initial: Record<string, string> = {}): { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void; data: Map<string, string> } {
@@ -93,6 +93,26 @@ test('rememberFloor stores the chosen floor under its own key', () => {
   const storage = memoryStorage();
   rememberFloor('widget-service', storage);
   assert.equal(storage.getItem('agents-office.floor'), 'widget-service');
+});
+
+// --- floorRepo / matchesFloor (issue #191: scoping a mission or kanban board's own repo tag
+// against the focused floor, which may be org-qualified while the tag never is) ---
+
+test('floorRepo keeps a bare floor name as-is and drops an org-qualifying parent', () => {
+  assert.equal(floorRepo('agents-office'), 'agents-office');
+  assert.equal(floorRepo('gabriel-amyot/agents-office'), 'agents-office');
+  assert.equal(floorRepo('grp-beklever-com/project-management'), 'project-management');
+  assert.equal(floorRepo(GENERAL_FLOOR), GENERAL_FLOOR);
+});
+
+test('matchesFloor compares a repo tag against the floor\'s own trailing segment, not exact equality', () => {
+  assert.equal(matchesFloor('agents-office', 'agents-office'), true);
+  assert.equal(matchesFloor('gabriel-amyot/agents-office', 'agents-office'), true, 'an org-qualified floor still matches the bare repo tag');
+  assert.equal(matchesFloor('agents-office', 'widget-service'), false);
+});
+
+test('matchesFloor never matches a specific floor when the tag is missing (unscoped data shows only on "all floors", never guessed onto one)', () => {
+  assert.equal(matchesFloor('agents-office', undefined), false);
 });
 
 // --- reloadForFloorSwitch ---

@@ -22,6 +22,13 @@ const { GithubOfficeExtension, KANBAN_BOARD_SLOTS } = await import('../plugins/g
 const { CARD_NEUTRAL_BORDER, VERTICES_PER_CARD } = await import('../plugins/github/cards.js');
 const { issueIdsLine, ISSUE_LINE_MAX_CHARACTERS } = await import('../plugins/github/labelIds.js');
 const { countDrawCalls } = await import('../src/scene/RenderBudget.js');
+const { ALL_FLOORS } = await import('../src/floors/FloorRegistry.js');
+const { setFocusedFloor } = await import('../src/floors/floorState.js');
+
+// Every pre-existing test in this file predates floor scoping (issue #191) and never names a
+// repo on its own boards: "all floors" is the one focus that never filters by repo, so it keeps
+// every one of them passing unchanged. The per-floor scoping tests below set their own focus.
+setFocusedFloor(ALL_FLOORS);
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -102,6 +109,30 @@ test('each board hangs on the wall as a framed canvas, redrawn only when its dat
 
   extension.worldChanged(world([]));
   assert.equal(boards().length, 0);
+});
+
+// --- Issue #191: a board scopes to the focused floor's own repo ---
+
+test('on a specific floor, only the board whose repo matches the focused floor hangs; "all floors" keeps showing every board', () => {
+  const scene = new THREE.Scene();
+  const extension = new GithubOfficeExtension();
+  extension.start(scene);
+  const boards = () => scene.children.filter((child) => child.name === 'github-kanban');
+  const tagged = (repo: string) => ({ ...board(repo), repo });
+
+  setFocusedFloor('agents-office');
+  extension.worldChanged(world([tagged('agents-office'), tagged('widget-service')]));
+  assert.equal(boards().length, 1);
+
+  setFocusedFloor('gabriel-amyot/agents-office');
+  extension.worldChanged(world([]));
+  extension.worldChanged(world([tagged('agents-office'), tagged('widget-service')]));
+  assert.equal(boards().length, 1, 'an org-qualified floor still matches the bare repo tag');
+
+  setFocusedFloor(ALL_FLOORS);
+  extension.worldChanged(world([]));
+  extension.worldChanged(world([tagged('agents-office'), tagged('widget-service')]));
+  assert.equal(boards().length, 2);
 });
 
 // --- Badges on the shoulders and upper arms, upright and facing the camera (issue #77) ---
