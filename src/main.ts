@@ -271,15 +271,18 @@ window.setInterval(() => void pollWorld(), 10_000);
 const poller = new AgentPoller(agentManager, undefined, focusFloor);
 // Issue #191 review (blocking): a floor chosen before it was renamed (the remote-naming
 // revision, for example) can match zero currently observed agents. Checked once, against the
-// first poll's own raw agent list (the same point the design already treats as authoritative
-// for floor decisions, review: "a fresh page load has not polled any agent yet"): if the
-// focused floor is no longer known, it bounces back to All floors through the same reload path
-// a manual floor switch uses, rather than silently leaving the whole building — agents, rooms
-// and kanban boards alike — filtered down to nothing with no indication why.
+// first poll with any agents in it at all (review follow-up: an empty poll is not evidence
+// either way — `floorStillKnown` already treats it as "still known" — so consuming the
+// one-shot check on an empty poll would permanently disable this bounce for the rest of the
+// page's life, the exact blocker this exists to catch, the moment a quiet startup is followed
+// by real activity): if that first populated poll says the focused floor is no longer known,
+// it bounces back to All floors through the same reload path a manual floor switch uses,
+// rather than silently leaving the whole building — agents, rooms and kanban boards alike —
+// filtered down to nothing with no indication why.
 let checkedFloorIsKnown = false;
 poller.start(3000, buildUI, (health) => freshness.show(health), (agents) => {
   floorSwitch?.render(agents);
-  if (!checkedFloorIsKnown && focusFloor !== undefined) {
+  if (!checkedFloorIsKnown && focusFloor !== undefined && agents.length > 0) {
     checkedFloorIsKnown = true;
     if (!floorStillKnown(focusFloor, agents)) {
       rememberFloor(ALL_FLOORS, window.localStorage);
