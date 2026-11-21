@@ -174,6 +174,13 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   const key = (n: number) => `mission${index}_seat_${n}`;
   const type = `room:${room.id}`;
 
+  // Issue #123 review round 2: the door-wall's own length (the `a` axis every along-the-wall
+  // mount, the kanban board and the closed-door slab both included, is authored against) is
+  // the rect's x-span for a north/south door, its z-span for an east/west one — same rule
+  // `RoomFrame` uses for depth, just the complementary dimension.
+  const doorIsNorthSouth = slot.door.side === 'north' || slot.door.side === 'south';
+  const doorWallLength = doorIsNorthSouth ? slot.rect.maxX - slot.rect.minX : slot.rect.maxZ - slot.rect.minZ;
+
   // Issue #193: a war room's own width (`WAR_ROOM_WIDTH`) is wider than its depth
   // (`ROOM_SIZE`, unchanged), so the floor is the slot's real rect, not a square.
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(slot.rect.maxX - slot.rect.minX, slot.rect.maxZ - slot.rect.minZ), getToonMaterial(FLOOR_OPEN));
@@ -223,7 +230,11 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   mount(boards.statement.mesh, 0, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
   mount(boards.docs.mesh, -3.6, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
   mount(boards.issues.mesh, 3.6, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
-  mount(boards.kanban.mesh, (slot.rect.maxX - slot.rect.minX) / 2 - 0.12, 6, 1.7, frame.faceDoor - Math.PI / 2);
+  // Issue #123 review round 2: this used the rect's x-span unconditionally, left over from
+  // when the door wall always ran along x — once the corridor fix moved war room doors onto
+  // the east/west wall, the door-wall's real length became the rect's z-span instead, and the
+  // board floated 3+ meters off the side wall it is meant to sit flush against.
+  mount(boards.kanban.mesh, doorWallLength / 2 - 0.12, 6, 1.7, frame.faceDoor - Math.PI / 2);
 
   // Issue #124: the title and lock signs sit on the far wall, over the statement board, not
   // near the door frame (the narration: "they are in the door frames so it's kind of weird").
@@ -242,7 +253,6 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   // (the gap axis `wallPieces` uses for that side), not always an x-coordinate — subtracting
   // the rect's x-center unconditionally put the closed-door slab in the wrong spot once the
   // corridor fix moved war room doors onto the east/west wall.
-  const doorIsNorthSouth = slot.door.side === 'north' || slot.door.side === 'south';
   const doorAlongCenter = doorIsNorthSouth
     ? (slot.rect.minX + slot.rect.maxX) / 2
     : (slot.rect.minZ + slot.rect.maxZ) / 2;

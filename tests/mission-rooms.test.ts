@@ -304,3 +304,30 @@ test('issue #123 review: every mesh of a built war room stays inside its own roo
   }
   assert.deepEqual(failures, []);
 });
+
+// --- Issue #123 review round 2: the kanban board's own along-the-door-wall offset still used
+// the rect's x-span unconditionally (left over from when the door wall always ran along x),
+// so once the corridor fix put war room doors on the east/west wall, the board floated meters
+// off the side wall it is meant to sit flush against, instead of touching it. ---
+
+test('issue #123 review round 2: the kanban board sits flush against a side wall, in both wing columns', () => {
+  for (const index of [0, 1]) {
+    const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index);
+    missionRoom.group.updateMatrixWorld(true);
+    const { rect, door } = missionRoom.slot;
+    assert.ok(door.side === 'east' || door.side === 'west', `expected an east/west door, got ${door.side}`);
+    let kanban: THREE.Mesh | undefined;
+    missionRoom.group.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      const geometry = mesh.geometry as THREE.PlaneGeometry | undefined;
+      if (mesh.isMesh && geometry?.parameters?.width === 3.6 && geometry?.parameters?.height === 1.8) kanban = mesh;
+    });
+    if (!kanban) throw new Error(`room ${index}: kanban board mesh not found`);
+    const position = kanban.getWorldPosition(new THREE.Vector3());
+    // A side wall runs the room's full depth at the rect's own z-extremes (the door wall's
+    // east/west rows run along z); flush against one of them means within wall thickness of
+    // minZ or maxZ, never floating meters toward the room's own z-center.
+    const distanceToNearestWall = Math.min(Math.abs(position.z - rect.minZ), Math.abs(position.z - rect.maxZ));
+    assert.ok(distanceToNearestWall < 0.2, `room ${index}: kanban board at z=${position.z} is ${distanceToNearestWall.toFixed(2)}m from the nearest side wall (rect ${JSON.stringify(rect)})`);
+  }
+});
