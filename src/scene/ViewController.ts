@@ -48,8 +48,13 @@ export interface ViewControllerOptions {
   figureShiftPx?: () => number;
   /** `#room=<name>` (issue #89): where the camera should go to show that room, from the active layout. Without it, or for a layout with no rooms, `#room=` does nothing. */
   roomView?: (name: string) => RoomView | null;
-  /** Issue #161: where the fixed desk-view camera sits, from the active layout. Without it (or a null return), key `H` and the idle timeout do nothing — graceful degradation, there is no desk to show. */
-  deskView?: () => { position: THREE.Vector3; lookAt: THREE.Vector3 } | null;
+  /**
+   * Issue #161: where the fixed desk-view camera sits, from the active layout. Without it (or
+   * a null return), key `H` and the idle timeout do nothing — graceful degradation, there is
+   * no desk to show. `fov` (issue #199) is optional: the shared camera's own FOV while desk
+   * mode is omitted — a layout, or a test fixture, that leaves it out keeps the old behavior.
+   */
+  deskView?: () => { position: THREE.Vector3; lookAt: THREE.Vector3; fov?: number } | null;
   /** Issue #175: the room (if any) whose floor contains this world point, for a double-click in the isometric view. Without it, double-click does nothing. */
   roomAt?: (x: number, z: number) => RoomView | null;
   /** Issue #161: seconds of no camera input before the office settles into the desk view. Default 120; tests pass a short one. */
@@ -101,6 +106,8 @@ export class ViewController {
   /** Seconds since the last camera input (issue #161); the desk view's idle default. */
   private idleSeconds = 0;
   private idleTimeoutSeconds: number;
+  /** Issue #199: the shared camera's own FOV from just before desk mode widened it, restored on the way out. Null outside desk mode, and while a `deskView` never sets `fov` at all (graceful degradation, no lens change). */
+  private deskRestoreFov: number | null = null;
 
   constructor(private options: ViewControllerOptions) {
     this.selection = options.selection ?? officeSelection();
@@ -221,6 +228,18 @@ export class ViewController {
     // Ground-walk (FreeCamera) stays off for the whole time the camera is locked at the desk.
     if (mode === 'desk') setMovementEnabled(false);
     else if (previous === 'desk') setMovementEnabled(true);
+    // Issue #199: desk mode widens the shared camera's own FOV, when the active layout supplies
+    // one, so the nearest queue row's outer pair clears the frustum; restored on the way out so
+    // first person and isometric keep the normal lens (graceful degradation without a `fov`).
+    if (mode === 'desk' && deskPose!.fov !== undefined) {
+      this.deskRestoreFov = this.options.camera.fov;
+      this.options.camera.fov = deskPose!.fov;
+      this.options.camera.updateProjectionMatrix();
+    } else if (previous === 'desk' && this.deskRestoreFov !== null) {
+      this.options.camera.fov = this.deskRestoreFov;
+      this.options.camera.updateProjectionMatrix();
+      this.deskRestoreFov = null;
+    }
     this.setHint();
     if (mode === 'isometric') {
       this.flight = null;

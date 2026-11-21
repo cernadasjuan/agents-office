@@ -167,19 +167,46 @@ test('the desk talk spot sits farther from the desk camera than either monitor, 
   assert.deepEqual(blocked, [], `${blocked.length} monitor(s) stand between the camera and the talk spot`);
 });
 
-test('both monitor faces sit inside the desk camera\'s own view frustum', () => {
-  const { position, lookAt } = deskCameraPose();
-  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
+// Issue #199: the three window sizes the AC pins — 1280x800 and 1600x1000 share the tighter
+// 1.6 aspect, 1920x1080 the wider 1.7778 — so a fix tuned to only one of them (the old test
+// below only ever checked 16:9) can still ship a regression for the other two.
+const DESK_VIEW_ASPECTS = [1280 / 800, 1600 / 1000, 1920 / 1080];
+
+function deskFrustum(aspect: number): THREE.Frustum {
+  const { position, lookAt, fov } = deskCameraPose();
+  const camera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 100);
   camera.position.copy(position);
   camera.lookAt(lookAt);
   camera.updateMatrixWorld();
   camera.updateProjectionMatrix();
-  const frustum = new THREE.Frustum().setFromProjectionMatrix(
+  return new THREE.Frustum().setFromProjectionMatrix(
     new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
   );
-  for (const [side, quad] of (['left', 'right'] as const).map((s, i) => [s, monitorWorldCorners()[i]!] as const)) {
-    const box = new THREE.Box3().setFromPoints(quad);
-    assert.ok(frustum.intersectsBox(box), `the ${side} monitor is outside the desk camera's own frustum`);
+}
+
+test('both monitor faces sit inside the desk camera\'s own view frustum, at every supported aspect ratio', () => {
+  for (const aspect of DESK_VIEW_ASPECTS) {
+    const frustum = deskFrustum(aspect);
+    for (const [side, quad] of (['left', 'right'] as const).map((s, i) => [s, monitorWorldCorners()[i]!] as const)) {
+      const box = new THREE.Box3().setFromPoints(quad);
+      assert.ok(frustum.intersectsBox(box), `the ${side} monitor is outside the desk camera's own frustum at aspect ${aspect.toFixed(3)}`);
+    }
+  }
+});
+
+// Issue #199: the office holds 23 queue spots at most (5 rows); 1, 6, 14 and 23 waiting agents
+// each occupy a growing prefix of them (fill order, `furnishing.ts`'s own queueSpots comment),
+// so checking those four prefixes covers "a few waiting" through "the office is full" — and,
+// before this fix, the nearest row's outer pair (`a = ±4.6`, filled at 6 waiting) failed every
+// one of these counts and every aspect, exactly the bug report.
+test('every queue spot clears the desk camera\'s frustum for 1, 6, 14 and 23 waiting agents, at every supported aspect ratio', () => {
+  const spots = queueSpotWorldPositions();
+  for (const aspect of DESK_VIEW_ASPECTS) {
+    const frustum = deskFrustum(aspect);
+    for (const waiting of [1, 6, 14, 23]) {
+      const outside = spots.slice(0, waiting).filter((spot) => !frustum.containsPoint(spot));
+      assert.deepEqual(outside, [], `${outside.length} of ${waiting} queue spot(s) sit outside the frustum at aspect ${aspect.toFixed(3)}`);
+    }
   }
 });
 

@@ -265,7 +265,7 @@ export class BuildingLayout implements LayoutStrategy {
    * has one at construction, so this should not happen in practice, but a fresh office render
    * mid-rebuild is still handled the same way `roomView` handles an unknown name.
    */
-  deskView(): { position: THREE.Vector3; lookAt: THREE.Vector3 } | null {
+  deskView(): { position: THREE.Vector3; lookAt: THREE.Vector3; fov: number } | null {
     if (!this.rooms.some((room) => room.kind === 'office')) return null;
     return deskCameraPose();
   }
