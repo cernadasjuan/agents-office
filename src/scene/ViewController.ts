@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
 import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, setWallColliders, updateFreeCamera } from './FreeCamera.js';
-import { IsometricController, applyIsometricState, followIsometric, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
+import { DIRECT_FOLLOW_RATES, FLIGHT_FOLLOW_RATES, IsometricController, applyIsometricState, followIsometric, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricFollowRates, type IsometricState } from './IsometricCamera.js';
 import { PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
 import type { RoomView, WallRect } from '../layout/LayoutStrategy.js';
 import { SelectionMarker } from './SelectionMarker.js';
@@ -75,6 +75,15 @@ export class ViewController {
   private isometric = new IsometricController();
   /** The isometric view's live pose: what the camera actually shows. `update()` eases it toward `isometric`'s goal every frame; nothing else ever writes it. */
   private liveIsometric: IsometricState = this.isometric.state();
+  /**
+   * PR #200 review round: the one knob a goal edit sets, not a tween. Direct manipulation
+   * (the wheel, a drag, WASD) sets `DIRECT_FOLLOW_RATES` right before it edits the goal, so the
+   * live pose keeps feeling like it is under the pointer. A flight-type change (a selection,
+   * `refocus`/F, an off-screen marker click, the `#zoom=`/`#room=` start framing) sets
+   * `FLIGHT_FOLLOW_RATES` instead, so it still reads as a flight. Read fresh by `update()` every
+   * frame — nothing here is "remembered" past the next input that changes it.
+   */
+  private isometricFollowRates: IsometricFollowRates = DIRECT_FOLLOW_RATES;
   /** Issue #113: a room added/removed or a window resize invalidates the isometric pan/zoom limits; re-derived lazily in `update()`, not on every tick. */
   private isometricBoundsDirty = true;
   private isometricCamera: THREE.OrthographicCamera;
@@ -141,8 +150,10 @@ export class ViewController {
         this.isometric.minHalfHeight,
         this.isometric.maxHalfHeight,
       );
-      // A start parameter is a cut too, like the fresh framing `setMode` just did: no follower lag on load.
-      this.liveIsometric = this.isometric.state();
+      // PR #200 review round: a start parameter is a flight from the view's own default
+      // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
+      // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
+      this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
       this.applyIsometric();
     }
   }
@@ -162,8 +173,10 @@ export class ViewController {
         this.isometric.minHalfHeight,
         this.isometric.maxHalfHeight,
       );
-      // A start parameter is a cut too, like the fresh framing `setMode` just did: no follower lag on load.
-      this.liveIsometric = this.isometric.state();
+      // PR #200 review round: a start parameter is a flight from the view's own default
+      // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
+      // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
+      this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
       this.applyIsometric();
     } else {
       this.applyPose(room.standing);
@@ -250,11 +263,6 @@ export class ViewController {
   }
 
   /**
-   * Call after each poll: applies `#focus` once and drops a selection whose agent left.
-   * A tombstone is not an agent and never appears in `agents`, so its id is kept too: an open
-   * tombstone card must survive the routine 3 s agent poll, not just the next `worldChanged`.
-   */
-  /**
    * Issue #113: call after the scene's floor content changes (a room added or removed, a
    * floor switch) so the isometric pan/zoom limits catch up. Cheap and idempotent: it only
    * flags the limits dirty, the actual bounds box recomputes once, lazily, in `update()` —
@@ -264,6 +272,11 @@ export class ViewController {
     this.isometricBoundsDirty = true;
   }
 
+  /**
+   * Call after each poll: applies `#focus` once and drops a selection whose agent left.
+   * A tombstone is not an agent and never appears in `agents`, so its id is kept too: an open
+   * tombstone card must survive the routine 3 s agent poll, not just the next `worldChanged`.
+   */
   agentsChanged(agents: ManagedAgent[]): void {
     const ids = agents.map((agent) => agent.info.id);
     const tombstoneIds = (this.options.tombstones?.() ?? []).map((target) => target.id);
@@ -286,7 +299,7 @@ export class ViewController {
         this.isometric.retrack(overviewBounds(this.options.scene), this.aspect());
       }
       this.panWithKeys(delta);
-      this.liveIsometric = followIsometric(this.liveIsometric, this.isometric.state(), delta);
+      this.liveIsometric = followIsometric(this.liveIsometric, this.isometric.state(), delta, this.isometricFollowRates);
       this.applyIsometric();
     } else if (this.flight) {
       const pose = this.flight.tween.advance(delta);
@@ -392,6 +405,9 @@ export class ViewController {
       if (isClick(this.pressPoint, point)) return;
       this.dragged = true;
       this.flight = null;
+      // PR #200 review round: a drag is direct manipulation, not a flight — responsive even
+      // mid-correction, even right after a flight-type change (a selection, a start parameter).
+      this.isometricFollowRates = DIRECT_FOLLOW_RATES;
       const dx = point.x - this.dragPoint.x;
       const dy = point.y - this.dragPoint.y;
       this.isometric.drag(dx, dy, canvas.clientHeight || 1);
@@ -428,6 +444,8 @@ export class ViewController {
       this.markActive();
       event.preventDefault();
       this.flight = null;
+      // PR #200 review round: the wheel is direct manipulation, not a flight.
+      this.isometricFollowRates = DIRECT_FOLLOW_RATES;
       // Zoom toward the cursor (issue #87, AC1), not toward the room center: the point
       // under the pointer stays under it. Falls back to a plain zoom while the canvas has
       // no on-screen size yet (e.g. a test or a hidden tab), when NDC is undefined.
@@ -503,7 +521,10 @@ export class ViewController {
       // Issue #113 redesign: a selection just edits the goal, the same as a wheel tick or a
       // drag. The follower in `update()` eases the live pose there; there is no flight object
       // to build, so a second selection before the first one arrives simply moves the goal
-      // again, with nothing stale left over from the first.
+      // again, with nothing stale left over from the first. PR #200 review round: a selection
+      // (also reached from `refocus`/F and an off-screen marker click) is a flight-type
+      // change, not direct manipulation — the slower rate, so it still reads as a flight.
+      this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
       this.isometric.focusOn(point);
       if (startZoom !== null) {
         this.isometric.halfHeight = THREE.MathUtils.clamp(
@@ -600,6 +621,8 @@ export class ViewController {
     if (this.panKeys.has('KeyD') || this.panKeys.has('ArrowRight')) right += 1;
     if (this.panKeys.has('KeyA') || this.panKeys.has('ArrowLeft')) right -= 1;
     if (right === 0 && forward === 0) return;
+    // PR #200 review round: WASD is direct manipulation, not a flight.
+    this.isometricFollowRates = DIRECT_FOLLOW_RATES;
     const fast = this.panKeys.has('ShiftLeft') || this.panKeys.has('ShiftRight') ? FAST_MULTIPLIER : 1;
     const step = this.zoomDistance * PAN_SPEED_PER_DISTANCE * fast * delta;
     this.isometric.pan(right * step, forward * step);

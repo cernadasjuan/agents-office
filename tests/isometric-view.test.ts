@@ -380,6 +380,54 @@ for (const shift of [0, 300]) {
   });
 }
 
+/** How long `view.update()` takes to land exactly on the goal (the live and goal pose both read equal), at a fixed `fps`, or -1 past `maxSeconds` (a stuck follower, not a slow one). */
+function settleSeconds(view: { update(elapsed: number, delta: number): void }, isAtRest: () => boolean, fps: number, maxSeconds = 5): number {
+  const delta = 1 / fps;
+  let elapsed = 0;
+  for (let i = 0; i < maxSeconds * fps; i++) {
+    elapsed += delta;
+    view.update(elapsed, delta);
+    if (isAtRest()) return elapsed;
+  }
+  return -1;
+}
+
+for (const fps of [30, 60]) {
+  test(`PR #200 review round: a selection flight from a typical distance settles in 0.45-0.8 s at ${fps} fps (a flight, not a jump)`, () => {
+    const { view, manager, selection, settle } = setup('#view=iso');
+    manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+    settle();
+    selection.select('a');
+    const seconds = settleSeconds(
+      view,
+      () => {
+        const isometric = (view as unknown as { isometric: { target: THREE.Vector3; halfHeight: number } }).isometric;
+        const live = (view as unknown as { liveIsometric: { target: THREE.Vector3; halfHeight: number } }).liveIsometric;
+        return live.target.equals(isometric.target) && live.halfHeight === isometric.halfHeight;
+      },
+      fps,
+    );
+    assert.ok(seconds >= 0.45 && seconds <= 0.8, `settled in ${seconds} s at ${fps} fps, want 0.45-0.8 s (PR #140 wanted visible easing; the direct rates alone settled this in about 0.12 s, which read like a jump)`);
+  });
+}
+
+test('PR #200 review round: a wheel tick keeps its direct-manipulation responsiveness, even right after a selection flight is still easing in', () => {
+  const { view, canvas, manager, selection, settle } = setup('#view=iso');
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  settle();
+  selection.select('a'); // starts a slow flight
+  view.update(2, 1 / 60); // one frame into the flight, well short of settling
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+  const before = camera.top - camera.bottom;
+
+  canvas.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -400, cancelable: true }));
+  view.update(2 + 1 / 60, 1 / 60);
+  const afterOneFrame = camera.top - camera.bottom;
+  // A direct-rate step at the live camera's own zoom closes a sizeable fraction of a typical
+  // wheel notch in a single frame; a still-flight-paced step here would barely move at all.
+  assert.ok(before - afterOneFrame > (before * 0.01), `one wheel tick still zooms in noticeably in a single frame (${before} to ${afterOneFrame})`);
+});
+
 // --- PR #140 parked failure repros, fixed by the goal/follower redesign (issue #113) ---
 
 /** A floor the building's own size, so adding or removing an annex grows or shrinks the bounds instead of replacing them outright (the only floor object would otherwise be the annex itself). */

@@ -12,15 +12,29 @@ const MAX_ZOOM_OUT = 1.5;
 export const ISO_FOCUS_HALF_HEIGHT = 7;
 const MIN_HALF_HEIGHT = 1.5;
 const WHEEL_ZOOM_RATE = 0.0015;
+
 /**
- * Issue #113 redesign: the live camera's pan speed, in world units per second per unit of
- * `halfHeight` (the zoom) at the moment of the step. Panning at a wide zoom covers more
- * visible ground than the same speed at a tight one, the same scaling `panWithKeys` already
- * used for its own speed, so the catch-up always reads at the same relative pace.
+ * The follower's own step speed (issue #113 redesign): `pan` in world units per second per
+ * unit of `halfHeight` (the zoom) at the moment of the step, `zoom` as a fraction of
+ * `halfHeight` closed per second. Panning at a wide zoom covers more visible ground than the
+ * same speed at a tight one, the same scaling `panWithKeys` already used for its own speed, so
+ * the catch-up always reads at the same relative pace.
  */
-const FOLLOW_PAN_RATE = 7;
-/** The live camera's zoom speed, as a fraction of `halfHeight` closed per second. */
-const FOLLOW_ZOOM_RATE = 4.5;
+export interface IsometricFollowRates {
+  pan: number;
+  zoom: number;
+}
+
+/** Direct manipulation (the wheel, a drag, WASD): the live pose should feel like it is under the pointer, not chasing it. */
+export const DIRECT_FOLLOW_RATES: IsometricFollowRates = { pan: 7, zoom: 4.5 };
+/**
+ * A flight-type goal change (a selection, `refocus`/F, an off-screen marker click, the
+ * `#room=`/`#zoom=` start framing): PR #200 review round — the direct rates above settled a
+ * selection flight in about 0.12 s, which read like a jump; earlier rounds required visible
+ * easing. Slower, so a flight still reads as a flight (about 0.5-0.7 s at a typical office
+ * distance), while the rates above keep the wheel, a drag and WASD exactly as responsive.
+ */
+export const FLIGHT_FOLLOW_RATES: IsometricFollowRates = { pan: 1.1, zoom: 0.85 };
 /** The floor under the pan/zoom speed's own `halfHeight` reference, so a tight focus zoom never stalls the follower to a crawl. */
 const MIN_FOLLOW_REFERENCE = 5;
 
@@ -224,13 +238,16 @@ function stepVector(from: THREE.Vector3, to: THREE.Vector3, maxStep: number): TH
  * second, frame-rate independent. Every input — the wheel, a cursor-anchored zoom, a drag, a
  * selection, a bounds clamp — edits only the goal (`IsometricController`'s own target and
  * halfHeight); this is the only place that ever moves the live pose, and it never restarts or
- * cancels: called again next frame, it just keeps closing whatever gap remains.
+ * cancels: called again next frame, it just keeps closing whatever gap remains. `rates`
+ * (review round, PR #200) is the one knob the caller sets per goal change, not a tween: direct
+ * manipulation and a flight-type change just pick a different `IsometricFollowRates`, the step
+ * math itself never changes shape.
  */
-export function followIsometric(live: IsometricState, goal: IsometricState, delta: number): IsometricState {
+export function followIsometric(live: IsometricState, goal: IsometricState, delta: number, rates: IsometricFollowRates = DIRECT_FOLLOW_RATES): IsometricState {
   const reference = Math.max(live.halfHeight, goal.halfHeight, MIN_FOLLOW_REFERENCE);
   return {
-    target: stepVector(live.target, goal.target, FOLLOW_PAN_RATE * reference * delta),
-    halfHeight: stepScalar(live.halfHeight, goal.halfHeight, FOLLOW_ZOOM_RATE * reference * delta),
+    target: stepVector(live.target, goal.target, rates.pan * reference * delta),
+    halfHeight: stepScalar(live.halfHeight, goal.halfHeight, rates.zoom * reference * delta),
   };
 }
 
