@@ -62,12 +62,15 @@ export const DESK_TALK_SPOT_D_OFFSET = 1.0;
 
 /**
  * Where a selected queued agent walks to address Gabriel directly (issue #162, desk mode
- * only): centered on the desk, standing eye height, facing back toward the desk camera. Pure,
- * the same "office is slot 0" assumption as the rest of this module.
+ * only): centered on the desk, standing at floor level (review: `Seat.position` is the
+ * figure's root, not its eye point — every other standing `Seat` in this layout, `queueSpots`
+ * and the home desks, uses `frame.point`'s default height 0; `FIGURE_EYE_HEIGHT` here floated
+ * the figure's root joint at eye level instead of its feet), facing back toward the desk
+ * camera. Pure, the same "office is slot 0" assumption as the rest of this module.
  */
 export function deskTalkSpotPose(): { position: THREE.Vector3; lookAt: THREE.Vector3 } {
   const frame = officeFrame();
-  const position = frame.point(0, OFFICE_DESK.d - DESK_TALK_SPOT_D_OFFSET, FIGURE_EYE_HEIGHT);
+  const position = frame.point(0, OFFICE_DESK.d - DESK_TALK_SPOT_D_OFFSET);
   const lookAt = deskCameraPose().position;
   return { position, lookAt };
 }

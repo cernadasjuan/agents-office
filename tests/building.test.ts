@@ -654,6 +654,10 @@ test('deskTalkSpot sits between the desk and the queue, standing, facing the des
   const rect = slotFor(0).rect;
   assert.ok(spot.position.x > rect.minX && spot.position.x < rect.maxX, 'inside the office on x');
   assert.ok(spot.position.z > rect.minZ && spot.position.z < rect.maxZ, 'inside the office on z');
+  // Review: a standing Seat's position is the figure's root, not its eye point (every other
+  // standing seat here — queueSpots, the home desks — sits at floor level); a figure placed at
+  // eye height instead would float above the floor.
+  assert.equal(spot.position.y, 0, 'the figure\'s root sits on the floor, not at eye height');
   assert.equal(spot.posture, 'standing');
   assert.deepEqual(spot.lookAt.toArray(), view.position.toArray(), 'faces back toward the desk camera, the same point it sits at');
   // The queue's own front row (`room0_queue_0`-ish) sits at a smaller x than the desk itself
