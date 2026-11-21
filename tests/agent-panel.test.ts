@@ -36,6 +36,19 @@ function card(list: HTMLElement, id: string): HTMLElement {
   return list.querySelector<HTMLElement>(`.agent-card[data-agent-id="${id}"]`)!;
 }
 
+function headerText(list: HTMLElement, group: string): string {
+  return groupOf(list, group).querySelector<HTMLElement>('.triage-group-header')!.textContent!;
+}
+
+function chipText(list: HTMLElement, group: string): string {
+  return list.querySelector<HTMLElement>(`.triage-chip[data-group="${group}"]`)!.textContent!;
+}
+
+function fireInput(filter: HTMLInputElement, value: string): void {
+  filter.value = value;
+  filter.dispatchEvent(new filter.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+}
+
 test('agents go to the group of what the user must do, in a fixed group order', (t) => {
   const { list, panel } = makePanel(t);
   panel.render([idle('i1'), working('w1'), yourTurn('y1', 3), waiting('n1', 12)]);
@@ -515,4 +528,79 @@ test('a re-render that drops the floor tag (the agent moved back to the focused 
 
   panel.render([waitingOn('a', 'agents-office')]);
   assert.equal(card(list, 'a').querySelector('.agent-floor'), null);
+});
+
+// --- Issue #229: the filter must not leave a stale count over hidden rows ---
+
+test('#229: a filter that hides every row in a group drops its header and chip count to 0, and hides the section', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('build-login'), working('build-filter')]);
+  assert.equal(headerText(list, 'working'), '▾ Working · 2');
+  assert.equal(chipText(list, 'working'), '2 working');
+
+  const filter = list.querySelector<HTMLInputElement>('.triage-filter')!;
+  fireInput(filter, 'zzz-no-match');
+
+  assert.equal(card(list, 'build-login').hidden, true);
+  assert.equal(card(list, 'build-filter').hidden, true);
+  assert.equal(headerText(list, 'working'), '▾ Working · 0');
+  assert.equal(chipText(list, 'working'), '0 working');
+  assert.equal(groupOf(list, 'working').hidden, true, 'an empty-after-filter group hides, same as a naturally empty one');
+});
+
+test('#229: a filter that matches some rows updates the count to the matched number, not the total', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('fix-login'), working('add-filter'), idle('idle-one')]);
+
+  const filter = list.querySelector<HTMLInputElement>('.triage-filter')!;
+  fireInput(filter, 'login');
+
+  assert.equal(headerText(list, 'working'), '▾ Working · 1');
+  assert.equal(chipText(list, 'working'), '1 working');
+});
+
+test('#229: clearing the filter restores every group\'s count to its total', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('fix-login'), working('add-filter')]);
+  const filter = list.querySelector<HTMLInputElement>('.triage-filter')!;
+  fireInput(filter, 'login');
+  assert.equal(headerText(list, 'working'), '▾ Working · 1');
+
+  fireInput(filter, '');
+  assert.equal(headerText(list, 'working'), '▾ Working · 2');
+  assert.equal(chipText(list, 'working'), '2 working');
+});
+
+test('#229: a filter that still matches the one needs-you agent keeps its real count, not the group\'s open-by-default threshold', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([waiting('n1', 2), waiting('n2', 5), waiting('n3', 8)]);
+  const filter = list.querySelector<HTMLInputElement>('.triage-filter')!;
+  fireInput(filter, 'n2');
+  assert.equal(headerText(list, 'needs-you'), '▾ Needs you · 1');
+});
+
+// --- Issue #230: Needs you / Your turn are global; mark them so once a floor is focused ---
+
+test('#230: with a floor focused, Needs you and Your turn carry an "all floors" marker', (t) => {
+  const { list, panel } = makePanel(t, { focusFloor: 'agents-office' });
+  panel.render([waiting('n1', 2), yourTurn('y1', 1), working('w1')]);
+
+  assert.equal(headerText(list, 'needs-you'), '▾ Needs you · 1 · all floors');
+  assert.equal(headerText(list, 'your-turn'), '▾ Your turn · 1 · all floors');
+});
+
+test('#230: the floor-scoped groups (Working, Idle, Cold) never carry the marker', (t) => {
+  const { list, panel } = makePanel(t, { focusFloor: 'agents-office' });
+  panel.render([working('w1'), idle('i1')]);
+
+  assert.equal(headerText(list, 'working'), '▾ Working · 1');
+  assert.equal(headerText(list, 'idle'), '▸ Idle · 1');
+});
+
+test('#230: on All floors (no focusFloor), nothing carries the marker (old behavior)', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([waiting('n1', 2), yourTurn('y1', 1)]);
+
+  assert.equal(headerText(list, 'needs-you'), '▾ Needs you · 1');
+  assert.equal(headerText(list, 'your-turn'), '▾ Your turn · 1');
 });
