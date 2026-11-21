@@ -3,12 +3,18 @@ import { currentWorld } from '../../src/extensions.js';
 import { registerCardPanel, type CardPanel } from '../../src/ui/AgentCard.js';
 
 /**
- * Browser part of the peek plugin. It adds three sections to the agent card:
- * "Recent" (the last lines, with the last open question pinned on top),
- * "Assets" (links from tool calls) and "Equipment" (skills, personas, repos).
- * It asks `/api/views/peek` for the selected agent only, at most every 5 s while
- * the card stays open (a timer that stops when the card closes). All text goes
- * through textContent. `setPeekTextHidden` hides all peek text for a private mode.
+ * Browser part of the peek plugin. It adds two sections to the agent card:
+ * "Recent" (the last lines, with the last open question pinned on top) and
+ * "Links" (links from tool calls — named and styled distinctly from the card's
+ * own "Issues" section, Sally's round 7 review AC5, so neither list reads as a
+ * continuation of the other while scanning). The old "Equipment" section
+ * (skills, personas, repos as a `<dl>` fact list) is gone (AC4): that data now
+ * lives only in the card's own Persona/Skills/Repos table, which renders at
+ * the same instant as the rest of the card instead of behind this plugin's
+ * async per-agent fetch (issue #216). It asks `/api/views/peek` for the
+ * selected agent only, at most every 5 s while the card stays open (a timer
+ * that stops when the card closes). All text goes through textContent.
+ * `setPeekTextHidden` hides all peek text for a private mode.
  */
 
 export const PEEK_URL = '/api/views/peek';
@@ -21,8 +27,6 @@ interface PeekData {
   lines: Array<{ kind: string; text: string }>;
   question?: string;
   assets: Array<{ kind: string; label: string; url: string }>;
-  skills: string[];
-  repos: string[];
 }
 
 export interface PeekPanelOptions {
@@ -34,10 +38,6 @@ export interface PeekPanelOptions {
   clearTimer?: (timer: unknown) => void;
 }
 
-function strings(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
-
 function parse(body: unknown): PeekData {
   const raw = (body ?? {}) as Record<string, unknown>;
   const objects = (value: unknown) => (Array.isArray(value) ? value : []).filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
@@ -45,8 +45,6 @@ function parse(body: unknown): PeekData {
     lines: objects(raw.lines).map((line) => ({ kind: String(line.kind ?? ''), text: String(line.text ?? '') })),
     ...(typeof raw.question === 'string' && raw.question ? { question: raw.question } : {}),
     assets: objects(raw.assets).map((asset) => ({ kind: String(asset.kind ?? ''), label: String(asset.label ?? ''), url: String(asset.url ?? '') })),
-    skills: strings(raw.skills),
-    repos: strings(raw.repos),
   };
 }
 
@@ -128,7 +126,7 @@ export class PeekPanel implements CardPanel {
     this.timer = null;
   }
 
-  /** Hide or show all peek text: Recent, the pinned question, Assets and Equipment. */
+  /** Hide or show all peek text: Recent, the pinned question and Links. */
   setTextHidden(hidden: boolean): void {
     this.textHidden = hidden;
     this.applyTextHidden();
@@ -158,7 +156,7 @@ export class PeekPanel implements CardPanel {
     const root = this.root;
     const agent = this.agent;
     if (!root || !agent) return;
-    const key = JSON.stringify([agent.id, agent.extras?.badges, this.data, this.failed]);
+    const key = JSON.stringify([agent.id, this.data, this.failed]);
     if (key === this.drawnKey && root.childElementCount > 0) return;
     this.drawnKey = key;
     const doc = root.ownerDocument;
@@ -191,9 +189,13 @@ export class PeekPanel implements CardPanel {
       recent.appendChild(list);
     }
 
-    const assets = section('peek-assets', 'Assets');
+    // "Links" (was "Assets"), relabeled and distinctly styled from the card's own "Issues"
+    // section (Sally's round 7 review, AC5): identical markup used to make the two lists read
+    // as one continuous link dump while scanning top to bottom. `.peek-links` carries its own
+    // accent color so this list is visually, not just textually, a different thing.
+    const links = section('peek-links', 'Links');
     if (!data || data.assets.length === 0) {
-      assets.appendChild(el('p', '', 'No assets'));
+      links.appendChild(el('p', '', 'No links'));
     } else {
       const list = el('ul');
       for (const asset of data.assets) {
@@ -209,18 +211,10 @@ export class PeekPanel implements CardPanel {
         }
         list.appendChild(item);
       }
-      assets.appendChild(list);
+      links.appendChild(list);
     }
 
-    const equipment = section('peek-equipment', 'Equipment');
-    const facts = el('dl', 'inspector-facts');
-    const fact = (title: string, items: string[], empty: string) => facts.append(el('dt', '', title), el('dd', '', items.length > 0 ? items.join(', ') : empty));
-    fact('Skills', data?.skills ?? [], 'None');
-    fact('Personas', agent.extras?.badges ?? [], 'None');
-    fact('Repos', data?.repos ?? [], 'None');
-    equipment.appendChild(facts);
-
-    wrapper.append(question, recent, assets, equipment);
+    wrapper.append(question, recent, links);
     root.replaceChildren(wrapper);
     this.applyTextHidden();
   }
@@ -228,7 +222,7 @@ export class PeekPanel implements CardPanel {
   private applyTextHidden(): void {
     const root = this.root;
     if (!root) return;
-    for (const section of root.querySelectorAll<HTMLElement>('.peek-recent, .peek-assets, .peek-equipment')) section.hidden = this.textHidden;
+    for (const section of root.querySelectorAll<HTMLElement>('.peek-recent, .peek-links')) section.hidden = this.textHidden;
     const question = root.querySelector<HTMLElement>('.peek-question');
     if (question) question.hidden = this.textHidden || question.dataset.empty === 'true';
   }

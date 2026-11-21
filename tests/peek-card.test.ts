@@ -63,7 +63,7 @@ test('a card panel shows only while available; without one the card is unchanged
   assert.equal(root().textContent?.includes('demo panel'), true);
 });
 
-test('with peek on, the card shows the pinned question, Recent, Assets and Equipment for the selected agent', async (t) => {
+test('with peek on, the card shows the pinned question, Recent and Links for the selected agent (Equipment is gone, issue #216 AC4)', async (t) => {
   const { calls, fetchFn } = fakeFetch({ [alpha.id]: peekBody });
   const { card, selection, root } = setup(t, new PeekPanel({ fetch: fetchFn, isOn: () => true }));
   card.render([alpha, beta]);
@@ -73,17 +73,16 @@ test('with peek on, the card shows the pinned question, Recent, Assets and Equip
   const q = (selector: string) => root().querySelector<HTMLElement>(selector);
   assert.equal(q('.peek-question')?.textContent, 'Should I merge?');
   const headings = [...root().querySelectorAll('.peek h4')].map((h) => h.textContent);
-  assert.deepEqual(headings, ['Recent', 'Assets', 'Equipment']);
+  assert.deepEqual(headings, ['Recent', 'Links'], 'Assets is relabeled Links; Equipment is gone entirely');
   const recent = [...root().querySelectorAll('.peek-recent li')].map((li) => li.textContent);
   assert.deepEqual(recent, ['Bash · git commit', '<img src=x onerror=alert(1)> Should I merge?']);
   assert.equal(root().querySelector('img'), null, 'text stays text');
-  const links = [...root().querySelectorAll<HTMLAnchorElement>('.peek-assets a')];
+  const links = [...root().querySelectorAll<HTMLAnchorElement>('.peek-links a')];
   assert.deepEqual(links.map((a) => [a.textContent, a.href, a.rel]), [
     ['agents-office#80', 'https://github.com/gabriel-amyot/agents-office/issues/80', 'noopener noreferrer'],
   ]);
-  assert.equal(root().querySelector('.peek-assets')?.textContent?.includes('KTP-1'), true, 'an unsafe URL stays plain text');
-  const equipment = root().querySelector('.peek-equipment')?.textContent ?? '';
-  for (const item of ['tdd', 'crit:crit', 'amelia', 'agents-office']) assert.ok(equipment.includes(item), item);
+  assert.equal(root().querySelector('.peek-links')?.textContent?.includes('KTP-1'), true, 'an unsafe URL stays plain text');
+  assert.equal(root().querySelector('.peek-equipment'), null, 'the old Equipment fact list never renders');
 });
 
 test('with peek off, the card has no peek sections and sends no request', async (t) => {
@@ -226,7 +225,7 @@ test('closing the card or turning the plugin off stops the timer', async (t) => 
   assert.equal(calls.length, 2);
 });
 
-test('the hide hook hides all peek text: Recent, the question, Assets and Equipment', async (t) => {
+test('the hide hook hides all peek text: Recent, the question and Links', async (t) => {
   const { fetchFn } = fakeFetch({ [alpha.id]: peekBody });
   const panel = new PeekPanel({ fetch: fetchFn, isOn: () => true });
   const { card, selection, root } = setup(t, panel);
@@ -234,9 +233,9 @@ test('the hide hook hides all peek text: Recent, the question, Assets and Equipm
   selection.select(alpha.id);
   await flush();
   panel.setTextHidden(true);
-  for (const selector of ['.peek-recent', '.peek-question', '.peek-assets', '.peek-equipment']) {
+  for (const selector of ['.peek-recent', '.peek-question', '.peek-links']) {
     assert.equal(root().querySelector<HTMLElement>(selector)?.hidden, true, selector);
   }
   panel.setTextHidden(false);
-  assert.equal(root().querySelector<HTMLElement>('.peek-assets')?.hidden, false);
+  assert.equal(root().querySelector<HTMLElement>('.peek-links')?.hidden, false);
 });

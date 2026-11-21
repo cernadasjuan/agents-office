@@ -18,7 +18,7 @@ export interface DetectedAgent extends AgentExtras {
  * `projectAgents` call with every field set, so a future field fails in CI instead of only in
  * the office.
  */
-export const EXTRA_KEYS: Array<keyof AgentExtras> = ['parentId', 'provider', 'attention', 'orchestrating', 'waitMinutes', 'group', 'badges', 'skills', 'tools', 'lastEquipSource', 'issues', 'room', 'role', 'actions', 'stuck', 'floor'];
+export const EXTRA_KEYS: Array<keyof AgentExtras> = ['parentId', 'provider', 'attention', 'orchestrating', 'waitMinutes', 'group', 'badges', 'skills', 'tools', 'lastEquipSource', 'issues', 'room', 'role', 'actions', 'stuck', 'floor', 'repos'];
 
 /** The optional fields the server sent, or undefined when there are none. */
 function extrasOf(agent: DetectedAgent): AgentExtras | undefined {

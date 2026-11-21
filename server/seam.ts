@@ -53,6 +53,13 @@ export interface DisplayExtras {
    * enricher). The projection re-validates it through its own whitelist (`floorName`, below),
    * never trusting the enricher's own output blindly. */
   floor?: string;
+  /** Repositories this agent's work touches, as plain display tokens (a bare repo name or an
+   * `owner/repo` pair, the same shape `floor` already uses) — never a filesystem path (issue
+   * #216, promoting the agent card's Repos column to synchronous data alongside Persona and
+   * Skills). Today `server/floor.ts`'s floor enricher sets this to the session's own floor
+   * repo (when it resolved one), the same remote-derived token `floor` carries. The projection
+   * re-validates every entry through `repoTag`, never trusting the enricher's own output. */
+  repos?: string[];
 }
 
 /** One agent as the server sees it. `internal` never leaves the server. */
@@ -513,6 +520,12 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
     const waitMinutes = wholeNumber(extras.waitMinutes, 100_000);
     const actions = actionList(extras.actions, enabledActions);
     const floor = floorName(extras.floor);
+    // Repos (issue #216): same `repoTag` whitelist `RoomInput`/`BoardInput` already use, so a
+    // malformed or path-like entry from a future enricher is dropped whole, never shortened to
+    // a tail that could leak a rejected value's fragment. Capped the same as `skills`.
+    const repos = Array.isArray(extras.repos)
+      ? [...new Set(extras.repos.map((repo) => repoTag(repo)).filter((repo): repo is string => repo !== undefined))].slice(0, 8)
+      : [];
     return {
       id: publicId(agent.id),
       name: displayText(agent.name, 60),
@@ -533,6 +546,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
       ...(typeof extras.role === 'string' && BADGE.test(extras.role) ? { role: extras.role } : {}),
       ...(extras.stuck === true ? { stuck: true as const } : {}),
       ...(floor ? { floor } : {}),
+      ...(repos.length > 0 ? { repos } : {}),
     };
   });
 }

@@ -73,6 +73,16 @@ test('floorEnricher sets display.floor for every observation, subagents included
   assert.equal(observations[2].display.floor, GENERAL_FLOOR);
 });
 
+test('floorEnricher also sets display.repos (issue #216) to the resolved floor repo, empty on the general floor', () => {
+  const repo = makeRepo('kiosk-app');
+  const observations = [agent(repo), agent(undefined)];
+
+  floorEnricher(new FloorResolver()).enrich(observations);
+
+  assert.deepEqual(observations[0].display.repos, ['repos/kiosk-app']);
+  assert.deepEqual(observations[1].display.repos, [], 'no real repo on the general floor, never a path or placeholder');
+});
+
 test('a resolved name caches by directory, so a second resolve for the same session does not re-walk the filesystem', () => {
   const repo = makeRepo('cache-check');
   const resolver = new FloorResolver();
