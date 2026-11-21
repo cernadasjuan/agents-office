@@ -29,9 +29,10 @@ const fixedLayout: LayoutStrategy = {
 
 interface SetupExtras {
   deskView?: () => { position: THREE.Vector3; lookAt: THREE.Vector3; fov?: number } | null;
-  roomAt?: (x: number, z: number) => { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null;
+  roomAt?: (x: number, z: number) => { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 }; kind?: string } | null;
   idleTimeoutSeconds?: number;
   crosshair?: HTMLElement | null;
+  onEnterLibrary?: () => void;
 }
 
 function setup(
@@ -332,6 +333,28 @@ test('double-click does nothing outside the isometric view, or when no room is u
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1600, height: 900, right: 1600, bottom: 900, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
   canvas.dispatchEvent(new dom.window.MouseEvent('dblclick', { clientX: 800, clientY: 450 }));
   assert.equal(view.mode, 'isometric', 'a double-click over no room (or without a roomAt option) stays in isometric');
+});
+
+test('double-clicking the library room calls onEnterLibrary instead of teleporting into it (issue #239: the library is its own scene now)', () => {
+  const room = { bounds: new THREE.Box3(new THREE.Vector3(20, 0, -6), new THREE.Vector3(32, 2.6, 6)), standing: { position: new THREE.Vector3(24, EYE_HEIGHT, 0), lookAt: new THREE.Vector3(30, EYE_HEIGHT, 0) }, kind: 'library' };
+  let entered = 0;
+  const { view, camera, canvas, press } = setup('', undefined, undefined, { roomAt: () => room, onEnterLibrary: () => { entered++; } });
+  press('KeyI');
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1600, height: 900, right: 1600, bottom: 900, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  const before = camera.position.clone();
+  canvas.dispatchEvent(new dom.window.MouseEvent('dblclick', { clientX: 800, clientY: 450 }));
+  assert.equal(entered, 1, 'onEnterLibrary runs exactly once');
+  assert.equal(view.mode, 'isometric', 'never teleports into first person for the library room');
+  assert.ok(camera.position.distanceTo(before) < 1e-6, 'the camera never moves toward the room\'s own standing pose');
+});
+
+test('double-clicking the library room without an onEnterLibrary option does nothing (graceful degradation)', () => {
+  const room = { bounds: new THREE.Box3(), standing: { position: new THREE.Vector3(1, 1, 1), lookAt: new THREE.Vector3() }, kind: 'library' };
+  const { view, canvas, press } = setup('', undefined, undefined, { roomAt: () => room });
+  press('KeyI');
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1600, height: 900, right: 1600, bottom: 900, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  canvas.dispatchEvent(new dom.window.MouseEvent('dblclick', { clientX: 800, clientY: 450 }));
+  assert.equal(view.mode, 'isometric', 'no crash and no teleport without the option');
 });
 
 test('#view=iso starts in the isometric view', () => {

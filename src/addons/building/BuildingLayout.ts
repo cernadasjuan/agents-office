@@ -346,7 +346,9 @@ export class BuildingLayout implements LayoutStrategy {
     const inside = (rect: Rect) => x >= rect.minX && x <= rect.maxX && z >= rect.minZ && z <= rect.maxZ;
     for (const record of this.rooms) {
       const slot = slotFor(record.index);
-      if (inside(slot.rect)) return roomViewFromSlot(slot);
+      // `kind` (issue #239): lets a caller special-case the library door (it swaps to the
+      // library's own scene) without this layout needing to know what a "scene swap" is.
+      if (inside(slot.rect)) return { ...roomViewFromSlot(slot), kind: record.kind };
     }
     for (const room of this.missionRooms.values()) {
       if (inside(room.slot.rect)) return roomViewFromSlot(room.slot);

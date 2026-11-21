@@ -149,6 +149,69 @@
       font-size: 11px;
       pointer-events: none;
     }
+    /* Issue #239: the short loading transition between the office scene and the library's
+       own scene. Plain and quiet on purpose (round 7 north star: simplicity and beauty, never
+       complexity for its own sake) — a dark cover and one line of text, nothing to parse. */
+    .scene-transition {
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #14121c;
+      color: #d8d0ff;
+      font: 15px/1.4 'Segoe UI', system-ui, sans-serif;
+      letter-spacing: 0.02em;
+    }
+    /* Issue #239: the library scene's own wall index and door-back-to-office button are real
+       DOM elements inside the CSS2D layer (`SceneSetup.ts` sets that whole layer's own
+       `pointer-events: none` so it never blocks the canvas drag/look everywhere else this app
+       uses it) — these two re-enable it on purpose, since clicking them is the entire point. */
+    .library-index, .library-back-door {
+      pointer-events: auto;
+    }
+    .library-plaque, .library-title {
+      background: rgba(90, 74, 58, 0.9);
+      color: #f5f0e8;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font: 600 13px system-ui, sans-serif;
+      white-space: nowrap;
+    }
+    .library-title { font-size: 20px; padding: 4px 12px; }
+    .library-index {
+      background: rgba(247, 243, 234, 0.95);
+      color: #2a2a3e;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font: 13px system-ui, sans-serif;
+      min-width: 220px;
+    }
+    .library-index h3 { margin: 0 0 6px; font-size: 13px; }
+    .library-index-line {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      border-radius: 4px;
+      padding: 4px 6px;
+      color: #2a2a3e;
+      font: inherit;
+      cursor: pointer;
+    }
+    .library-index-line:hover { background: rgba(58, 111, 90, 0.18); }
+    .library-back-door {
+      background: rgba(58, 111, 90, 0.9);
+      color: #f5f0e8;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font: 600 13px system-ui, sans-serif;
+      cursor: pointer;
+      white-space: nowrap;
+    }
     #legend {
       position: fixed;
       top: 50%;

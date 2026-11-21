@@ -890,6 +890,17 @@ test('roomAt finds the office by a point inside its rect, and returns null betwe
   assert.equal(layout.roomAt(1000, 1000), null, 'far outside every room');
 });
 
+test('roomAt reports the room\'s own kind (issue #239: so a caller can special-case the library door without knowing building internals)', () => {
+  const { layout } = setup();
+  const officeRect = slotFor(0).rect;
+  const officeCenter = { x: (officeRect.minX + officeRect.maxX) / 2, z: (officeRect.minZ + officeRect.maxZ) / 2 };
+  assert.equal(layout.roomAt(officeCenter.x, officeCenter.z)?.kind, 'office');
+
+  const libraryRect = slotFor(1).rect; // BuildingLayout force-adds the library as room index 1
+  const libraryCenter = { x: (libraryRect.minX + libraryRect.maxX) / 2, z: (libraryRect.minZ + libraryRect.maxZ) / 2 };
+  assert.equal(layout.roomAt(libraryCenter.x, libraryCenter.z)?.kind, 'library');
+});
+
 test('roomAt finds a mission room by its own rect, not just building rooms', () => {
   const { layout } = setup();
   layout.syncWorldRooms([{ id: 'm0', kind: 'mission', title: 'Media Plan', state: 'open', walls: {} }]);

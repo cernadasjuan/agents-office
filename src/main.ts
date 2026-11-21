@@ -23,9 +23,27 @@ import { handleTriageKey } from './ui/TriageKeys.js';
 import { FloorSwitch } from './ui/FloorSwitch.js';
 import { ALL_FLOORS, defaultFloor, floorsWithStoredRooms, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
 import { focusedFloor, setFocusedFloor } from './floors/floorState.js';
+import { isLibrarySceneSearch, libraryEntryUrl } from './library/sceneNav.js';
+import { consumeReturningFromLibrary, navigateAfterTransition, removeTransition, showTransition } from './library/transition.js';
+
+/**
+ * Issue #239: the library stopped being a room inside this scene; it is its own scene now
+ * (Gabriel's "different dimension" idea). `?scene=library` in the URL is the one seam
+ * (`src/library/sceneNav.ts`) that decides which of the two boots runs; this file's own
+ * office bootstrap (everything below) is otherwise unchanged from before that scene existed.
+ */
+function bootOffice(): void {
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
+
+// Issue #239: a brief "welcome back" overlay, shown only right after the library's own back
+// door navigated here (`consumeReturningFromLibrary` clears the flag so an ordinary reload
+// never replays it) — never added to every ordinary office load.
+if (consumeReturningFromLibrary()) {
+  const overlay = showTransition('Welcome back.');
+  window.setTimeout(() => removeTransition(overlay), 420);
+}
 
 // Build office and get stations
 const stations = createOffice(scene);
@@ -107,6 +125,13 @@ const view = new ViewController({
     agentManager.setDeskTalker(mode === 'desk' ? selectedAgentId() : null);
   },
   figureShiftPx: () => agentCard.cameraShiftPx(),
+  // Issue #239: double-clicking the library room swaps to its own scene instead of the normal
+  // first-person teleport every other room kind gets.
+  onEnterLibrary: () => {
+    navigateAfterTransition('Entering the library…', () => {
+      window.location.assign(libraryEntryUrl(window.location));
+    });
+  },
 });
 
 // --- Triage list (side panel) ---
@@ -317,3 +342,10 @@ const frameLoop = new FrameLoop({
 });
 if (stats) Object.assign(window, { __officeStats: Object.assign(stats, { drawCalls: () => frameLoop.drawCalls(), cameraPosition: () => view.activeCamera.position.toArray(), viewMode: () => view.mode }) });
 frameLoop.start((callback) => requestAnimationFrame(callback));
+}
+
+if (isLibrarySceneSearch(window.location.search)) {
+  void import('./library/bootLibrary.js').then((module) => module.bootLibraryScene());
+} else {
+  bootOffice();
+}

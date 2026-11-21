@@ -66,6 +66,14 @@ export interface ViewControllerOptions {
   idleTimeoutSeconds?: number;
   /** Issue #194: every wall in the active layout, as a flat 2D collision list, so first-person ground-walk stops at a wall instead of walking through it. Without it, walls stay unobstructed — the old behavior. */
   wallColliders?: () => WallRect[];
+  /**
+   * Issue #239: double-clicking the library room in the isometric view calls this instead of
+   * the normal first-person teleport `setMode` does for every other room kind — the library
+   * stopped being a room inside this scene; it is its own scene now (Gabriel's "different
+   * dimension" idea). Without it, double-clicking the library room does nothing (graceful
+   * degradation, the same as before `roomAt` existed at all).
+   */
+  onEnterLibrary?: () => void;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -490,6 +498,9 @@ export class ViewController {
       const room = this.roomUnderPoint(event.clientX, event.clientY);
       if (!room) return;
       this.markActive();
+      // Issue #239: the library is no longer a room to stand inside of this scene; it is its
+      // own scene, entered through `onEnterLibrary` instead of the normal teleport.
+      if (room.kind === 'library') { this.options.onEnterLibrary?.(); return; }
       this.setMode('first-person', false, room.standing);
     });
     canvas.addEventListener('wheel', (event) => {
