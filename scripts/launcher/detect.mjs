@@ -31,25 +31,36 @@ export function isOfficeHtml(html) {
  * port, the launcher just could not read enough of it to confirm the office. `fetchImpl` is
  * injectable so tests never open a real socket, except the one test that deliberately does,
  * against a raw TCP server that stalls its body on purpose.
+ *
+ * Two independent, sequential budgets, not one shared one: `timeoutMs` covers only connecting
+ * and getting the response headers; `bodyTimeoutMs` (defaults to the same value) starts fresh
+ * only once those headers have actually arrived, and covers reading the body. Splitting them
+ * means a slow-but-live office (headers arrive right up against `timeoutMs`) still gets its
+ * own full `bodyTimeoutMs` window to answer, and a test of the stalled-body case can hand it a
+ * tiny `bodyTimeoutMs` without racing the unrelated question of how long headers took to land.
  */
-export async function probeOffice(port = DEFAULT_PORT, { timeoutMs = 1000, fetchImpl = fetch } = {}) {
+export async function probeOffice(
+  port = DEFAULT_PORT,
+  { timeoutMs = 1000, bodyTimeoutMs = timeoutMs, fetchImpl = fetch } = {},
+) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const headersTimer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
   try {
-    let response;
-    try {
-      response = await fetchImpl(`http://127.0.0.1:${port}/`, { signal: controller.signal });
-    } catch {
-      return { reachable: false, isOffice: false };
-    }
-    if (typeof response.status !== 'number') return { reachable: false, isOffice: false };
-    try {
-      const html = typeof response.text === 'function' ? await response.text() : '';
-      return { reachable: true, isOffice: isOfficeHtml(html) };
-    } catch {
-      return { reachable: true, isOffice: false };
-    }
+    response = await fetchImpl(`http://127.0.0.1:${port}/`, { signal: controller.signal });
+  } catch {
+    return { reachable: false, isOffice: false };
   } finally {
-    clearTimeout(timer);
+    clearTimeout(headersTimer);
+  }
+  if (typeof response.status !== 'number') return { reachable: false, isOffice: false };
+  const bodyTimer = setTimeout(() => controller.abort(), bodyTimeoutMs);
+  try {
+    const html = typeof response.text === 'function' ? await response.text() : '';
+    return { reachable: true, isOffice: isOfficeHtml(html) };
+  } catch {
+    return { reachable: true, isOffice: false };
+  } finally {
+    clearTimeout(bodyTimer);
   }
 }
