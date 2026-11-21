@@ -74,6 +74,8 @@ export interface LayoutStrategy {
   deskMonitorCorners?(): THREE.Vector3[][];
   /** Where a selected queued agent walks to address Gabriel directly (issue #162, desk mode only), or null without a desk. */
   deskTalkSpot?(): Seat | null;
+  /** Hides or shows the user's own desk chair (issue #243): the desk-view camera sits close enough to it that it otherwise fills the bottom of the frame. A no-op without a desk, the same graceful degradation as every other desk-view method here. */
+  setDeskChairVisible?(visible: boolean): void;
   /** Whether this agent currently queues in front of the user's own desk — the only agents eligible for `deskTalkSpot` (issue #162). */
   isQueued?(agentId: string): boolean;
   /**

@@ -59,8 +59,14 @@ export function createDesk(hasMonitor = true) {
     group.add(kb);
   }
 
-  // Chair
+  // Chair. Named (not just grouped), so the office's own desk-view camera — which sits
+  // essentially where this chair is (`deskGeometry.ts`'s `DESK_SEAT_OFFSET`, "inside the
+  // chair, not on top of the desk") — can find and hide this one specific chair instead of
+  // rendering Gabriel's own seat back at him as a looming dark shape at the bottom of his own
+  // view (issue #243). Every other desk (war rooms included) keeps its chair visible; nothing
+  // here changes for them.
   const chairGroup = createChair();
+  chairGroup.name = 'desk-chair';
   chairGroup.position.set(0, 0, 0.7);
   group.add(chairGroup);
 

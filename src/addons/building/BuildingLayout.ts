@@ -307,6 +307,22 @@ export class BuildingLayout implements LayoutStrategy {
   }
 
   /**
+   * Issue #243: the desk-view camera sits essentially where the user's own chair is
+   * (`deskGeometry.ts`'s `DESK_SEAT_OFFSET`, "inside the chair, not on top of the desk"), close
+   * enough and low enough that an 82°-FOV frustum wide enough for the queue (`deskView`'s own
+   * fov, issue #199) always catches the chair's back/seat/pole in its lower half — no pose-only
+   * fix clears the chair without re-shrinking that offset and re-breaking #199's queue framing.
+   * The chair itself (`Desk.ts`'s `createDesk`, named `'desk-chair'`) is hidden instead while in
+   * desk mode: a no-op without a rented office room yet, or if the chair is not found (a layout
+   * mid-rebuild), the same graceful degradation every other desk-view method here uses.
+   */
+  setDeskChairVisible(visible: boolean): void {
+    const office = this.rooms.find((room) => room.kind === 'office');
+    const chair = office?.group.getObjectByName('desk-chair');
+    if (chair) chair.visible = visible;
+  }
+
+  /**
    * World corners of each desk monitor's bezel, left then right (issue #161 review): lets the
    * label declutter keep a queued agent's label clear of them in desk mode. Delegates to the
    * pure geometry in `deskGeometry.ts` — the one source of where a monitor actually sits, the
