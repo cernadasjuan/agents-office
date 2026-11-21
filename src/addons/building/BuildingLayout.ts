@@ -179,8 +179,10 @@ export class BuildingLayout implements LayoutStrategy {
     this.hideHallSideWalls();
     placeMissionsBoard(this.missionsBoard.mesh, this.scene);
     this.missionsBoard.draw([], this.wallClock());
-    const remembered = this.rememberedRooms();
-    for (const kind of remembered.length > 0 ? remembered : (['office'] as RoomKind[])) this.addRoom(kind, false);
+    // `rememberedRooms` always returns the office first (issue #192: it is the lobby, not one
+    // floor's own room, so a floor can never come up without it), so there is no fallback
+    // list to fall through to here.
+    for (const kind of this.rememberedRooms()) this.addRoom(kind, false);
     // The Library is its own room from the start: research trips and librarians go there
     if (!this.roomKinds.includes('library')) this.addRoom('library', false);
     this.saveRooms();
@@ -768,23 +770,30 @@ export class BuildingLayout implements LayoutStrategy {
   }
 
   /**
-   * Remembered rooms, one kind each. A `kind@<tag>` entry is a retired
-   * per-workspace desk room (roadmap item 20, superseded by floors, #118): it
-   * is dropped, without error, and its sessions resettle in the shared pool.
+   * Remembered rooms, one kind each, the office always first. A `kind@<tag>` entry is a
+   * retired per-workspace desk room (roadmap item 20, superseded by floors, #118): it is
+   * dropped, without error, and its sessions resettle in the shared pool.
+   *
+   * The office is Gabriel's lobby, not this floor's own room (issue #192: he has one office,
+   * never one per floor) — every floor's own stored list keeps it anyway, for the same reason
+   * every floor's building keeps rebuilding it at index 0, but a malformed or pre-office
+   * stored list must never leave it out: `addRoom` only ever runs for what this returns, so
+   * this is the one place "the office always renders" actually has to hold.
    */
   private rememberedRooms(): RoomKind[] {
+    let stored: RoomKind[];
     try {
       const parsed: unknown = JSON.parse(this.storage?.getItem(floorStorageKey(this.floor)) ?? '[]');
       const kinds = Object.keys(ROOM_STATION_TYPE);
-      if (!Array.isArray(parsed)) return [];
-      return parsed
+      stored = !Array.isArray(parsed) ? [] : parsed
         .filter((entry): entry is string => typeof entry === 'string')
         .slice(0, 200)
         .filter((entry) => !entry.includes('@'))
         .filter((kind): kind is RoomKind => kinds.includes(kind));
     } catch {
-      return [];
+      stored = [];
     }
+    return stored[0] === 'office' ? stored : ['office', ...stored.filter((kind) => kind !== 'office')];
   }
 
   private saveRooms(): void {

@@ -129,6 +129,31 @@ test('two floors keep separate room lists in the same storage: growing one never
   assert.ok(JSON.parse(storage.get(floorStorageKey('widget-service'))!).includes('desks'));
 });
 
+// --- Lobby (issue #192): one office, never one per floor ---
+
+test('the office always builds first, even with a stored room list that somehow lost it', () => {
+  const storage = new Map<string, string>([[floorStorageKey('widget-service'), '["library","desks"]']]);
+  const backing = { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v) };
+  const scene = new THREE.Scene();
+  const layout = new BuildingLayout(scene, createOffice(scene), { storage: backing, floor: 'widget-service' });
+
+  assert.deepEqual(layout.roomKinds, ['office', 'library', 'desks']);
+  assert.equal(scene.getObjectByName('room-0-office')?.name, 'room-0-office', 'the office still sits at index 0, the lobby\'s own fixed spot');
+});
+
+test('an agent that queues for Gabriel seats in the lobby queue regardless of what floor its own extras name: a building never filters its queue by floor', () => {
+  const { layout, agent, tick } = setup();
+  // `floor` is carried on `extras` the same way the server projects it; `BuildingLayout`
+  // never reads it — floor scoping is the poller's job (issue #192: the office is shared,
+  // not rebuilt per floor, so the one building on screen must seat whoever reaches it).
+  const home = layout.seatFor(agent('local', 'implementing'), null)!;
+  const seat = layout.seatFor(agent('visitor', 'meeting', { attention: 'waiting', waitMinutes: 3, floor: 'widget-service' }), null)!;
+
+  assert.notEqual(seat.key, home.key);
+  tick(600); // past QUEUE_REFRESH_MS: orderQueue runs and claims a queue spot
+  assert.ok(layout.isQueued('visitor'), 'a cross-floor waiting agent queues at the one shared office, the same as a local one');
+});
+
 test('an agent keeps its home desk, makes a trip after the dwell time, and comes back to the same desk', () => {
   const { layout, agent, tick } = setup();
   const home = layout.seatFor(agent('a', 'implementing'), null)!;

@@ -478,3 +478,41 @@ test('a working subagent keeps its activity label', (t) => {
 
   assert.equal(card(list, 'sub').querySelector('.agent-activity')!.textContent, 'Implementing');
 });
+
+// --- Cross-floor queue tag (issue #192) ---
+
+const waitingOn = (id: string, floor: string, waitMinutes = 3): AgentInfo =>
+  ({ id, name: id, activity: 'meeting', extras: { attention: 'waiting', waitMinutes, floor } });
+
+test('with a floor focused, a queued row from another floor gets a floor tag', (t) => {
+  const { list, panel } = makePanel(t, { focusFloor: 'agents-office' });
+  panel.render([waitingOn('here', 'agents-office'), waitingOn('there', 'widget-service')]);
+
+  assert.equal(card(list, 'here').querySelector('.agent-floor'), null, 'the focused floor itself never gets its own tag');
+  assert.equal(card(list, 'there').querySelector('.agent-floor')?.textContent, 'widget-service');
+});
+
+test('on All floors (no focusFloor) nothing gets a floor tag, even with a floor field present', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([waitingOn('a', 'agents-office'), waitingOn('b', 'widget-service')]);
+
+  assert.equal(card(list, 'a').querySelector('.agent-floor'), null);
+  assert.equal(card(list, 'b').querySelector('.agent-floor'), null);
+});
+
+test('a floor tag sits beside a provider or persona tag, not in place of it', (t) => {
+  const { list, panel } = makePanel(t, { focusFloor: 'agents-office' });
+  panel.render([{ id: 'x', name: 'x', activity: 'meeting', extras: { attention: 'waiting', waitMinutes: 1, floor: 'widget-service', provider: 'codex', badges: ['Dev'] } }]);
+
+  const tags = [...card(list, 'x').querySelectorAll('.agent-tags > *')].map((chip) => chip.className);
+  assert.deepEqual(tags, ['agent-floor', 'agent-provider', 'agent-badge']);
+});
+
+test('a re-render that drops the floor tag (the agent moved back to the focused floor) removes the chip', (t) => {
+  const { list, panel } = makePanel(t, { focusFloor: 'agents-office' });
+  panel.render([waitingOn('a', 'widget-service')]);
+  assert.ok(card(list, 'a').querySelector('.agent-floor'));
+
+  panel.render([waitingOn('a', 'agents-office')]);
+  assert.equal(card(list, 'a').querySelector('.agent-floor'), null);
+});

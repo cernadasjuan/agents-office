@@ -2,6 +2,7 @@ import { AgentManager } from './AgentManager.js';
 import { AgentExtras, AgentInfo } from './AgentData.js';
 import type { Activity } from './ActivityAnimations.js';
 import { GENERAL_FLOOR } from '../floors/FloorRegistry.js';
+import { queuesForYou } from '../ui/attention.js';
 
 export interface DetectedAgent extends AgentExtras {
   id: string;
@@ -50,6 +51,13 @@ export class AgentPoller {
    * added or kept. An agent with no `extras.floor` (an old server, or floors inactive) is
    * treated as the shared general floor, never silently dropped. Unset (the default, and
    * every layout that is not floor-aware): no filter, every agent shows, the old behavior.
+   *
+   * One carve-out (issue #192): an agent that queues for Gabriel keeps showing even from
+   * another floor. Gabriel has one office, not one per floor — it is the lobby's own queue,
+   * not that agent's own floor, so the floor filter must never be the thing that makes a
+   * waiting agent invisible. `queuesForYou` is the same predicate the building's own physical
+   * queue and the triage panel's groups already use, so a session counts as "in the queue"
+   * exactly once, not by a second, slightly different rule here.
    */
   constructor(agentManager: AgentManager, private now: () => number = () => Date.now(), private focusFloor?: string) {
     this.agentManager = agentManager;
@@ -111,7 +119,7 @@ export class AgentPoller {
     this.onAgents?.(rawAgents);
     const agents = this.focusFloor === undefined
       ? rawAgents
-      : rawAgents.filter((a) => (a.floor ?? GENERAL_FLOOR) === this.focusFloor);
+      : rawAgents.filter((a) => (a.floor ?? GENERAL_FLOOR) === this.focusFloor || queuesForYou(a));
     const currentIds = new Set(agents.map((a) => a.id));
     let changed = firstAnswer;
 

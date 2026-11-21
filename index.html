@@ -242,7 +242,7 @@
     .agent-wait { color: #ffb199; font-size: 11px; white-space: nowrap; }
     .agent-activity { color: #8888ff; font-size: 11px; }
     .agent-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
-    .agent-provider, .agent-badge {
+    .agent-provider, .agent-badge, .agent-floor {
       font-size: 10px;
       padding: 0 5px;
       border-radius: 6px;
@@ -250,6 +250,8 @@
     }
     .agent-provider { color: #9fe0c0; }
     .agent-badge { color: #d0c0ff; }
+    /* Issue #192: the lobby queue's cross-floor tag, a different color from a persona badge so it never reads as one. */
+    .agent-floor { color: #ffd68a; }
     #agent-inspector, #tombstone-inspector, #mission-issues-inspector {
       position: fixed;
       top: 16px;

@@ -199,6 +199,51 @@ test('an agent that leaves the focused floor is removed, even though it is still
   assert.equal(removeAgent.mock.callCount(), 1);
 });
 
+test('with a focus floor, an agent on another floor that queues for Gabriel is still added (issue #192: one lobby office, not one per floor)', async () => {
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
+    { id: 'a', name: 'agent', activity: 'implementing', floor: 'agents-office' },
+    { id: 'b', name: 'agent', activity: 'meeting', floor: 'widget-service', attention: 'waiting', waitMinutes: 3 },
+    { id: 'c', name: 'agent', activity: 'idle', floor: 'widget-service', attention: 'your-turn', waitMinutes: 5 },
+    { id: 'd', name: 'agent', activity: 'implementing', floor: 'widget-service' },
+  ])));
+  const addAgent = mock.fn();
+  const manager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent: () => undefined } as unknown as AgentManager;
+  const poller = new AgentPoller(manager, () => Date.now(), 'agents-office') as unknown as { poll(): Promise<void> };
+
+  await poller.poll();
+
+  assert.deepEqual(addAgent.mock.calls.map((call) => call.arguments[0].id), ['a', 'b', 'c']);
+});
+
+test('a cold wait from another floor is still dropped: only a fresh or aging wait queues into the lobby', async () => {
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
+    { id: 'cold', name: 'agent', activity: 'meeting', floor: 'widget-service', attention: 'waiting', waitMinutes: 2 * 24 * 60 },
+  ])));
+  const addAgent = mock.fn();
+  const manager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent: () => undefined } as unknown as AgentManager;
+  const poller = new AgentPoller(manager, () => Date.now(), 'agents-office') as unknown as { poll(): Promise<void> };
+
+  await poller.poll();
+
+  assert.equal(addAgent.mock.callCount(), 0);
+});
+
+test('a cross-floor queued agent leaving its wait (and its floor) is removed, same as any other agent', async () => {
+  let agent = { id: 'a', name: 'agent', activity: 'meeting', floor: 'widget-service', attention: 'waiting', waitMinutes: 3 };
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([agent])));
+  const addAgent = mock.fn();
+  const removeAgent = mock.fn();
+  const manager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent } as unknown as AgentManager;
+  const poller = new AgentPoller(manager, () => Date.now(), 'agents-office') as unknown as { poll(): Promise<void> };
+
+  await poller.poll();
+  assert.equal(addAgent.mock.callCount(), 1);
+
+  agent = { ...agent, activity: 'implementing', attention: undefined as never, waitMinutes: undefined as never };
+  await poller.poll();
+  assert.equal(removeAgent.mock.callCount(), 1, 'no longer waiting and on another floor: it leaves the lobby queue and stays off this floor');
+});
+
 test('onAgents (start) receives the raw, unfiltered answer even while a focus floor is set', async () => {
   mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
     { id: 'a', name: 'agent', activity: 'implementing', floor: 'agents-office' },
