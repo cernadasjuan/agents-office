@@ -94,6 +94,56 @@ test('the mission\'s root issue appears first in the issue list', () => {
   assert.equal(mission?.issues.length, 2);
 });
 
+// --- Issue #191: a mission tags its own repo, for the focused floor to scope its war room by ---
+
+test('a mission\'s repo comes from its root issue first, kept as the full owner/repo pair', () => {
+  const mission = summarizeMission('x', { root_issue: { number: 1, url: 'https://github.com/gabriel-amyot/agents-office/issues/1' } });
+  assert.equal(mission?.repo, 'gabriel-amyot/agents-office');
+});
+
+test('without a root issue, a mission falls back to its first GitHub member\'s repo, also kept whole', () => {
+  const mission = summarizeMission('x', { members: [
+    { kind: 'folder', ref: 'tickets/x', title: 'Folder' },
+    { kind: 'gh', ref: 'gabriel-amyot/widget-service#9', title: 'Fix' },
+  ] });
+  assert.equal(mission?.repo, 'gabriel-amyot/widget-service');
+});
+
+test('with no GitHub reference at all, a mission falls back to its own root directory\'s floor, owner/repo included when its remote resolves one', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-missions-root-'));
+  const repoDir = path.join(fixtureRoot, 'someorg', 'project-xyz');
+  fs.mkdirSync(path.join(repoDir, '.git'), { recursive: true });
+  try {
+    const mission = summarizeMission('x', { title: 'No GH ref' }, repoDir);
+    assert.equal(mission?.repo, 'someorg/project-xyz', 'no remote configured here: falls back to the parent-dir qualifier, same as the floor itself would');
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('with no GitHub reference and a root whose own git remote resolves one, the mission tags the full owner/repo, not the directory name', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-missions-remote-'));
+  const repoDir = path.join(fixtureRoot, 'projects', 'agents-office');
+  fs.mkdirSync(path.join(repoDir, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(repoDir, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/gabriel-amyot/agents-office.git\n');
+  try {
+    const mission = summarizeMission('x', { title: 'No GH ref, remote resolves' }, repoDir);
+    assert.equal(mission?.repo, 'gabriel-amyot/agents-office', 'the remote owner/repo, not "projects/agents-office"');
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('with no GitHub reference and a root that resolves to no repo at all, a mission carries no repo tag (issue #191 review: "general" is itself a selectable floor, so tagging it there would wrongly pull every such mission in when a user actually focuses general)', () => {
+  const mission = summarizeMission('x', { title: 'No GH ref, no repo' }, root);
+  assert.ok(!('repo' in mission!));
+});
+
+test('with no GitHub reference and no root given, a mission carries no repo tag', () => {
+  const mission = summarizeMission('x', { title: 'No GH ref, no root' });
+  assert.ok(!('repo' in mission!));
+});
+
 test('a done mission is a locked room, and folders that are not missions are skipped', () => {
   const missions = readMissions([root]);
   assert.equal(missions.find((m) => m.slug === 'old-mission')?.state, 'locked');

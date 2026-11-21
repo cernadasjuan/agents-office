@@ -88,6 +88,32 @@ export function knownFloors(agents: ReadonlyArray<{ floor?: string }>): string[]
 }
 
 /**
+ * Every floor with its own stored room list (issue #191 review, replacing the forced-reload
+ * bounce): read straight from the real storage keys present (`floorRoomsStorageKey`'s own
+ * prefix), never a separate registry nobody would keep in sync. A floor a user already grew
+ * rooms on — even one with zero live agents right now, a renamed repo's old name included —
+ * stays reachable from the floor-switch menu this way, rather than disappearing or forcing a
+ * reload the moment nobody happens to be coding there this instant: a client-side snapshot of
+ * "who is active right now" cannot reliably tell a quiet-but-valid floor apart from one that
+ * is gone for good, so this never tries to guess; it only ever answers from data that is
+ * actually still there. A plain `Storage`-shaped object (`window.localStorage` already
+ * supports this), not the narrower `FloorStorage` interface above, which only reads or writes
+ * a key it already knows the name of — enumerating unknown keys needs `length`/`key(index)`
+ * too.
+ */
+export function floorsWithStoredRooms(storage: Pick<Storage, 'length' | 'key'> | undefined): string[] {
+  if (!storage) return [];
+  const prefix = `${LEGACY_ROOMS_KEY}:`;
+  const floors: string[] = [];
+  for (let index = 0; index < storage.length; index++) {
+    const key = storage.key(index);
+    const floor = key?.startsWith(prefix) ? key.slice(prefix.length) : undefined;
+    if (floor && isFloorName(floor)) floors.push(floor);
+  }
+  return floors;
+}
+
+/**
  * The floor to focus: `#floor=` in the URL first (an explicit link always wins, the same
  * URL-first order `chooseViewMode`/`chooseLayoutId` already use), then the last floor the
  * user visited, else `ALL_FLOORS` (review: a fresh page load has not polled any agent yet,
@@ -108,6 +134,36 @@ export function defaultFloor(
 
 export function rememberFloor(floor: string, storage: Pick<FloorStorage, 'setItem'> | undefined): void {
   storage?.setItem(FOCUSED_FLOOR_KEY, floor);
+}
+
+/**
+ * A floor name's own trailing segment: the bare repo name, with any org-qualifying parent
+ * directory dropped (`server/floor.ts`'s own rule adds that parent only to tell apart two
+ * repos that share a leaf folder name under different organizations — a plugin tagging its
+ * own data with a repo never knows or needs that parent, see `matchesFloor` below).
+ */
+export function floorRepo(floor: string): string {
+  return floor.slice(floor.lastIndexOf('/') + 1);
+}
+
+/**
+ * Whether a repo-tagged datum (a mission war room, a GitHub kanban board, issue #191) belongs
+ * on a focused floor. A plugin's own repo tag is a bare repo name, or a full `owner/repo` pair
+ * when the plugin actually knows the owner (a GitHub issue ref, a configured kanban repo); a
+ * floor name is the same shape, `owner/repo` when its own git remote resolved one, else a bare
+ * name (`server/floor.ts`'s `qualifiedFloorName`). When both sides carry an owner, this
+ * compares the pair exactly: two repos that share a leaf name under different owners must
+ * never match just because their trailing segment is equal. With an owner on only one side (or
+ * neither), it falls back to the trailing segment, the best match either side can make without
+ * guessing the missing owner. A missing tag (a room or board whose own repo could not be
+ * resolved at all) never matches a specific floor: review, it must not silently guess onto
+ * whichever floor happens to be focused; it only ever shows on `ALL_FLOORS` (the caller's own
+ * job to check, not this function's).
+ */
+export function matchesFloor(floor: string, repo: string | undefined): boolean {
+  if (repo === undefined) return false;
+  if (floor.includes('/') && repo.includes('/')) return floor === repo;
+  return floorRepo(floor) === floorRepo(repo);
 }
 
 /** The parts of `window.location` a floor switch needs; injectable for tests. */

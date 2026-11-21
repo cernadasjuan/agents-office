@@ -16,6 +16,15 @@ function makeRepo(name: string, parent = 'repos'): string {
   return repo;
 }
 
+/** A repo whose `.git/config` names an `origin` remote (issue #191's revision: the floor name
+ * prefers the remote's own owner/name over the parent-dir qualifier, since that is what Gabriel
+ * actually expects to see, not a filesystem accident like `projects/`). */
+function makeRepoWithRemote(name: string, remoteUrl: string, parent = 'repos'): string {
+  const repo = makeRepo(name, parent);
+  fs.writeFileSync(path.join(repo, '.git', 'config'), `[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = ${remoteUrl}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n`);
+  return repo;
+}
+
 function makeWorktree(mainRepo: string, name: string, gitdir?: string): string {
   const worktree = path.join(root, 'worktrees', name);
   fs.mkdirSync(worktree, { recursive: true });
@@ -83,7 +92,87 @@ test('a resolved name caches by directory, so a second resolve for the same sess
   }
 });
 
+test('the remote lookup caches per repo root, so two different working directories under the same repo read .git/config only once', () => {
+  const repo = makeRepoWithRemote('remote-cache-check', 'https://github.com/gabriel-amyot/agents-office.git', 'projects');
+  const nested = path.join(repo, 'src', 'deep');
+  fs.mkdirSync(nested, { recursive: true });
+  const resolver = new FloorResolver();
+  const readFileSync = fs.readFileSync;
+  const ownConfig = path.join(repo, '.git', 'config');
+  let configReads = 0;
+  (fs as unknown as { readFileSync: typeof fs.readFileSync }).readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => {
+    // Exact match on this test's own repo, not a suffix: a suffix match also counts every other
+    // concurrently-running test's own `.git/config` read (for example `tests/missions-plugin.test.ts`'s
+    // own fixture repo), which made this assertion racy against unrelated test files.
+    if (String(args[0]) === ownConfig) configReads++;
+    return readFileSync(...args);
+  }) as typeof fs.readFileSync;
+  try {
+    assert.equal(resolver.resolve(repo), 'gabriel-amyot/agents-office');
+    const readsAfterFirst = configReads;
+    assert.ok(readsAfterFirst > 0, 'the first resolve actually read the config');
+    // A different cwd (nested, under the same repo root) misses the outer per-directory cache
+    // but must still reuse the remote lookup's own per-repo-root cache, not re-read the file.
+    assert.equal(resolver.resolve(nested), 'gabriel-amyot/agents-office');
+    assert.equal(configReads, readsAfterFirst, 'the remote lookup for the same repo root was not repeated');
+  } finally {
+    fs.readFileSync = readFileSync;
+  }
+});
+
 // --- Review fixes ---
+
+// --- Issue #191 revision: the git remote's own owner/name wins over the parent-dir qualifier ---
+
+test('a repo with a GitHub HTTPS origin resolves to its own owner/repo, not its parent directory name', () => {
+  const repo = makeRepoWithRemote('https-origin-repo', 'https://github.com/gabriel-amyot/agents-office.git', 'projects');
+  assert.equal(new FloorResolver().resolve(repo), 'gabriel-amyot/agents-office');
+});
+
+test('a repo with a GitHub SSH origin resolves the same owner/repo as the HTTPS form', () => {
+  const repo = makeRepoWithRemote('ssh-origin-repo', 'git@github.com:gabriel-amyot/agents-office.git', 'projects');
+  assert.equal(new FloorResolver().resolve(repo), 'gabriel-amyot/agents-office');
+});
+
+test('a GitLab origin with nested subgroups keeps only the last group segment and the repo name', () => {
+  const repo = makeRepoWithRemote('gitlab-origin-repo', 'https://cicd.prod.datasophia.com/grp-dac/sub1/sub2/project-management.git', 'orgs');
+  assert.equal(new FloorResolver().resolve(repo), 'sub2/project-management');
+});
+
+test('an origin URL with no .git suffix and a trailing slash still resolves cleanly', () => {
+  const repo = makeRepoWithRemote('trailing-slash-repo', 'https://github.com/gabriel-amyot/agents-office/', 'projects');
+  assert.equal(new FloorResolver().resolve(repo), 'gabriel-amyot/agents-office');
+});
+
+test('a repo with no remote at all falls back to the parent-dir qualifier, unchanged from before this revision', () => {
+  const repo = makeRepo('no-remote-repo', 'projects');
+  assert.equal(new FloorResolver().resolve(repo), 'projects/no-remote-repo');
+});
+
+test('a repo whose config has no origin remote, or an unparsable url, falls back to the parent-dir qualifier', () => {
+  const noOrigin = makeRepo('no-origin', 'projects');
+  fs.writeFileSync(path.join(noOrigin, '.git', 'config'), '[core]\n\trepositoryformatversion = 0\n');
+  assert.equal(new FloorResolver().resolve(noOrigin), 'projects/no-origin');
+
+  const badUrl = makeRepo('bad-url', 'projects');
+  fs.writeFileSync(path.join(badUrl, '.git', 'config'), '[remote "origin"]\n\turl = not a url at all\n');
+  assert.equal(new FloorResolver().resolve(badUrl), 'projects/bad-url');
+});
+
+test('an oversized .git/config falls back to the parent-dir qualifier rather than being read in full (issue #191 review nit: a size cap, like the worktree-file reader\'s own bounded read)', () => {
+  const repo = makeRepo('oversized-config', 'projects');
+  // A real `[remote "origin"]` section is in here too, so a successful read-without-a-cap
+  // would otherwise resolve a real owner/repo — the point is that it never gets the chance.
+  const filler = '#'.repeat(200_000);
+  fs.writeFileSync(path.join(repo, '.git', 'config'), `${filler}\n[remote "origin"]\n\turl = https://github.com/gabriel-amyot/agents-office.git\n`);
+  assert.equal(new FloorResolver().resolve(repo), 'projects/oversized-config');
+});
+
+test('a worktree resolves its main repository\'s own remote owner/repo, not the worktree directory', () => {
+  const mainRepo = makeRepoWithRemote('worktree-main-repo', 'https://github.com/gabriel-amyot/agents-office.git', 'projects');
+  const worktree = makeWorktree(mainRepo, '191-floors-step2');
+  assert.equal(new FloorResolver().resolve(worktree), 'gabriel-amyot/agents-office');
+});
 
 test('two repos that share a leaf folder name under different parent directories resolve to two different floors', () => {
   const repoA = makeRepo('project-management', 'grp-beklever-com');

@@ -27,6 +27,11 @@ export interface WorldRoom {
   /** For the missions board (issue #144): when a mission started, and when a closed one stopped. */
   createdAt?: string;
   closedAt?: string;
+  /** The repo this room scopes to (issue #191): a bare repo short name, matched against the
+   * focused floor's own trailing segment (`src/floors/FloorRegistry.ts`'s `matchesFloor`), not
+   * exact floor-name equality. Absent only when no repo could be resolved; such a room shows
+   * on `ALL_FLOORS` only. */
+  repo?: string;
   walls: {
     statement?: string;
     docs?: string[];
@@ -40,6 +45,8 @@ export interface WorldBoard {
   id: string;
   title: string;
   columns: Array<{ name: string; cards: Array<{ number: number; title: string }> }>;
+  /** The repo this board scopes to (issue #191), the same tag and client matching rule as `WorldRoom.repo`. */
+  repo?: string;
 }
 
 /** One ticket of the personal Jira board (issue #145). `url` is the browse link built from the key. */

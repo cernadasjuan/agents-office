@@ -20,7 +20,7 @@ import { FreshnessFooter } from './ui/freshness.js';
 import { Legend } from './ui/Legend.js';
 import { handleTriageKey } from './ui/TriageKeys.js';
 import { FloorSwitch } from './ui/FloorSwitch.js';
-import { ALL_FLOORS, defaultFloor, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
+import { ALL_FLOORS, defaultFloor, floorsWithStoredRooms, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
 import { focusedFloor, setFocusedFloor } from './floors/floorState.js';
 
 // Setup scene
@@ -269,7 +269,17 @@ window.setInterval(() => void pollWorld(), 10_000);
 // still sees the raw, unfiltered answer, so the floor-switch menu lists every floor with a
 // tracked session, not only the focused one.
 const poller = new AgentPoller(agentManager, undefined, focusFloor);
-poller.start(3000, buildUI, (health) => freshness.show(health), (agents) => floorSwitch?.render(agents));
+// Issue #191 review (revised): a floor chosen before it was renamed (the remote-naming
+// revision, for example), or one that simply has no live agent right now, both render as a
+// quiet building — its own stored rooms, its own mission war rooms and kanban boards, just
+// with nobody currently in it. Neither forces a reload: a client-side snapshot of "who is
+// active right now" cannot reliably tell a quiet-but-valid floor apart from one that is gone
+// for good, so this never guesses. `floorSwitch.render` lists every floor with its own stored
+// room list too (`floorsWithStoredRooms`), not only the floors agents are tracked on right
+// now, so Gabriel can always leave a quiet floor through the menu himself.
+poller.start(3000, buildUI, (health) => freshness.show(health), (agents) => {
+  floorSwitch?.render(agents, floorsWithStoredRooms(window.localStorage));
+});
 
 // --- Render loop ---
 // On demand, at most 30 fps, once a second when nothing moves. `?debug=1` exposes `window.__officeStats`.

@@ -112,6 +112,13 @@ export interface RoomInput {
   /** For the missions board (issue #144): when a mission started, and when a closed one stopped. */
   createdAt?: string;
   closedAt?: string;
+  /** The repo this room scopes to, for the focused floor to filter by (issue #191). A bare
+   * repo short name (never `owner/repo`, `server/seam.ts`'s own `repoShortName`), matched on
+   * the client against a floor's own trailing segment (`src/floors/FloorRegistry.ts`'s
+   * `matchesFloor`) rather than compared for exact equality, since a floor may be
+   * org-qualified while this tag never is. Absent only when no repo could be resolved at all;
+   * such a room shows on `ALL_FLOORS` only, never guessed onto one specific floor. */
+  repo?: string;
   walls?: {
     statement?: string;
     docs?: string[];
@@ -125,6 +132,8 @@ export interface BoardInput {
   key: string;
   title: string;
   columns: Array<{ name: string; cards: Array<{ number: number; title: string }> }>;
+  /** The repo this board scopes to (issue #191), the same whitelist and client matching rule as `RoomInput.repo`. */
+  repo?: string;
 }
 
 /** One ticket of a personal Jira board (issue #145). `url` is the browse link built from the key. */
@@ -262,8 +271,10 @@ function isoTimestamp(value: unknown): string | undefined {
 
 const REPO_SHORT = /^[A-Za-z0-9_.-]{1,40}$/;
 
-/** The repository name after the last slash, or undefined when it is not a plain short token. */
-function repoShortName(value: unknown): string | undefined {
+/** The repository name after the last slash, or undefined when it is not a plain short token
+ * (issue #191: shared with `RoomInput`/`BoardInput`'s own `repo` tag, below, since a mission or a
+ * GitHub kanban board whitelists its repo through the exact same shape as an agent's issue card). */
+export function repoShortName(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const short = value.slice(value.lastIndexOf('/') + 1);
   return REPO_SHORT.test(short) && short !== '.' && short !== '..' ? short : undefined;
@@ -370,9 +381,27 @@ function projectStory(input: SessionStoryInput | undefined) {
 
 const OWNER_REPO = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
 
-/** A full `owner/name` pair, or undefined when the value does not match that shape. */
+/** A full `owner/name` pair, or undefined when the value does not match that shape. Neither
+ * segment may be `.` or `..` (review, issue #191: the shape alone, both sides drawn from the
+ * same character class the floor-name whitelist uses, admits a relative segment like `../x` or
+ * `owner/..` — the same rule `floorName` already applies segment-wise, not just to the one
+ * literal `'./.'` string this used to special-case). */
 function ownerRepo(value: unknown): string | undefined {
-  return typeof value === 'string' && OWNER_REPO.test(value) && value !== './.' ? value : undefined;
+  if (typeof value !== 'string' || !OWNER_REPO.test(value)) return undefined;
+  return value.split('/').some((segment) => segment === '.' || segment === '..') ? undefined : value;
+}
+
+/**
+ * A `RoomInput`/`BoardInput` repo tag (issue #191 revision): a full `owner/repo` pair kept
+ * whole when the value already has that shape, else the bare short name. A value with a slash
+ * must pass the stricter `ownerRepo` whitelist outright, or is dropped whole — review, blocking:
+ * falling through to `repoShortName` for a value that merely *contains* a slash would keep only
+ * the text after its *last* one, silently admitting the tail of a rejected value like
+ * `../private` (owner `..`, repo `private`) as a seemingly clean bare name. `repoShortName`
+ * only ever runs on a value with no slash at all, the bare-name case it is actually for.
+ */
+function repoTag(value: unknown): string | undefined {
+  return typeof value === 'string' && value.includes('/') ? ownerRepo(value) : repoShortName(value);
 }
 
 const HEX_COLOR = /^#?([0-9A-Fa-f]{6})$/;
@@ -519,6 +548,7 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         const story = projectStory(entry?.story);
         return [{ id: publicId(`sleeper:${room.key}:${rawId}`), ...(endedAt ? { endedAt } : {}), ...(name ? { name } : {}), ...(story ? { story } : {}) }];
       });
+    const repo = repoTag(room.repo);
     return {
       id: publicId(`room:${room.key}`),
       kind: room.kind === 'workspace' ? 'workspace' : 'mission',
@@ -527,6 +557,7 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
       ...(sleepers.length > 0 ? { sleepers } : {}),
       ...(isoTimestamp(room.createdAt) ? { createdAt: isoTimestamp(room.createdAt) } : {}),
       ...(isoTimestamp(room.closedAt) ? { closedAt: isoTimestamp(room.closedAt) } : {}),
+      ...(repo ? { repo } : {}),
       walls: {
         ...(walls.statement ? { statement: displayText(walls.statement, 240) } : {}),
         ...(Array.isArray(walls.docs) ? { docs: walls.docs.slice(0, 8).map((doc) => displayText(doc, 60)) } : {}),
@@ -555,6 +586,7 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         .map((card) => ({ number: wholeNumber(card.number, 10_000_000), title: displayText(card.title, 60) }))
         .filter((card) => card.number !== undefined),
     })),
+    ...(repoTag(board.repo) ? { repo: repoTag(board.repo) } : {}),
   }));
   const jiraTickets = parts.flatMap((part) => part.jiraTickets ?? []).slice(0, 50)
     .map(jiraTicket).filter((ticket): ticket is NonNullable<ReturnType<typeof jiraTicket>> => ticket !== undefined);

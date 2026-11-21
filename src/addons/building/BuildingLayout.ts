@@ -13,6 +13,7 @@ import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.
 import { tombstoneNameBatchFor } from './tombstoneNames.js';
 import type { WarRoomCounts } from './warRoomFurnishing.js';
 import type { WorldRoom } from '../../extensions.js';
+import { matchesFloor } from '../../floors/FloorRegistry.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
 import { markStatic } from '../../scene/StaticMerge.js';
 import { createStool } from '../../furniture/Stool.js';
@@ -61,6 +62,9 @@ function isLibrarian(extras: LayoutAgent['extras']): boolean {
 }
 
 export const BUILDING_STORAGE_KEY = 'agents-office.building.rooms';
+/** Marks the one-time legacy-rooms migration as done (issue #191, `migrateLegacyRooms`), so it
+ * never runs a second time no matter which floor is focused afterward. */
+const ROOMS_MIGRATED_KEY = 'agents-office.building.rooms.migrated';
 /**
  * Each floor keeps its own room-kind list under its own storage key (issue #118 floors
  * design: `BUILDING_STORAGE_KEY` becomes `BUILDING_STORAGE_KEY:<floor>`). Without a floor
@@ -171,6 +175,7 @@ export class BuildingLayout implements LayoutStrategy {
     this.dwellMs = options.dwellMs ?? DEFAULT_DWELL_MS;
     this.storage = options.storage;
     this.floor = options.floor;
+    this.migrateLegacyRooms();
     this.hideHallSideWalls();
     placeMissionsBoard(this.missionsBoard.mesh, this.scene);
     this.missionsBoard.draw([], this.wallClock());
@@ -192,7 +197,12 @@ export class BuildingLayout implements LayoutStrategy {
    * the mission wing; a known room updates its walls. A locked room keeps standing,
    * and its agents leave.
    */
-  syncWorldRooms(rooms: WorldRoom[]): LayoutMove[] {
+  syncWorldRooms(worldRooms: WorldRoom[]): LayoutMove[] {
+    // Issue #191: a specific floor builds only its own repo's war rooms (`matchesFloor` compares
+    // the room's own bare repo tag against this floor's trailing segment, org-qualified or not).
+    // Unset `this.floor` is `ALL_FLOORS` (`src/addons/building.ts` never passes a floor option
+    // for it), the original behavior: every room shows, repo tag or none.
+    const rooms = this.floor === undefined ? worldRooms : worldRooms.filter((room) => matchesFloor(this.floor!, room.repo));
     for (const room of rooms) {
       const known = this.missionRooms.get(room.id);
       if (known) {
@@ -723,6 +733,40 @@ export class BuildingLayout implements LayoutStrategy {
     // Its own zone: the overview lowers the hall walls like the room walls
     markStatic(this.hallWalls, { zone: 'hall-walls', overviewLower: OFFICE.height });
     this.scene.add(this.hallWalls);
+  }
+
+  /**
+   * One-time migration (issue #191): today's single building's room list (the legacy bare
+   * `BUILDING_STORAGE_KEY`) becomes the first specific floor ever focused, so none of a user's
+   * already-grown rooms are lost once floors exist. `ALL_FLOORS` (`this.floor` unset) never
+   * migrates: it keeps reading the legacy key directly, same as before floors existed — the
+   * migration only matters the first time a user actually narrows to one floor. A marker key,
+   * not a legacy-key scan, makes this run at most once ever, for whichever floor that first is;
+   * a floor that already has its own room list is never overwritten, and the legacy key itself
+   * is left behind, read but never deleted or rewritten (review: a dual-read path was explicitly
+   * ruled out by the design, but "leave the key behind" still means never touching it).
+   *
+   * Not covered (issue #191 review, documented rather than fixed): a floor renamed after a user
+   * already grew its room list there — the remote-naming revision renamed every repo with a
+   * remote, `projects/agents-office` to `gabriel-amyot/agents-office` for example — has no
+   * migration from the old `floorStorageKey` to the new one. The client never sees a repo's raw
+   * directory path (S4), so it has no way to recompute what the old parent-dir-qualified name
+   * would have been from the new one; only the server, which resolved both, could have made
+   * that link, and it only ever hands the client the final name. A renamed floor's grown rooms
+   * (beyond office and library) regrow from scratch under the new name, the same cold-start
+   * experience a floor gets the first time it is ever focused.
+   */
+  private migrateLegacyRooms(): void {
+    if (this.floor === undefined) return;
+    try {
+      if (this.storage?.getItem(ROOMS_MIGRATED_KEY)) return;
+      const legacy = this.storage?.getItem(BUILDING_STORAGE_KEY);
+      const already = this.storage?.getItem(floorStorageKey(this.floor));
+      if (legacy && !already) this.storage?.setItem(floorStorageKey(this.floor), legacy);
+      this.storage?.setItem(ROOMS_MIGRATED_KEY, this.floor);
+    } catch {
+      // Storage full or blocked: the building still works for this page, just without migrated rooms
+    }
   }
 
   /**

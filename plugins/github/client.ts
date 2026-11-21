@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../../src/agents/AgentManager.js';
 import { registerExtension, type OfficeExtension, type World, type WorldBoard } from '../../src/extensions.js';
+import { ALL_FLOORS, matchesFloor } from '../../src/floors/FloorRegistry.js';
+import { focusedFloor } from '../../src/floors/floorState.js';
 import { IssueCardBatch } from './cards.js';
 import { canvas, fitted } from './text.js';
 import { installIssueLineStyle, MAX_IDS, showIssueIds } from './labelIds.js';
@@ -96,7 +98,12 @@ export class GithubOfficeExtension implements OfficeExtension {
 
   worldChanged(world: World): void {
     if (!this.scene) return;
-    const boards = (world.boards ?? []).slice(0, KANBAN_BOARD_SLOTS.length);
+    // Issue #191: the kanban board is per-repo already (one board per configured repository);
+    // on a specific floor, only its own repo's board shows. `ALL_FLOORS` keeps every board, the
+    // original behavior, unchanged.
+    const floor = focusedFloor();
+    const scoped = floor === ALL_FLOORS ? (world.boards ?? []) : (world.boards ?? []).filter((board) => matchesFloor(floor, board.repo));
+    const boards = scoped.slice(0, KANBAN_BOARD_SLOTS.length);
     while (this.boards.length > boards.length) this.unmountBoard(this.boards.pop()!);
     boards.forEach((board, index) => {
       const signature = JSON.stringify(board);

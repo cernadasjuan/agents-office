@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
+import { FloorResolver, GENERAL_FLOOR } from '../../server/floor.js';
 import type { Enricher, Observation, OfficePlugin, RoomInput, WorldProvider } from '../../server/seam.js';
 import { EMPTY_GITHUB_CONFIG, parseGithubConfig, readSessionStory, SESSION_SLUG, type GithubConfig } from './sessionStoryReader.js';
 
@@ -16,6 +17,11 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_RECORD_BYTES = 1_000_000;
 const MAX_SCAN_BYTES = 4_000_000;
 const RECORD_CACHE_MS = 30_000;
+
+/** Resolves a mission root directory to a floor, the same rule a session's own cwd uses
+ * (issue #191's root-fallback below): shared and cached like `server/floor.ts`'s own built-in
+ * enricher, since a busy office reads the same roots on every poll. */
+const floorResolver = new FloorResolver();
 
 export interface MissionSummary {
   slug: string;
@@ -34,6 +40,13 @@ export interface MissionSummary {
   createdAt?: string;
   /** When a closed mission stopped, approximated by its last `updated` timestamp. Open missions have none. */
   closedAt?: string;
+  /** The mission's own repo, for the focused floor to scope its war room by (issue #191): its
+   * `root_issue`'s own `owner/repo`, else its first GitHub member's, else — with neither — the
+   * mission's own root directory's floor. Absent when no root was given either, or when that
+   * root resolves to no repo at all (`GENERAL_FLOOR`): `'general'` is itself a selectable
+   * floor, so tagging it there would wrongly pull in every such mission once a user actually
+   * focuses it — an unresolved repo shows on `ALL_FLOORS` only. */
+  repo?: string;
 }
 
 export function parseRoots(list: string | undefined): string[] {
@@ -82,12 +95,36 @@ function threadNumber(id: unknown): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-/** Turn one mission record into what its room shows. Unknown or missing fields give empty walls. */
-export function summarizeMission(slug: string, record: unknown): MissionSummary | null {
+/**
+ * The mission's own repo (issue #191): its `root_issue`'s own `owner/repo` first, else its
+ * first GitHub member's, kept whole (never shortened — `matchesFloor` needs the owner half for
+ * an exact comparison against an org-qualified floor). With neither, it falls back to `root`'s
+ * own floor (the mission record's directory, resolved the same way a session's cwd is, so it
+ * may itself be `owner/repo` when that directory's own git remote resolves one). `undefined`
+ * when no root was given either, or when the root resolves to `GENERAL_FLOOR` (review,
+ * blocking: `'general'` is itself a selectable floor, not "no repo" — tagging a mission with it
+ * would pull every such mission in the moment a user actually focuses the general floor, the
+ * exact wrong-guess this field must never make; an unresolved repo shows on `ALL_FLOORS` only).
+ */
+function missionRepo(mission: Record<string, unknown>, root: string | undefined): string | undefined {
+  const fromRootIssue = rootIssue(mission)?.repo;
+  if (fromRootIssue) return fromRootIssue;
+  const member = list(mission.members).find((m) => text(m.kind) === 'gh' && issueRef(m.ref)?.repo);
+  const fromMember = member ? issueRef(member.ref)?.repo : undefined;
+  if (fromMember) return fromMember;
+  if (!root) return undefined;
+  const floor = floorResolver.resolve(root);
+  return floor === GENERAL_FLOOR ? undefined : floor;
+}
+
+/** Turn one mission record into what its room shows. Unknown or missing fields give empty walls.
+ * `root` is the mission record's own directory, needed only for `missionRepo`'s own fallback. */
+export function summarizeMission(slug: string, record: unknown, root?: string): MissionSummary | null {
   if (typeof record !== 'object' || record === null) return null;
   const mission = record as Record<string, unknown>;
   const status = text(mission.status);
   const threads = list(mission.threads);
+  const repo = missionRepo(mission, root);
   const column = (states: string[]) => threads
     .filter((thread) => states.includes(text(thread.state)))
     .map((thread) => ({ number: threadNumber(thread.id), title: text(thread.title) }))
@@ -121,6 +158,7 @@ export function summarizeMission(slug: string, record: unknown): MissionSummary 
       .filter((entry) => entry.id !== ''),
     ...(text(mission.created) ? { createdAt: text(mission.created) } : {}),
     ...(status === 'done' || status === 'abandoned' ? (text(mission.updated) ? { closedAt: text(mission.updated) } : {}) : {}),
+    ...(repo ? { repo } : {}),
   };
 }
 
@@ -137,7 +175,7 @@ export function readMissions(roots: string[]): MissionSummary[] {
       try {
         const stat = fs.lstatSync(file);
         if (!stat.isFile() || stat.size > MAX_RECORD_BYTES) continue;
-        const summary = summarizeMission(entry.name, parse(fs.readFileSync(file, 'utf-8')));
+        const summary = summarizeMission(entry.name, parse(fs.readFileSync(file, 'utf-8')), root);
         if (summary) missions.push(summary);
       } catch {
         // skip a record that does not parse
@@ -254,6 +292,7 @@ export function missionsPlugin(roots: string[], now: () => number = Date.now, gi
         sleepers: mission.sleepers.map(sleeperInput),
         ...(mission.createdAt ? { createdAt: mission.createdAt } : {}),
         ...(mission.closedAt ? { closedAt: mission.closedAt } : {}),
+        ...(mission.repo ? { repo: mission.repo } : {}),
         walls: { statement: mission.statement, docs: mission.docs, issues: mission.issues, kanban: mission.kanban },
       })),
     }),

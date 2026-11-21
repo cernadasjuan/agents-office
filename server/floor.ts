@@ -50,18 +50,58 @@ function worktreeMainDir(gitFile: string, worktreeDir: string): string | undefin
   }
 }
 
+/** The `url = ...` value of a git config's `[remote "origin"]` section, or undefined without
+ * one. A plain text scan, not an ini parser: finds the named section, then the first `url`
+ * line inside it, stopping at the next `[section]` header (or the end of the file). */
+function originUrl(configText: string): string | undefined {
+  const section = /\[remote "origin"\]([\s\S]*?)(?=\n\s*\[|$)/.exec(configText);
+  if (!section) return undefined;
+  return /^\s*url\s*=\s*(.+)$/m.exec(section[1])?.[1].trim();
+}
+
+const SSH_REMOTE = /^[\w.-]+@[\w.-]+:(.+)$/;
+const HTTP_REMOTE = /^https?:\/\/[^/]+\/(.+)$/;
+
 /**
- * A repository's own floor name: its directory name, qualified by its immediate parent
- * directory's name when that parent exists and fits the whitelist too (review: the org
- * separation fix). `GENERAL_FLOOR` when the repo's own directory name itself does not fit
- * the whitelist (never half a floor name, and never a crash).
+ * A remote URL's own owner/repo, Gabriel's own expectation for a floor name (review: a
+ * filesystem accident like `projects/agents-office`, the repo's bare parent directory, is not
+ * what he expects to see — the remote he actually pushes to is). GitHub (`owner/repo`) and a
+ * GitLab group (`group/.../repo`, any subgroup depth) both reduce to the same two-segment
+ * shape: the last path segment before the repo name, then the repo name itself, dropping any
+ * deeper subgroup nesting as `matchesFloor`'s own trailing-segment fallback would anyway once a
+ * tag has no owner to compare. Undefined when the URL does not parse into at least two
+ * segments, or either segment fails the floor-name whitelist (never half a floor name).
  */
-function qualifiedFloorName(repoDir: string): string {
-  const repoName = path.basename(repoDir);
-  if (!validSegment(repoName)) return GENERAL_FLOOR;
-  const parentDir = path.dirname(repoDir);
-  const parentName = parentDir === repoDir ? '' : path.basename(parentDir);
-  return parentName && validSegment(parentName) ? `${parentName}/${repoName}` : repoName;
+function ownerRepoFromRemote(url: string): string | undefined {
+  const afterHost = SSH_REMOTE.exec(url)?.[1] ?? HTTP_REMOTE.exec(url)?.[1];
+  if (!afterHost) return undefined;
+  const segments = afterHost.replace(/\.git\/?$/, '').replace(/\/+$/, '').split('/').filter(Boolean);
+  if (segments.length < 2) return undefined;
+  const repo = segments[segments.length - 1];
+  const owner = segments[segments.length - 2];
+  return validSegment(owner) && validSegment(repo) ? `${owner}/${repo}` : undefined;
+}
+
+/** A real git config is a handful of lines; anything past this is never read at all (review
+ * nit: the worktree-file reader right above already bounds its own read the same way). */
+const MAX_GIT_CONFIG_BYTES = 65_536;
+
+/** A repo directory's own remote owner/repo, read straight from its `.git/config` (never a
+ * shell-out: `server/floor.ts` is core, not an opt-in plugin, and P-no-shell applies everywhere
+ * here, not only inside a plugin). Undefined on any read or parse failure — a repo with no
+ * `.git/config`, a config that is not a plain file, one over `MAX_GIT_CONFIG_BYTES`, no
+ * `origin` remote, or an unparsable URL, falls back to the parent-dir qualifier below, exactly
+ * as before this existed. */
+function remoteOwnerRepo(repoDir: string): string | undefined {
+  const configPath = path.join(repoDir, '.git', 'config');
+  try {
+    const stat = fs.lstatSync(configPath);
+    if (!stat.isFile() || stat.size > MAX_GIT_CONFIG_BYTES) return undefined;
+    const url = originUrl(fs.readFileSync(configPath, 'utf8'));
+    return url ? ownerRepoFromRemote(url) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -76,6 +116,10 @@ function qualifiedFloorName(repoDir: string): string {
  */
 export class FloorResolver {
   private cache = new Map<string, string>();
+  /** The remote lookup's own cache, keyed by repo root rather than by a session's own `cwd`
+   * (issue #191 revision): several sessions, and several directories inside one of them, share
+   * one repo root, and must not each pay their own `.git/config` read for the same answer. */
+  private remoteCache = new Map<string, string | undefined>();
 
   resolve(cwd: string | undefined): string {
     if (!cwd) return GENERAL_FLOOR;
@@ -94,9 +138,9 @@ export class FloorResolver {
       const git = path.join(current, '.git');
       try {
         const stat = fs.lstatSync(git);
-        if (!stat.isFile()) return qualifiedFloorName(current);
+        if (!stat.isFile()) return this.qualifiedFloorName(current);
         const mainDir = worktreeMainDir(git, current);
-        return mainDir ? qualifiedFloorName(mainDir) : GENERAL_FLOOR;
+        return mainDir ? this.qualifiedFloorName(mainDir) : GENERAL_FLOOR;
       } catch {
         const parent = path.dirname(current);
         if (parent === current) return GENERAL_FLOOR;
@@ -104,6 +148,32 @@ export class FloorResolver {
       }
     }
     return GENERAL_FLOOR;
+  }
+
+  /** `remoteOwnerRepo(repoDir)`, cached per repo root, capped and cleared the same way `cache` is. */
+  private cachedRemoteOwnerRepo(repoDir: string): string | undefined {
+    if (this.remoteCache.has(repoDir)) return this.remoteCache.get(repoDir);
+    const result = remoteOwnerRepo(repoDir);
+    if (this.remoteCache.size >= MAX_CACHED_DIRS) this.remoteCache.clear();
+    this.remoteCache.set(repoDir, result);
+    return result;
+  }
+
+  /**
+   * A repository's own floor name: its remote `origin`'s own owner/repo when one resolves,
+   * else its directory name, qualified by its immediate parent directory's name when that
+   * parent exists and fits the whitelist too (review: the org separation fix). `GENERAL_FLOOR`
+   * when the repo's own directory name itself does not fit the whitelist (never half a floor
+   * name, and never a crash).
+   */
+  private qualifiedFloorName(repoDir: string): string {
+    const fromRemote = this.cachedRemoteOwnerRepo(repoDir);
+    if (fromRemote) return fromRemote;
+    const repoName = path.basename(repoDir);
+    if (!validSegment(repoName)) return GENERAL_FLOOR;
+    const parentDir = path.dirname(repoDir);
+    const parentName = parentDir === repoDir ? '' : path.basename(parentDir);
+    return parentName && validSegment(parentName) ? `${parentName}/${repoName}` : repoName;
   }
 }
 

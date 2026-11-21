@@ -8,7 +8,10 @@ export interface FloorSwitchOptions {
  * The floor-switch menu (issue #118 AC3): a plain `<select>` in the panel header. `ALL_FLOORS`
  * ("All floors", review: the default, no-filter state) always lists first, then every floor
  * with a tracked session right now, plus the focused floor itself (so a floor with zero
- * sessions right after a switch still shows as the chosen option), general always last
+ * sessions right after a switch still shows as the chosen option), plus every floor with its
+ * own stored room list (issue #191 review: a floor the user already grew rooms on, but with
+ * zero live agents right now, must stay reachable here — Gabriel can always leave a quiet
+ * floor through this menu, rather than the office forcing him off it), general always last
  * (`knownFloors`, `src/floors/FloorRegistry.ts`). All text through `textContent` (S5); a
  * floor name is already the whitelisted short token `server/seam.ts` projects, never raw.
  *
@@ -34,10 +37,16 @@ export class FloorSwitch {
     this.render([]);
   }
 
-  /** Rebuilds the option list from every floor known right now (after each poll). `ALL_FLOORS` is never a real agent floor, so it is prepended here, not derived from `knownFloors`. */
-  render(agents: ReadonlyArray<{ floor?: string }>): void {
+  /**
+   * Rebuilds the option list from every floor known right now (after each poll), plus every
+   * floor with its own stored room list (`storedFloors`, issue #191 review: a quiet but valid
+   * floor must stay a menu choice, not vanish the moment it has no live agent). `ALL_FLOORS`
+   * is never a real agent floor, so it is prepended here, not derived from `knownFloors`.
+   */
+  render(agents: ReadonlyArray<{ floor?: string }>, storedFloors: readonly string[] = []): void {
     const doc = this.root.ownerDocument;
-    const known = knownFloors([...agents, { floor: this.focused }]).filter((floor) => floor !== ALL_FLOORS);
+    const withStored = [...agents, { floor: this.focused }, ...storedFloors.map((floor) => ({ floor }))];
+    const known = knownFloors(withStored).filter((floor) => floor !== ALL_FLOORS);
     const floors = [ALL_FLOORS, ...known];
     this.select.textContent = '';
     for (const floor of floors) {

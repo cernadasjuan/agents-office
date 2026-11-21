@@ -69,7 +69,7 @@ function builtRoomRect(scene: THREE.Scene, index: number, kind: string): { minX:
   return { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z };
 }
 
-function setup(storage = new Map<string, string>()) {
+function setup(storage = new Map<string, string>(), floor?: string) {
   let clock = 0;
   let wallClock = Date.parse('2026-11-20T00:00:00Z');
   const scene = new THREE.Scene();
@@ -78,6 +78,7 @@ function setup(storage = new Map<string, string>()) {
     wallClock: () => wallClock,
     dwellMs: 4000,
     storage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => void storage.set(k, v) },
+    ...(floor ? { floor } : {}),
   });
   const agent = (id: string, activity: Activity, extras?: AgentExtras) => ({ id, activity, ...(extras ? { extras } : {}) });
   return {
@@ -398,6 +399,94 @@ test('agents of a mission work in its war room, their helpers stand near them, a
   layout.syncWorldRooms([missionRoom('locked')]);
   const late = layout.seatFor(agent('late', 'implementing', { room: 'room-1' }), null)!;
   assert.doesNotMatch(late.key, /^mission/);
+});
+
+// --- Issue #191: a floor shows only its own mission war rooms ---
+
+/** The title text actually drawn on a built mission room's own label, by its scene index
+ * (`mission-room-<n>`, `buildMissionRoom`'s own naming) — identity, not just a count (review:
+ * a filter that kept the wrong room would still pass a count-only assertion). */
+function missionRoomTitles(scene: THREE.Scene, count: number): string[] {
+  return Array.from({ length: count }, (_, index) => {
+    const group = scene.getObjectByName(`mission-room-${index}`)!;
+    let title: string | undefined;
+    group.traverse((child) => { if (child.name === 'room-label') title = child.userData.roomLabel as string; });
+    return title!;
+  });
+}
+
+test('on a specific floor, only a mission room whose repo matches it is built; "all floors" keeps building every one', () => {
+  const widget = { ...missionRoom(), id: 'room-2', title: 'Widget migration', repo: 'widget-service' };
+  const own = { ...missionRoom(), title: 'Office roadmap', repo: 'agents-office' };
+
+  const onFloor = setup(new Map(), 'agents-office');
+  onFloor.layout.syncWorldRooms([own, widget]);
+  assert.equal(onFloor.layout.missionRoomCount, 1);
+  assert.deepEqual(missionRoomTitles(onFloor.scene, 1), ['Office roadmap'], 'the matching room survived, not just any one room');
+
+  const allFloors = setup();
+  allFloors.layout.syncWorldRooms([own, widget]);
+  assert.equal(allFloors.layout.missionRoomCount, 2);
+  assert.deepEqual(missionRoomTitles(allFloors.scene, 2), ['Office roadmap', 'Widget migration']);
+});
+
+test('an org-qualified floor still matches a mission tagged with the bare repo name', () => {
+  const own = { ...missionRoom(), repo: 'agents-office' };
+  const { layout } = setup(new Map(), 'gabriel-amyot/agents-office');
+  layout.syncWorldRooms([own]);
+  assert.equal(layout.missionRoomCount, 1);
+});
+
+test('on a specific floor, a mission room with no repo tag at all never builds (it only ever shows on "all floors")', () => {
+  const { layout } = setup(new Map(), 'agents-office');
+  layout.syncWorldRooms([missionRoom()]);
+  assert.equal(layout.missionRoomCount, 0);
+});
+
+// --- Issue #191: the legacy single-building room list migrates once to the first floor focused ---
+
+test('the legacy room list migrates forward to the first specific floor ever focused, without touching the legacy key', () => {
+  const storage = new Map([[BUILDING_STORAGE_KEY, JSON.stringify(['office', 'library', 'desks'])]]);
+
+  const scene = new THREE.Scene();
+  const layout = new BuildingLayout(scene, createOffice(scene), {
+    storage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => void storage.set(k, v) },
+    floor: 'agents-office',
+  });
+
+  assert.deepEqual(layout.roomKinds, ['office', 'library', 'desks']);
+  assert.deepEqual(JSON.parse(storage.get(floorStorageKey('agents-office'))!), ['office', 'library', 'desks']);
+  assert.deepEqual(JSON.parse(storage.get(BUILDING_STORAGE_KEY)!), ['office', 'library', 'desks'], 'left behind, not deleted');
+});
+
+test('migration runs only once: a second floor, focused later, starts with no rooms of its own, not another copy of the legacy list', () => {
+  const storage = new Map([[BUILDING_STORAGE_KEY, JSON.stringify(['office', 'library', 'desks'])]]);
+  const backing = { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v) };
+
+  new BuildingLayout(new THREE.Scene(), createOffice(new THREE.Scene()), { storage: backing, floor: 'agents-office' });
+  const second = new BuildingLayout(new THREE.Scene(), createOffice(new THREE.Scene()), { storage: backing, floor: 'widget-service' });
+
+  assert.deepEqual(second.roomKinds, ['office', 'library'], 'the ordinary cold-start default, not the migrated legacy list');
+});
+
+test('a floor that already has its own room list is never overwritten by the legacy migration', () => {
+  const storage = new Map([
+    [BUILDING_STORAGE_KEY, JSON.stringify(['office', 'library', 'desks'])],
+    [floorStorageKey('agents-office'), JSON.stringify(['office', 'library'])],
+  ]);
+  const layout = new BuildingLayout(new THREE.Scene(), createOffice(new THREE.Scene()), {
+    storage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => void storage.set(k, v) },
+    floor: 'agents-office',
+  });
+  assert.deepEqual(layout.roomKinds, ['office', 'library']);
+});
+
+test('"all floors" never migrates: it keeps reading the legacy key directly, same as before floors existed', () => {
+  const storage = new Map([[BUILDING_STORAGE_KEY, JSON.stringify(['office', 'library', 'desks'])]]);
+  const layout = new BuildingLayout(new THREE.Scene(), createOffice(new THREE.Scene()), {
+    storage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => void storage.set(k, v) },
+  });
+  assert.deepEqual(layout.roomKinds, ['office', 'library', 'desks']);
 });
 
 // --- Issue #126: war-room furniture routes agent activity, in-room first ---

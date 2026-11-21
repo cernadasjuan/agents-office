@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  ALL_FLOORS, defaultFloor, floorFromHash, floorRoomsStorageKey, GENERAL_FLOOR, isFloorName,
-  knownFloors, LEGACY_ROOMS_KEY, reloadForFloorSwitch, rememberFloor,
+  ALL_FLOORS, defaultFloor, floorFromHash, floorRepo, floorRoomsStorageKey, floorsWithStoredRooms, GENERAL_FLOOR,
+  isFloorName, knownFloors, LEGACY_ROOMS_KEY, matchesFloor, reloadForFloorSwitch, rememberFloor,
 } from '../src/floors/FloorRegistry.js';
 
 function memoryStorage(initial: Record<string, string> = {}): { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void; data: Map<string, string> } {
@@ -72,6 +72,31 @@ test('knownFloors always includes general even with zero agents', () => {
   assert.deepEqual(knownFloors([]), [GENERAL_FLOOR]);
 });
 
+// --- floorsWithStoredRooms (issue #191 review, replacing the forced-reload bounce: a floor
+// the user already grew rooms on, renamed or simply idle, stays a menu choice instead of
+// vanishing or forcing a reload the moment it has no live agent) ---
+
+/** A minimal `Storage`-shaped fake: only `length`/`key(index)`, the two methods
+ * `floorsWithStoredRooms` actually needs, backed by a plain key list. */
+function fakeLengthKeyStorage(keys: string[]): Pick<Storage, 'length' | 'key'> {
+  return { length: keys.length, key: (index) => keys[index] ?? null };
+}
+
+test('floorsWithStoredRooms reads every floor whose own room-list key is present, order preserved', () => {
+  const storage = fakeLengthKeyStorage([
+    `${LEGACY_ROOMS_KEY}:agents-office`,
+    'some-unrelated-key',
+    `${LEGACY_ROOMS_KEY}:gabriel-amyot/agents-office`,
+  ]);
+  assert.deepEqual(floorsWithStoredRooms(storage), ['agents-office', 'gabriel-amyot/agents-office']);
+});
+
+test('floorsWithStoredRooms drops a key whose floor segment does not fit the whitelist, and is empty without storage', () => {
+  const storage = fakeLengthKeyStorage([`${LEGACY_ROOMS_KEY}:../private`, LEGACY_ROOMS_KEY]);
+  assert.deepEqual(floorsWithStoredRooms(storage), []);
+  assert.deepEqual(floorsWithStoredRooms(undefined), []);
+});
+
 // --- defaultFloor ---
 
 test('defaultFloor prefers #floor= in the URL over everything else, "all" included', () => {
@@ -93,6 +118,45 @@ test('rememberFloor stores the chosen floor under its own key', () => {
   const storage = memoryStorage();
   rememberFloor('widget-service', storage);
   assert.equal(storage.getItem('agents-office.floor'), 'widget-service');
+});
+
+// --- floorRepo / matchesFloor (issue #191: scoping a mission or kanban board's own repo tag
+// against the focused floor, which may be org-qualified while the tag never is) ---
+
+test('floorRepo keeps a bare floor name as-is and drops an org-qualifying parent', () => {
+  assert.equal(floorRepo('agents-office'), 'agents-office');
+  assert.equal(floorRepo('gabriel-amyot/agents-office'), 'agents-office');
+  assert.equal(floorRepo('grp-beklever-com/project-management'), 'project-management');
+  assert.equal(floorRepo(GENERAL_FLOOR), GENERAL_FLOOR);
+});
+
+test('matchesFloor compares a repo tag against the floor\'s own trailing segment, not exact equality', () => {
+  assert.equal(matchesFloor('agents-office', 'agents-office'), true);
+  assert.equal(matchesFloor('gabriel-amyot/agents-office', 'agents-office'), true, 'an org-qualified floor still matches the bare repo tag');
+  assert.equal(matchesFloor('agents-office', 'widget-service'), false);
+});
+
+test('matchesFloor never matches a specific floor when the tag is missing (unscoped data shows only on "all floors", never guessed onto one)', () => {
+  assert.equal(matchesFloor('agents-office', undefined), false);
+});
+
+// --- Revision: when both the floor and the tag carry an owner, matchesFloor compares the
+// full owner/repo exactly, since a trailing-segment match alone cannot tell apart two repos
+// that share a leaf name under different owners. ---
+
+test('with an owner on both sides, matchesFloor requires an exact owner/repo match, not just the trailing segment', () => {
+  assert.equal(matchesFloor('gabriel-amyot/project-management', 'gabriel-amyot/project-management'), true);
+  assert.equal(matchesFloor('grp-beklever-com/project-management', 'gabriel-amyot/project-management'), false,
+    'same repo name, different owner: a trailing-segment match would wrongly accept this');
+});
+
+test('with an owner on only one side, matchesFloor falls back to the trailing segment', () => {
+  // The floor has no remote-derived owner (a local-only checkout); the tag does (from a GitHub
+  // issue ref). Best effort still matches on the bare repo name.
+  assert.equal(matchesFloor('agents-office', 'gabriel-amyot/agents-office'), true);
+  // The floor carries an owner (its own remote); the tag is a bare name (no owner known, for
+  // example a github-plugin board whose configured repo could not be parsed further).
+  assert.equal(matchesFloor('gabriel-amyot/agents-office', 'agents-office'), true);
 });
 
 // --- reloadForFloorSwitch ---
