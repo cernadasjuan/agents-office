@@ -139,12 +139,19 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
   const baseDebugging = Math.max(counts.debugging, 1);
   const baseDeskLike = Math.max(counts.deskLike, 1);
   const deskSlotCount = Math.min(baseDeskLike + baseDebugging, MAX_DESK_SLOTS, slots.length);
+  // The base set guarantees one of each (the floors above), but the room's own slot cap
+  // (MAX_DESK_SLOTS, or fewer near an off-center door) can still fit less than the floors'
+  // own sum once real debugging headcount grows past it — debug stations fill first (below),
+  // so an uncapped debug count here would then leave zero desks (issue #209 review: a debugger
+  // headcount of 8 or more, the room's own full cap, silently dropped the base desk). Reserve
+  // at least one slot for the desk whenever the cap actually bites.
+  const debugSlotCount = Math.min(baseDebugging, Math.max(deskSlotCount - 1, 0));
   for (let i = 0; i < deskSlotCount; i++) {
     const { a, d } = slots[i];
     const ja = jitter(rand, a, JITTER_POS);
     const jd = jitter(rand, d, JITTER_POS);
     const turn = jitter(rand, 0, JITTER_ROT);
-    const isDebug = i < baseDebugging;
+    const isDebug = i < debugSlotCount;
     pieces.push({ piece: isDebug ? PIECES.debugStation() : PIECES.desk(), a: ja, d: jd, turn });
     stations.push({ type: isDebug ? 'debugging' : 'implementing', a: ja, d: jd - 0.9, look: [ja, jd, 1.2], posture: 'seated' });
   }

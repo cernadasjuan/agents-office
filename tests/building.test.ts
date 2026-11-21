@@ -530,6 +530,28 @@ test('issue #209: an idle mission agent leaves its war room seat behind when it 
   assert.doesNotMatch(move!.seat.key, /^mission0_/, 'off to the lounge, not left in the war room');
 });
 
+// Review: issue #209 took `idle` out of the room branch of `targetFor`, so a mission parent
+// that only ever sat in its own war room (never once earning a `home` desk through the plain
+// desk-work branch) can now leave `room:<id>` for `trip:idle` while a pod-anchored child's own
+// pending `pod` assignment is still maturing. If the parent's own pending matures first, in the
+// same `update()` pass, `podKeys` used to read `parent.home!` for its anchor once the parent was
+// no longer in a room — `undefined` for a parent that never had one — and threw.
+test('review: a pod subagent does not crash the layout when its parent goes idle out of a war room with no home desk', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  const parent = agent('p', 'debugging', { room: 'room-1' });
+  layout.seatFor(parent, null);
+  const child = agent('c', 'researching', { room: 'room-1', parentId: 'p', badges: ['librarian'] });
+  layout.seatFor(child, null); // librarian + researching: trip:researching, bypasses pod
+
+  parent.activity = 'idle';
+  layout.seatFor(parent, 'debugging'); // pending: trip:idle (parent.home is still unset)
+  child.activity = 'implementing';
+  layout.seatFor(child, 'researching'); // pending: pod, read while parent.target still room:room-1
+
+  assert.doesNotThrow(() => tick(4000), 'both pendings mature in the same tick');
+});
+
 test('AC5: a researching mission agent never goes to the library-knowledge shelves', () => {
   const { layout, agent } = setup();
   layout.syncWorldRooms([missionRoom()]);

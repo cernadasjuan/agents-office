@@ -578,9 +578,17 @@ export class BuildingLayout implements LayoutStrategy {
    * seated posture instead, the same `postureOverride` mechanism the sofa's idle
    * seats already use (`ActivityAnimations.ts`), so a busy or idle pod subagent
    * both read as "has a place," not as a crowd that needs attention.
+   *
+   * Issue #209 review: `targetFor`'s `pod` decision reads the parent's state at the
+   * child's own dwell time, not at assign time; if the parent goes idle (leaving its
+   * room, `home` still unset — a mission parent only ever gets a `home` desk through
+   * the plain desk-work branch, never through the room branch) in the same tick its
+   * child's own pending `pod` assignment matures, `parent.home!` reads `undefined`
+   * and this throws. `parent.seat` is always set once a parent has been assigned at
+   * all, room or no room, so it is the safe fallback, not a bare `home!`.
    */
   private podKeys(parent: AgentState): string[] {
-    const anchorKey = parent.target?.startsWith('room:') && parent.seat ? parent.seat : parent.home!;
+    const anchorKey = (parent.target?.startsWith('room:') && parent.seat ? parent.seat : parent.home) ?? parent.seat!;
     const desk = this.stations.get(anchorKey)!;
     const facing = new THREE.Vector3().subVectors(desk.lookAt, desk.position).setY(0).normalize();
     const side = new THREE.Vector3(-facing.z, 0, facing.x);

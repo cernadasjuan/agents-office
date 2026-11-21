@@ -92,6 +92,18 @@ test('issue #209: the base work set still fits clear of the door, at every off-c
   }
 });
 
+// Review: at the room's own full slot cap (MAX_DESK_SLOTS, or fewer near an off-center door),
+// debugging headcount alone used to fill every slot and starve the base desk guaranteed above
+// (debug stations fill first). A desk must still survive once the cap, not the floor, is what
+// actually limits the grid.
+test('review: the base desk survives even when debugging headcount alone fills the room\'s full slot cap', () => {
+  for (const doorAlong of [0, -3, 3]) {
+    const plan = furnishWarRoom(`mission-debug-saturated-${doorAlong}`, { deskLike: 0, debugging: 8 }, doorAlong);
+    const names = plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation').map((p) => p.piece.name);
+    assert.ok(names.includes('desk'), `missing the base desk at doorAlong=${doorAlong}, got ${names.join(',')}`);
+  }
+});
+
 // --- AC2: the same mission id gives the same layout, on every reload ---
 
 test('AC2: the same mission id and counts furnish the same room every time', () => {
