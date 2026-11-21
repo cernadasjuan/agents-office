@@ -361,7 +361,10 @@ export class BuildingLayout implements LayoutStrategy {
     for (const room of this.missionRooms.values()) {
       if (inside(room.slot.rect)) return roomViewFromSlot(room.slot);
     }
-    return null;
+    // Issue #249: a double-click in isometric over the hex structure (Hub or Office) did
+    // nothing — this only ever scanned the rect rooms above. Checked last, so it never changes
+    // which room a point inside a rect room resolves to.
+    return this.hexOffice.roomAt(x, z);
   }
 
   /**
