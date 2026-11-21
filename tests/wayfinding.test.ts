@@ -16,8 +16,8 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout } = await import('../src/addons/building/BuildingLayout.js');
 const {
-  buildRoom, roomFloorColor, roomTitle, roomLabelLines, compactLabelLines, middleEllipsis, roomLabelPose, roomLabelBatchFor, WALL_HEIGHT, FIRST_PERSON_LABEL_Y, FIRST_PERSON_LABEL_HEIGHT,
-  OVERVIEW_DOOR_HEIGHT, OVERVIEW_LABEL_BOTTOM,
+  buildRoom, buildCeiling, roomFloorColor, roomTitle, roomLabelLines, compactLabelLines, middleEllipsis, roomLabelPose, roomLabelBatchFor, WALL_HEIGHT, FIRST_PERSON_LABEL_Y, FIRST_PERSON_LABEL_HEIGHT,
+  OVERVIEW_DOOR_HEIGHT, ISOMETRIC_LABEL_BOTTOM,
 } = await import('../src/addons/building/rooms.js');
 const { buildRealSizeOffice } = await import('./real-size-office.js');
 const { IsometricController } = await import('../src/scene/IsometricCamera.js');
@@ -29,7 +29,7 @@ const { FrameLoop } = await import('../src/scene/FrameLoop.js');
 const { addLighting } = await import('../src/scene/SceneSetup.js');
 const { OFFICE } = await import('../src/utils/Constants.js');
 const {
-  LabelDetailController, OVERVIEW_SIGN_ZOOM, FIRST_PERSON_SIGN_DISTANCE, roomLabelVisible, signVisible,
+  LabelDetailController, ISOMETRIC_SIGN_ZOOM, FIRST_PERSON_SIGN_DISTANCE, roomLabelVisible, signVisible,
 } = await import('../src/ui/LabelDetail.js');
 after(() => {
   dom.window.close();
@@ -133,7 +133,7 @@ test('in the overview a plate grows with the zoom distance but never gets wider 
   const near = roomLabelPose({ viewMode: 'isometric', zoomDistance: 20, detail: false }, 2);
   const far = roomLabelPose({ viewMode: 'isometric', zoomDistance: 80, detail: false }, 2);
   assert.ok(far.height > near.height * 1.9, 'twice the distance, about twice the size');
-  assert.ok(near.y - near.height / 2 >= OVERVIEW_LABEL_BOTTOM - 1e-6 && near.onTop);
+  assert.ok(near.y - near.height / 2 >= ISOMETRIC_LABEL_BOTTOM - 1e-6 && near.onTop);
   const wide = roomLabelPose({ viewMode: 'isometric', zoomDistance: 200, detail: false }, 6);
   assert.ok(wide.width <= 12 - 1 + 1e-6, `width ${wide.width}`);
   const fp = roomLabelPose({ viewMode: 'first-person', zoomDistance: 200, detail: true }, 2);
@@ -258,7 +258,7 @@ test('a room label shows its full name when zoomed in or with labels: all', () =
   assert.equal(changes, 1, 'a label change asks for a frame');
   controller.refresh();
   assert.equal(changes, 1, 'no change, no frame');
-  state.zoom = OVERVIEW_SIGN_ZOOM;
+  state.zoom = ISOMETRIC_SIGN_ZOOM;
   controller.refresh();
   assert.deepEqual(label.userData.labelLines, ['ROADMAP FOR THE', 'FORK']);
 });
@@ -408,10 +408,10 @@ test('every doorway of the building has a frame, outer rings and war rooms inclu
 // --- AC3: cut-away walls ---
 
 /** Run the static merge and the cutaway once, as a frame of the render loop does. */
-function frameOf(scene: THREE.Scene, statics: InstanceType<typeof StaticBatch>, overview: boolean): boolean {
+function frameOf(scene: THREE.Scene, statics: InstanceType<typeof StaticBatch>, fromAbove: boolean): boolean {
   scene.updateMatrixWorld();
   statics.update();
-  return applyCutaway(scene, overview);
+  return applyCutaway(scene, fromAbove);
 }
 
 /** The highest point of every drawn (camera layer) mesh under a zone container that the overview lowers. */
@@ -448,6 +448,39 @@ test('issue #176: a room\'s walls (office, library, every other kind) are as tal
   room.group.traverse((object) => { if (object.name === 'room-walls') object.traverse((child) => { if ((child as THREE.Mesh).isMesh) walls.push(child as THREE.Mesh); }); });
   assert.ok(walls.length > 0, 'the room has wall meshes');
   for (const wall of walls) assert.ok(Math.abs(topOf(wall) - OFFICE.height) < 1e-6, `${wall.parent?.name ?? 'wall'} top at ${topOf(wall)}, expected ${OFFICE.height}`);
+});
+
+test('buildCeiling() makes a ceiling mesh at the given height, marked dynamic (review, #184)', () => {
+  const rect = slotFor(1).rect;
+  const ceiling = buildCeiling(rect);
+  assert.equal(ceiling.userData.ceiling, true, 'findCeilings/applyCeilingCut can find it');
+  assert.equal(ceiling.userData.dynamic, true, 'excluded from any merge, like the main room\'s own ceiling');
+  assert.ok(Math.abs(ceiling.position.y - WALL_HEIGHT) < 1e-6, `ceiling at ${ceiling.position.y}, expected ${WALL_HEIGHT}`);
+  assert.ok(Math.abs(ceiling.position.x - (rect.minX + rect.maxX) / 2) < 1e-6 && Math.abs(ceiling.position.z - (rect.minZ + rect.maxZ) / 2) < 1e-6, 'centered over the room');
+  const custom = buildCeiling(rect, 9);
+  assert.equal(custom.position.y, 9, 'a given height overrides the main room\'s own constant');
+});
+
+test('a room\'s own ceiling (buildRoom) never merges, so a view switch does not eject it from a batch for a frame (review, #184)', () => {
+  const slot = slotFor(1);
+  const room = buildRoom('library', slot, 1, []);
+  const scene = new THREE.Scene();
+  scene.add(room.group);
+  const ceiling = room.group.children.find((child) => child.userData.ceiling) as THREE.Mesh;
+  assert.ok(ceiling, 'buildRoom added a ceiling');
+
+  const statics = new StaticBatch(scene);
+  statics.update();
+  assert.equal(ceiling.layers.isEnabled(STATIC_SOURCE_LAYER), false, 'never moved onto the merged-source layer');
+  assert.equal(ceiling.layers.isEnabled(0), true, 'draws itself, on the default camera layer');
+
+  // Flipping visible is exactly what applyCeilingCut does on every first-person/isometric
+  // switch. A merged source doing this would change the room's own wall-batch signature and
+  // force a rebuild; a dynamic mesh never joins that batch, so nothing here should rebuild.
+  ceiling.visible = false;
+  assert.equal(statics.update(), false, 'hiding the ceiling triggers no batch rebuild');
+  ceiling.visible = true;
+  assert.equal(statics.update(), false, 'showing it again triggers no batch rebuild either');
 });
 
 test('room walls, door frames and hall walls draw merged in zones the overview lowers', () => {
@@ -536,7 +569,7 @@ test('the hall wall pieces the overview hides draw merged in one group that the 
   const hall = scene.getObjectByName('building-hall-walls')!;
   const hidden = hall.getObjectByName('overview-hidden-walls')!;
   assert.ok(hidden, 'a group of hidden pieces');
-  assert.equal(hidden.userData.overviewHidden, true);
+  assert.equal(hidden.userData.hiddenFromAbove, true);
   const pieces = hidden.children.filter((child) => (child as THREE.Mesh).isMesh && child.name !== 'static-merged');
   assert.ok(pieces.length >= 2, `${pieces.length} hidden pieces`);
   for (const piece of pieces) assert.ok(piece.layers.isEnabled(STATIC_SOURCE_LAYER), 'a hidden piece draws merged');
@@ -593,12 +626,12 @@ test('the render loop redraws the shadows when only the cutaway changes', () => 
 // --- AC5: quieter mission signs ---
 
 const view = (overrides: Partial<{ mode: 'smart' | 'all'; viewMode: 'isometric' | 'first-person'; zoomDistance: number }> = {}) =>
-  ({ mode: 'smart' as const, viewMode: 'isometric' as const, zoomDistance: OVERVIEW_SIGN_ZOOM + 20, ...overrides });
+  ({ mode: 'smart' as const, viewMode: 'isometric' as const, zoomDistance: ISOMETRIC_SIGN_ZOOM + 20, ...overrides });
 
 test('a mission sign shows only when you zoom in or hover; the past sessions sign only on hover', () => {
   const far = FIRST_PERSON_SIGN_DISTANCE + 5;
   assert.equal(signVisible({ hovered: false, distance: far, hoverOnly: false }, view()), false);
-  assert.equal(signVisible({ hovered: false, distance: far, hoverOnly: false }, view({ zoomDistance: OVERVIEW_SIGN_ZOOM })), true);
+  assert.equal(signVisible({ hovered: false, distance: far, hoverOnly: false }, view({ zoomDistance: ISOMETRIC_SIGN_ZOOM })), true);
   assert.equal(signVisible({ hovered: true, distance: far, hoverOnly: false }, view()), true);
   assert.equal(signVisible({ hovered: false, distance: far, hoverOnly: true }, view({ zoomDistance: 3 })), false);
   assert.equal(signVisible({ hovered: true, distance: far, hoverOnly: true }, view()), true);
@@ -630,7 +663,7 @@ test('the label controller hides war room signs in the default overview and show
   camera.lookAt(0, 0, 0);
   camera.updateMatrixWorld();
   const canvas = dom.window.document.createElement('canvas');
-  const state = { zoom: OVERVIEW_SIGN_ZOOM + 30 };
+  const state = { zoom: ISOMETRIC_SIGN_ZOOM + 30 };
   const controller = new LabelDetailController({
     agents: () => [], camera, canvas, keys: dom.window, scene,
     viewMode: () => 'isometric', zoomDistance: () => state.zoom, pick: () => null, selected: () => null,
@@ -638,7 +671,7 @@ test('the label controller hides war room signs in the default overview and show
   const signs = room.group.children.filter((child): child is CSS2DObject => child instanceof CSS2DObject);
   controller.refresh();
   assert.ok(signs.every((sign) => sign.element.style.visibility === 'hidden'));
-  state.zoom = OVERVIEW_SIGN_ZOOM - 1;
+  state.zoom = ISOMETRIC_SIGN_ZOOM - 1;
   controller.refresh();
   const title = signs.find((sign) => sign.element.textContent === 'Roadmap')!;
   assert.equal(title.element.style.visibility, '');

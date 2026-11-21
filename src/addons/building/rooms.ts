@@ -140,7 +140,7 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
   // Pieces on hidden sides go in one group the overview hides. It merges in place: one draw call, hidden with it
   const hidden = new THREE.Group();
   hidden.name = 'overview-hidden-walls';
-  hidden.userData.overviewHidden = true;
+  hidden.userData.hiddenFromAbove = true;
   markStatic(hidden);
   const material = getToonMaterial(Colors.wall);
   for (const piece of wallPieces(rect, doors)) {
@@ -164,11 +164,14 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
 
 /**
  * A room's ceiling, at the main room's wall height (issue #176: first person gets it back).
- * Every room's ceiling shares one merged zone (`room-ceilings`, no shadows), so the building's
- * draw-call budget does not grow with the room count; `applyCeilingCut` hides them all together
- * in the isometric view, the same way the main room's own ceiling already does.
+ * Marked `dynamic`, the same way the main room's own ceiling (`Walls.ts`) already is (review,
+ * #184): toggling `visible` on a merged source changes the merge signature and forces a batch
+ * rebuild, so a merged ceiling would drop out of its batch for one frame on every view switch
+ * before the next static-merge pass puts it back. `dynamic` keeps each ceiling out of any
+ * merge in the first place (its room's own zone, `rooms` or `missions`), so there is nothing
+ * to eject: the toggle is just a `visible` flip, free every frame, not only on a rebuild.
  */
-export function buildCeiling(rect: Rect, height = WALL_HEIGHT): THREE.Mesh {
+export function buildCeiling(rect: Rect, height: number = WALL_HEIGHT): THREE.Mesh {
   const ceiling = new THREE.Mesh(
     new THREE.PlaneGeometry(rect.maxX - rect.minX, rect.maxZ - rect.minZ),
     getToonMaterial(0xf2ede5),
@@ -178,7 +181,7 @@ export function buildCeiling(rect: Rect, height = WALL_HEIGHT): THREE.Mesh {
   ceiling.receiveShadow = true;
   ceiling.name = 'room-ceiling';
   ceiling.userData.ceiling = true;
-  markStatic(ceiling, { zone: 'room-ceilings', castShadow: false });
+  ceiling.userData.dynamic = true;
   return ceiling;
 }
 

@@ -164,7 +164,12 @@ function parseZoom(value: string | null): number | null {
 
 /**
  * `#view=iso` (or `isometric`) starts in the isometric view; an unknown or retired view name
- * (`overview`, for example) falls back to first person. `#select=<agent id>` (or `#focus=`, its
+ * (`overview`, for example) is `null` here, first person's own value in `ViewHash.view`. The
+ * live app never stops at this fallback alone: `main.ts` picks the start view through
+ * `chooseViewMode` (`ViewMemory.ts`), which tries this hash value first, then the last saved
+ * view, then the active layout's own default — isometric for the building layout, so
+ * `#view=overview` with nothing else saved actually lands in isometric, the closest view from
+ * above, not first person (#173 review). `#select=<agent id>` (or `#focus=`, its
  * older name, still read) selects that agent once it appears. `#zoom=<distance>` starts at that
  * camera distance instead of the view's own default framing (issue #89): the isometric view
  * converts it to the equivalent `halfHeight`, the same way `ViewController.zoomDistance` already

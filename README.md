@@ -424,7 +424,7 @@ AGENTS_OFFICE_PLUGINS=jira pnpm dev
 - **?** to open or close the legend (also the **?** button in the panel header). Esc closes it without a change to the selection
 
 - `?dwell=<seconds>` in the URL (0 to 30, default 0) makes an agent in the original `activity` layout wait that long before it walks to a new station. A change back before the time cancels the walk. The figure shows the new activity at once.
-- The office remembers the last view (first person or isometric) in the browser and opens in it after a reload. `#view=first-person` or `#view=iso` in the URL wins over the saved view; an unknown or no-longer-supported view name (`#view=overview`, for example) falls back to first person. The side panel header shows the layout and the view.
+- The office remembers the last view (first person or isometric) in the browser and opens in it after a reload. `#view=first-person` or `#view=iso` in the URL wins over the saved view. An unknown or no-longer-supported view name (`#view=overview`, for example) is treated like a missing hash: the saved view wins next, then the layout's own default (isometric for the building layout, first person otherwise), not first person outright. The side panel header shows the layout and the view.
 - First person has no bounding box: you can walk through every doorway into a room, and fly above the building (Space). Only the floor stops the camera. There is no wall collision.
 - Every room (your office, the library, a lounge, a war room, and the main room) has a ceiling and walls as tall as the main room's, in first person. The isometric view keeps no ceiling, so the rooms still read from above (issue #176).
 - **Shift+L** switches the layout after a confirmation (the page reloads). The layout choice is saved too.

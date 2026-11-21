@@ -186,6 +186,18 @@ test('the start view: a #view hash, then the saved view, then the layout default
   assert.equal(chooseViewMode('', throwing, 'isometric'), 'isometric');
 });
 
+test('#173 review: #view=overview, the retired mode\'s own name, lands on the layout default, not hardcoded to first person', () => {
+  // `chooseViewMode` never special-cases "overview": an unrecognized hash value is exactly as
+  // unrecognized as any other, so it falls through to storage, then the layout's own default.
+  // The building layout's default is isometric (#173: the closest view from above), so that is
+  // where `#view=overview` lands when nothing else is saved — not first person, a wrong claim an
+  // earlier revision of this PR made (review, #184).
+  assert.equal(chooseViewMode('#view=overview', memoryStorage(), 'isometric'), 'isometric');
+  assert.equal(chooseViewMode('#view=overview', memoryStorage(), 'first-person'), 'first-person');
+  // A saved view still wins over the layout default, the same as any other unrecognized hash.
+  assert.equal(chooseViewMode('#view=overview', memoryStorage({ [VIEW_STORAGE_KEY]: 'first-person' }), 'isometric'), 'first-person');
+});
+
 test('the view mode is saved in the browser and a blocked storage does not break it', () => {
   const storage = memoryStorage();
   rememberViewMode('first-person', storage);

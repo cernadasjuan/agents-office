@@ -12,13 +12,13 @@ export const OVERVIEW_WALL_HEIGHT = 0.5;
  * Call it every frame after the static merge: zones built later follow the
  * mode at once. Returns true when a zone changed (render and redraw shadows).
  */
-export function applyCutaway(scene: THREE.Object3D, overview: boolean): boolean {
+export function applyCutaway(scene: THREE.Object3D, fromAbove: boolean): boolean {
   let changed = false;
   for (const zone of scene.children) {
     const height = zone.userData.overviewLower;
     if (typeof height !== 'number' || !(height > 0)) continue;
     const target = typeof zone.userData.overviewHeight === 'number' ? zone.userData.overviewHeight : OVERVIEW_WALL_HEIGHT;
-    const scaleY = overview ? Math.min(1, target / height) : 1;
+    const scaleY = fromAbove ? Math.min(1, target / height) : 1;
     if (zone.scale.y === scaleY) continue;
     zone.scale.y = scaleY;
     zone.updateMatrixWorld(true);
@@ -41,8 +41,8 @@ export function findCeilings(root: THREE.Object3D): THREE.Object3D[] {
  * first person used to see over the top of them, but first person now walks on the ground
  * (#174), so that reason is gone. The isometric view still needs the open roof. True when one changed.
  */
-export function applyCeilingCut(ceilings: THREE.Object3D[], overview: boolean): boolean {
-  const visible = !overview;
+export function applyCeilingCut(ceilings: THREE.Object3D[], fromAbove: boolean): boolean {
+  const visible = !fromAbove;
   let changed = false;
   for (const ceiling of ceilings) {
     if (ceiling.visible === visible) continue;

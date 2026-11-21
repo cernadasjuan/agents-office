@@ -27,7 +27,7 @@ export function createWalls(): THREE.Group {
   frontWall.position.set(0, Y, HZ);
   frontWall.castShadow = true;
   frontWall.receiveShadow = true;
-  frontWall.userData.overviewHidden = true; // faces the overview camera
+  frontWall.userData.hiddenFromAbove = true; // faces the isometric camera
   group.add(frontWall);
 
   // Left wall (x = -HX)
@@ -35,7 +35,7 @@ export function createWalls(): THREE.Group {
   leftWall.position.set(-HX, Y, 0);
   leftWall.castShadow = true;
   leftWall.receiveShadow = true;
-  leftWall.userData.overviewHidden = true; // faces the overview camera
+  leftWall.userData.hiddenFromAbove = true; // faces the isometric camera
   group.add(leftWall);
 
   // Right wall (x = +HX)

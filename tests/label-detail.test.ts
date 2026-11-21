@@ -6,7 +6,7 @@ import {
   FIRST_PERSON_FULL_LABEL_DISTANCE,
   LABEL_DETAIL_INTERVAL_MS,
   LabelDetailController,
-  OVERVIEW_FULL_LABEL_ZOOM,
+  ISOMETRIC_FULL_LABEL_ZOOM,
   applyLabelDetail,
   labelDetail,
   nextLabelMode,
@@ -21,8 +21,8 @@ after(() => dom.window.close());
 
 const near = FIRST_PERSON_FULL_LABEL_DISTANCE - 1;
 const far = FIRST_PERSON_FULL_LABEL_DISTANCE + 1;
-const zoomedIn = OVERVIEW_FULL_LABEL_ZOOM - 1;
-const zoomedOut = OVERVIEW_FULL_LABEL_ZOOM + 10;
+const zoomedIn = ISOMETRIC_FULL_LABEL_ZOOM - 1;
+const zoomedOut = ISOMETRIC_FULL_LABEL_ZOOM + 10;
 
 function facts(overrides: Partial<LabelFacts> = {}): LabelFacts {
   return { attention: undefined, selected: false, hovered: false, distance: far, ...overrides };
@@ -98,7 +98,7 @@ test('smart mode, isometric: far zoom gives compact labels, even for agents near
 
 test('smart mode, isometric: close zoom gives full labels', () => {
   assert.equal(labelDetail(facts(), view({ viewMode: 'isometric', zoomDistance: zoomedIn })), 'full');
-  assert.equal(labelDetail(facts(), view({ viewMode: 'isometric', zoomDistance: OVERVIEW_FULL_LABEL_ZOOM })), 'full');
+  assert.equal(labelDetail(facts(), view({ viewMode: 'isometric', zoomDistance: ISOMETRIC_FULL_LABEL_ZOOM })), 'full');
 });
 
 test('smart mode, first person: the isometric zoom has no effect', () => {
@@ -401,7 +401,7 @@ test('declutter: runs in the isometric view too (review fix)', () => {
 });
 
 test('declutter: a long name\'s real rendered width can overlap a neighbor the fixed estimate alone would miss (review fix)', () => {
-  // Zoomed out, so labels go compact (zoom <= OVERVIEW_FULL_LABEL_ZOOM would force full and
+  // Zoomed out, so labels go compact (zoom <= ISOMETRIC_FULL_LABEL_ZOOM would force full and
   // use FULL_LABEL_SIZE instead): x=0 and x=4 project about 115 px apart here, just past the
   // sum of two compact half-widths (55+55=110).
   const { controller, agents } = declutterSetup({ zoom: zoomedOut });

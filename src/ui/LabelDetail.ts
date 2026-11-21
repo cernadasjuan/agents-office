@@ -11,9 +11,9 @@ export type LabelLevel = 'full' | 'compact';
 /** First person: agents within this many units of the camera get a full label. */
 export const FIRST_PERSON_FULL_LABEL_DISTANCE = 8;
 /** Isometric: at this camera distance or closer, every label is full. Above the 12-unit fly-to focus distance. */
-export const OVERVIEW_FULL_LABEL_ZOOM = 14;
+export const ISOMETRIC_FULL_LABEL_ZOOM = 14;
 /** Isometric: at this camera distance or closer, war room signs show. */
-export const OVERVIEW_SIGN_ZOOM = 24;
+export const ISOMETRIC_SIGN_ZOOM = 24;
 /** First person: war room signs within this many units of the camera show. */
 export const FIRST_PERSON_SIGN_DISTANCE = 12;
 /** How often the labels are recomputed. */
@@ -71,7 +71,7 @@ export function labelDetail(facts: LabelFacts, view: LabelView): LabelLevel {
   // wait nearby must not lose its activity line and go compact there.
   const blockedRecently = facts.attention === 'waiting' && (fromAbove ? band === undefined || band === 'fresh' : band !== 'cold');
   if (blockedRecently || facts.stuck || facts.selected || facts.hovered) return 'full';
-  if (fromAbove) return view.zoomDistance <= OVERVIEW_FULL_LABEL_ZOOM ? 'full' : 'compact';
+  if (fromAbove) return view.zoomDistance <= ISOMETRIC_FULL_LABEL_ZOOM ? 'full' : 'compact';
   return facts.distance <= FIRST_PERSON_FULL_LABEL_DISTANCE ? 'full' : 'compact';
 }
 
@@ -117,7 +117,7 @@ export interface SignFacts {
 export function signVisible(facts: SignFacts, view: LabelView): boolean {
   if (view.mode === 'all' || facts.hovered) return true;
   if (facts.hoverOnly) return false;
-  if (isViewFromAbove(view.viewMode)) return view.zoomDistance <= OVERVIEW_SIGN_ZOOM;
+  if (isViewFromAbove(view.viewMode)) return view.zoomDistance <= ISOMETRIC_SIGN_ZOOM;
   return facts.distance <= FIRST_PERSON_SIGN_DISTANCE;
 }
 
@@ -321,7 +321,7 @@ export class LabelDetailController {
       if (roomRect) {
         const visible = roomLabelVisible({ viewMode: view.viewMode, cameraInside: inRect(this.cameraPosition, roomRect) });
         const fromAbove = isViewFromAbove(view.viewMode);
-        const detail = view.mode === 'all' || inRect(pointed, roomRect) || (fromAbove && view.zoomDistance <= OVERVIEW_SIGN_ZOOM);
+        const detail = view.mode === 'all' || inRect(pointed, roomRect) || (fromAbove && view.zoomDistance <= ISOMETRIC_SIGN_ZOOM);
         const key = `${visible}|${view.viewMode}|${detail}|${fromAbove ? view.zoomDistance.toFixed(2) : ''}`;
         if (object.userData.labelViewKey === key) continue;
         object.userData.labelViewKey = key;

@@ -30,7 +30,7 @@ function setup(hash = '', figureShiftPx?: () => number, roomView?: (name: string
   const document = dom.window.document;
   const scene = new THREE.Scene();
   const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
-  wall.userData.overviewHidden = true;
+  wall.userData.hiddenFromAbove = true;
   scene.add(wall);
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
   camera.position.set(-12, 5.5, 11);
@@ -103,11 +103,17 @@ test('issue #89: #zoom= starts the isometric view at the equivalent camera dista
 });
 
 test('issue #89: #zoom= is clamped into the view’s own pan/zoom limits, like the wheel already is', () => {
-  const { view } = setup('#view=iso&zoom=1000000');
+  const baseline = setup('#view=iso');
+  baseline.view.update(0, 1 / 60);
+  const { view, camera } = setup('#view=iso&zoom=1000000');
   view.update(0, 1 / 60);
   const isometric = (view as unknown as { isometric: { maxHalfHeight: number } }).isometric;
-  const maxZoomDistance = view.zoomDistance; // the clamp applied before this read, so it already reflects the limit
-  assert.ok(maxZoomDistance > 0 && Number.isFinite(maxZoomDistance), `clamped to a real zoom-out limit (${maxZoomDistance}, maxHalfHeight ${isometric.maxHalfHeight})`);
+  // The real upper bound (review, #184): equivalentDistance is halfHeight / tan(fov/2), the
+  // inverse of applyStartZoom's own conversion, so this is the exact distance maxHalfHeight
+  // maps to — not just "some finite number", which would still pass with the clamp removed.
+  const maxZoomDistance = isometric.maxHalfHeight / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+  assert.ok(Math.abs(view.zoomDistance - maxZoomDistance) < 1e-6, `clamped to the real zoom-out limit (${view.zoomDistance} vs maxHalfHeight-derived ${maxZoomDistance})`);
+  assert.notEqual(view.zoomDistance, baseline.view.zoomDistance, 'different from the view’s own default framing');
 });
 
 test('issue #89 review, fix round 2: a bare #zoom= (no #select=) only sets the initial framing; a later, unrelated click gets its own normal framing', () => {

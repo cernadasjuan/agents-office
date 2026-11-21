@@ -16,7 +16,7 @@ const { ViewController } = await import('../src/scene/ViewController.js');
 const { SelectionState, parseViewHash } = await import('../src/scene/Selection.js');
 const { IsometricController, isometricDirection, ISO_ELEVATION, floorPointUnderCursor, zoomTowardCursor } = await import('../src/scene/IsometricCamera.js');
 const { chooseViewMode, viewStatusText } = await import('../src/scene/ViewMemory.js');
-const { labelDetail, signVisible, roomLabelVisible, OVERVIEW_FULL_LABEL_ZOOM } = await import('../src/ui/LabelDetail.js');
+const { labelDetail, signVisible, roomLabelVisible, ISOMETRIC_FULL_LABEL_ZOOM } = await import('../src/ui/LabelDetail.js');
 const { renderQuality } = await import('../src/scene/RenderScheduler.js');
 const { roomLabelPose } = await import('../src/addons/building/roomLabels.js');
 const { findCeilings } = await import('../src/scene/Cutaway.js');
@@ -173,7 +173,7 @@ function setup(hash = '', options: { figureShiftPx?: () => number; view?: 'first
   const document = dom.window.document;
   const scene = new THREE.Scene();
   const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
-  wall.userData.overviewHidden = true;
+  wall.userData.hiddenFromAbove = true;
   scene.add(wall);
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
   camera.position.set(-12, 5.5, 11);
@@ -319,7 +319,7 @@ test('the remembered view and the hash include the isometric view; the header na
 
 test('label rules in the isometric view follow its own zoom (#173: the only view from above)', () => {
   const facts = { attention: undefined, selected: false, hovered: false, distance: 999 };
-  const near = { mode: 'smart' as const, viewMode: 'isometric' as const, zoomDistance: OVERVIEW_FULL_LABEL_ZOOM - 1 };
+  const near = { mode: 'smart' as const, viewMode: 'isometric' as const, zoomDistance: ISOMETRIC_FULL_LABEL_ZOOM - 1 };
   const far = { ...near, zoomDistance: 40 };
   assert.equal(labelDetail(facts, near), 'full');
   assert.equal(labelDetail(facts, far), 'compact');

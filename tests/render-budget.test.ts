@@ -109,12 +109,16 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // genuinely worn (`tests/real-size-office.ts`'s own PERSONAS list, issue #128 review) and
   // its one source of randomness seeded (the library's bookshelves, same file, issue #128
   // review round 2: an unseeded book count and color made this total drift between runs,
-  // 368 to 372, depending on how many book colors a shelf happened to draw). Pinned here at
-  // 374, 372 plus 2: real headroom above the number this fixture actually and repeatably
-  // measures, not a number nobody reproduces. Each PR gets up to 5 more against the 372
-  // baseline before it must recover headroom elsewhere, not just add to the margin left by
-  // the last one.
-  assert.ok(after.total <= 374, `worst case ${after.total} exceeds the pinned baseline (372) + 2`);
+  // 368 to 372, depending on how many book colors a shelf happened to draw). Issue #176's
+  // per-room ceilings (25 rooms in this fixture) land it at 397: each one is marked `dynamic`,
+  // the same way the main room's own ceiling already is (review, #184), so a view switch never
+  // ejects a merged ceiling from its batch for a frame — the cost is a real, steady +25 draw
+  // calls, not a one-frame spike, and the project accepted it over a merged zone that would
+  // need a rebuild on every switch. Pinned here at 399, 397 plus 2: real headroom above the
+  // number this fixture actually and repeatably measures, not a number nobody reproduces. Each
+  // PR gets up to 5 more against the 397 baseline before it must recover headroom elsewhere,
+  // not just add to the margin left by the last one.
+  assert.ok(after.total <= 399, `worst case ${after.total} exceeds the pinned baseline (397) + 2`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -131,7 +135,9 @@ test('the worst case measures the same total every run: the fixture\'s one rando
     new FigureBatch(scene).sync(agents.map((managed) => managed.figure.group));
     totals.add(countDrawCalls(scene).total);
   }
-  assert.deepEqual([...totals], [372], `expected every one of 8 runs to measure 372, got ${[...totals]}`);
+  // 397, not the pre-#176 372 (see the worst-case test above): per-room ceilings, dynamic, add
+  // a steady +25. Confirmed stable across repeated runs of this suite before pinning it here.
+  assert.deepEqual([...totals], [397], `expected every one of 8 runs to measure 397, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

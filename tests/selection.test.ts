@@ -118,7 +118,10 @@ test('the URL hash picks the start view and the agent to focus', () => {
   assert.deepEqual(parseViewHash('#view=iso'), { view: 'isometric', focus: null, zoom: null, room: null });
   assert.deepEqual(parseViewHash('#focus=ab12cd&view=iso'), { view: 'isometric', focus: 'ab12cd', zoom: null, room: null });
   assert.deepEqual(parseViewHash('#view=sideways&focus=a'), { view: 'first-person', focus: 'a', zoom: null, room: null });
-  assert.deepEqual(parseViewHash('#view=overview&focus=a'), { view: 'first-person', focus: 'a', zoom: null, room: null }, 'the overview mode is gone (#173): an unknown view falls back to first person');
+  // parseViewHash's own fallback only; chooseViewMode (ViewMemory.ts) layers the saved view and
+  // the layout default on top, so the live app does not always land in first person for this
+  // (see tests/navigation.test.ts's #173 review test: the building layout lands in isometric).
+  assert.deepEqual(parseViewHash('#view=overview&focus=a'), { view: 'first-person', focus: 'a', zoom: null, room: null }, 'the overview mode is gone (#173): an unknown view falls back to first person here');
   assert.deepEqual(parseViewHash('#focus=<script>'), { view: 'first-person', focus: null, zoom: null, room: null });
   assert.deepEqual(parseViewHash(`#focus=${'a'.repeat(200)}`), { view: 'first-person', focus: null, zoom: null, room: null });
 });

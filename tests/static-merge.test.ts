@@ -67,7 +67,7 @@ test('boards, transparent, hidden, overview-hidden and dynamic meshes keep their
   const hidden = box(wood(), 2);
   hidden.visible = false;
   const wall = box(wood(), 3);
-  wall.userData.overviewHidden = true;
+  wall.userData.hiddenFromAbove = true;
   const door = new THREE.Group();
   door.userData.dynamic = true;
   const doorPanel = box(wood(), 4);
@@ -112,7 +112,7 @@ test('a batch rebuilds when a mesh is added, removed or hidden, and not otherwis
 test('a root without a zone merges in place and follows its own visibility (lamps in the overview)', () => {
   const scene = new THREE.Scene();
   const lamp = new THREE.Group();
-  lamp.userData.overviewHidden = true;
+  lamp.userData.hiddenFromAbove = true;
   lamp.add(box(metal(), 0), box(metal(), 1));
   markStatic(lamp);
   scene.add(lamp);
@@ -169,11 +169,11 @@ test('the overview hiding walls and lamps does not rebuild a batch', () => {
   const scene = new THREE.Scene();
   const hall = new THREE.Group();
   const nearWall = box(wood(), 0);
-  nearWall.userData.overviewHidden = true;
+  nearWall.userData.hiddenFromAbove = true;
   hall.add(nearWall, box(wood(), 1));
   markStatic(hall, { zone: 'hall' });
   const lamp = new THREE.Group();
-  lamp.userData.overviewHidden = true;
+  lamp.userData.hiddenFromAbove = true;
   lamp.add(box(metal(), 3));
   markStatic(lamp);
   scene.add(hall, lamp);

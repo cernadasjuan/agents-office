@@ -62,7 +62,7 @@ export class ViewController {
   private flight: { tween: PoseTween; end: CameraPose } | null = null;
   private isometricFlight: IsometricTween | null = null;
   private savedFirstPerson: CameraPose | null = null;
-  private hiddenInOverview: THREE.Object3D[] = [];
+  private hiddenFromAbove: THREE.Object3D[] = [];
   private panKeys = new Set<string>();
   private pressPoint: ScreenPoint | null = null;
   private dragPoint: ScreenPoint | null = null;
@@ -446,18 +446,18 @@ export class ViewController {
     this.isometric.pan(right * step, forward * step);
   }
 
-  /** Walls and lamps marked `userData.overviewHidden` would block the overview; hide them there. */
+  /** Walls and lamps marked `userData.hiddenFromAbove` would block the isometric view; hide them there. */
   private hideNearWalls(): void {
-    this.hiddenInOverview = [];
+    this.hiddenFromAbove = [];
     this.options.scene.traverse((object) => {
-      if (object.userData.overviewHidden && object.visible) this.hiddenInOverview.push(object);
+      if (object.userData.hiddenFromAbove && object.visible) this.hiddenFromAbove.push(object);
     });
-    for (const object of this.hiddenInOverview) object.visible = false;
+    for (const object of this.hiddenFromAbove) object.visible = false;
   }
 
   private showNearWalls(): void {
-    for (const object of this.hiddenInOverview) object.visible = true;
-    this.hiddenInOverview = [];
+    for (const object of this.hiddenFromAbove) object.visible = true;
+    this.hiddenFromAbove = [];
   }
 
   private setHint(): void {
