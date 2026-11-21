@@ -114,6 +114,22 @@
       border-radius: 4px;
       padding: 2px 4px;
     }
+    /* Issue #231: a small, quiet alternative to the footer's keyboard hint for the camera
+       mode, in the same header row the floor switch already lives in. */
+    .view-switch { display: flex; gap: 2px; margin-top: 4px; }
+    .view-switch-button {
+      background: none;
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 4px;
+      color: #a8b8ff;
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .view-switch-button.active { color: #fff; background: rgba(120, 120, 255, 0.25); border-color: rgba(168, 184, 255, 0.6); }
     .panel-buttons { display: flex; gap: 4px; }
     .panel-button {
       background: none;
@@ -422,6 +438,7 @@
         <h2>Agents Office <span id="label-mode" class="label-mode"></span></h2>
         <div id="view-status" class="view-status"></div>
         <div id="floor-switch-container" class="floor-switch-container" hidden></div>
+        <div id="view-switch-container"></div>
       </div>
       <div class="panel-buttons">
         <button type="button" id="legend-button" class="panel-button">?</button>

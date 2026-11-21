@@ -20,6 +20,7 @@ import { FreshnessFooter } from './ui/freshness.js';
 import { Legend } from './ui/Legend.js';
 import { handleTriageKey } from './ui/TriageKeys.js';
 import { FloorSwitch } from './ui/FloorSwitch.js';
+import { ViewSwitch } from './ui/ViewSwitch.js';
 import { ALL_FLOORS, defaultFloor, floorsWithStoredRooms, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
 import { focusedFloor, setFocusedFloor } from './floors/floorState.js';
 
@@ -81,6 +82,11 @@ const missionIssuesCard = new MissionIssuesCard(document.body, { anchor: documen
 // from the active layout (issue #89); a layout with no rooms, or an unknown name, is a no-op.
 // The panel header shows the layout and the view.
 const viewStatus = document.getElementById('view-status');
+// Issue #231: the view switch is constructed after `view` (its buttons call straight into it),
+// so this starts null and the first `modeChanged` call (always fired once, during the
+// ViewController constructor below) is a no-op; `viewSwitch.setActive(view.mode)` right after
+// construction catches that one up.
+let viewSwitch: ViewSwitch | null = null;
 const view = new ViewController({
   camera,
   canvas: renderer.domElement,
@@ -101,9 +107,22 @@ const view = new ViewController({
     if (viewStatus) viewStatus.textContent = viewStatusText(layoutName(layoutId), mode);
     // Issue #162: leaving desk mode walks a talker back to its queue spot, same as deselecting it.
     agentManager.setDeskTalker(mode === 'desk' ? selectedAgentId() : null);
+    viewSwitch?.setActive(mode);
   },
   figureShiftPx: () => agentCard.cameraShiftPx(),
 });
+
+// View switch (issue #231): a small, visible alternative to the footer's keyboard hint. Each
+// button calls the exact method its matching key already calls, never a new transition of its
+// own; `ViewSwitch` itself works out the first-person button's "which toggle gets back there" case.
+const viewSwitchContainer = document.getElementById('view-switch-container');
+if (viewSwitchContainer) {
+  viewSwitch = new ViewSwitch(viewSwitchContainer, view.mode, {
+    isometric: () => view.toggleIsometric(),
+    desk: () => view.toggleDesk(),
+  });
+  viewSwitch.setActive(view.mode);
+}
 
 // --- Triage list (side panel) ---
 // `?demo=1` adds the prototype activity menu to each row. Live polls overwrite a choice.
