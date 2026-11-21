@@ -9,10 +9,14 @@ export interface WorldRoom {
   state: 'open' | 'locked';
   /** One entry per ended session (a tombstone): its own public id and the day it ended. */
   sleepers?: Array<{ id: string; endedAt?: string }>;
+  /** For the missions board (issue #144): when a mission started, and when a closed one stopped. */
+  createdAt?: string;
+  closedAt?: string;
   walls: {
     statement?: string;
     docs?: string[];
-    issues?: Array<{ number: number; title: string; state: 'open' | 'closed' }>;
+    /** `repo` is a full `owner/name`: one mission can hold issues from more than one repository. */
+    issues?: Array<{ number: number; repo?: string; title: string; state: 'open' | 'closed' }>;
     kanban?: Array<{ column: string; cards: Array<{ number: number; title: string }> }>;
   };
 }

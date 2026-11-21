@@ -8,14 +8,31 @@ import { ActivityLayout } from '../layout/ActivityLayout.js';
 import type { LayoutStrategy, Seat } from '../layout/LayoutStrategy.js';
 import { isAnimationAsleep } from '../scene/AnimationSleep.js';
 
-// FNV-1a hash of the agent ID, so an agent keeps its color across polls and reloads
-function accentColorFor(agentId: string): THREE.Color {
+function fnv1a(text: string): number {
   let hash = 0x811c9dc5;
-  for (let i = 0; i < agentId.length; i++) {
-    hash ^= agentId.charCodeAt(i);
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }
-  return Colors.accents[(hash >>> 0) % Colors.accents.length];
+  return hash >>> 0;
+}
+
+// FNV-1a hash of the agent ID, so an agent keeps its color across polls and reloads
+function accentColorFor(agentId: string): THREE.Color {
+  return Colors.accents[fnv1a(agentId) % Colors.accents.length];
+}
+
+/**
+ * A mission's own 2 colors (issue #125 part 3), the same idea as a subagent
+ * wearing its parent's color: every agent and subagent of a mission wears that
+ * mission's pair, in every view, not only inside its war room. Seeded by
+ * `roomKey` (the mission's own public room id, already stable per mission), so
+ * the same mission always picks the same pair. Drawn only from `Colors.accents`
+ * (never a new hex): the figure batch already paid for these materials.
+ */
+function missionColorsFor(roomKey: string): [THREE.Color, THREE.Color] {
+  const [a, b] = Colors.missionPalettes[fnv1a(roomKey) % Colors.missionPalettes.length];
+  return [Colors.accents[a], Colors.accents[b]];
 }
 
 const SUBAGENT_SCALE = 0.85;
@@ -43,9 +60,11 @@ export class AgentManager {
   }
 
   addAgent(info: AgentInfo): StickFigure {
-    // A subagent wears its parent's color and stands a little smaller, so you see whose helper it is
+    // A subagent wears its parent's color and stands a little smaller, so you see whose helper it is.
+    // A mission agent (and its subagents) wears that mission's own 2 colors instead (issue #125).
     const parentId = info.extras?.parentId;
-    const figure = new StickFigure(info.name, accentColorFor(parentId ?? info.id));
+    const [accent, second] = this.colorsFor(info);
+    const figure = new StickFigure(info.name, accent, second);
     if (parentId) figure.group.scale.setScalar(SUBAGENT_SCALE);
     figure.setSubagent(parentId !== undefined);
     figure.setTag(info.extras?.provider);
@@ -73,11 +92,25 @@ export class AgentManager {
     managed.figure.setActivity(activity);
   }
 
+  /**
+   * Which 2 colors a figure wears: a mission's own pair if its `extras.room` names one,
+   * else the plain per-agent-id accent and no second color. `room` can arrive after
+   * `addAgent` (issue #125 part 3 review round 2: a mission's own enricher attaches
+   * `roomKey` to a session's extras as it scans the transcript, not always at the agent's
+   * first appearance), so `setExtras` recomputes this the same way, every time.
+   */
+  private colorsFor(info: AgentInfo): [THREE.Color, THREE.Color | undefined] {
+    const mission = info.extras?.room ? missionColorsFor(info.extras.room) : undefined;
+    return [mission?.[0] ?? accentColorFor(info.extras?.parentId ?? info.id), mission?.[1]];
+  }
+
   /** New display data from plugins. The layout may move the agent (for example to a room). */
   setExtras(agentId: string, extras: AgentExtras | undefined): void {
     const managed = this.agents.get(agentId);
     if (!managed) return;
     managed.info.extras = extras;
+    const [accent, second] = this.colorsFor(managed.info);
+    managed.figure.setAccentColor(accent, second);
     managed.figure.setSubagent(extras?.parentId !== undefined);
     managed.figure.setTag(extras?.provider);
     managed.figure.setAttention(extras?.attention, extras?.waitMinutes, extras?.orchestrating);

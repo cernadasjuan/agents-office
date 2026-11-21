@@ -42,8 +42,22 @@ export function createLimb(length: number, radius = 0.035): THREE.Mesh {
   return part(geometry, getToonMaterial(Colors.limb));
 }
 
-export function createHand(): THREE.Mesh {
-  return part(shared('hand', () => new THREE.BoxGeometry(0.06, 0.06, 0.06)), getToonMaterial(Colors.skin));
+/** The per-instance tint (issue #125 part 3) that lands exactly on `color` when multiplied
+ * onto the hand's own skin-colored material: the ratio of `color` to `Colors.skin`. */
+export function handTintFor(color: THREE.Color): THREE.Color {
+  return new THREE.Color(color.r / Colors.skin.r, color.g / Colors.skin.g, color.b / Colors.skin.b);
+}
+
+/**
+ * `color`: a mission's second color (issue #125 part 3) instead of plain skin. Every hand
+ * still shares the one skin-colored material and bucket (`FigureBatch.ts`); the color
+ * shows up as a per-instance tint, never a second material, so a mission's hand color
+ * costs no extra draw call.
+ */
+export function createHand(color?: THREE.Color): THREE.Mesh {
+  const mesh = part(shared('hand', () => new THREE.BoxGeometry(0.06, 0.06, 0.06)), getToonMaterial(Colors.skin));
+  if (color) mesh.userData.tint = handTintFor(color);
+  return mesh;
 }
 
 export function createFoot(): THREE.Mesh {
@@ -72,7 +86,8 @@ export interface Joints {
   rightFoot: THREE.Mesh;
 }
 
-export function buildSkeleton(accentColor: THREE.Color): Joints {
+/** `secondColor`: a mission's second color (issue #125 part 3), worn on the hands; plain skin without one. */
+export function buildSkeleton(accentColor: THREE.Color, secondColor?: THREE.Color): Joints {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
@@ -138,7 +153,7 @@ export function buildSkeleton(accentColor: THREE.Color): Joints {
   const leftForearmMesh = createLimb(0.3);
   leftForearm.add(leftForearmMesh);
 
-  const leftHand = createHand();
+  const leftHand = createHand(secondColor);
   leftHand.position.set(0, -0.3, 0);
   leftForearm.add(leftHand);
 
@@ -154,7 +169,7 @@ export function buildSkeleton(accentColor: THREE.Color): Joints {
   const rightForearmMesh = createLimb(0.3);
   rightForearm.add(rightForearmMesh);
 
-  const rightHand = createHand();
+  const rightHand = createHand(secondColor);
   rightHand.position.set(0, -0.3, 0);
   rightForearm.add(rightHand);
 

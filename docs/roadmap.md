@@ -66,6 +66,7 @@ Both are write actions. They break S7 and need a separate security design: a loc
 A mission is a long goal that spans several sessions. In the office, each mission gets a war room.
 
 - **Agents:** sessions that work on the mission go to its room. Several sessions can work at the same time, or one after another.
+- **Furniture:** one rule set furnishes every war room (issue #125): must-have pieces (clock, plants, a sofa, a bookshelf, a whiteboard) from the start, could-have pieces (a water cooler, a TV, a low divider) by how many agents actually work there, desks and debug stations that grow with the peak headcount and never shrink. Placement is seeded by the mission id, so a reload furnishes the same room.
 - **Past sessions:** a finished session leaves a trace in the room: a small tombstone, up to a cap. You can count how many sessions the mission took. A click or hover on a tombstone names which session it was and when it ended; a session that returns removes its own tombstone (issue #127).
 - **Walls:** the mission statement, the generated documents, the issue tracker and a kanban board of the mission's issues. Here the kanban makes sense, because the mission owns a known set of issues.
 - **Closed mission:** the room locks. No agent goes in. The room stays in the building as a locked room, so the history stays visible.
