@@ -31,6 +31,7 @@ interface SetupExtras {
   deskView?: () => { position: THREE.Vector3; lookAt: THREE.Vector3; fov?: number } | null;
   roomAt?: (x: number, z: number) => { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null;
   idleTimeoutSeconds?: number;
+  crosshair?: HTMLElement | null;
 }
 
 function setup(
@@ -690,4 +691,90 @@ test('first person: the card shift turns only the aim; the camera stands where t
   const shifted = fly(() => 300);
   assert.ok(shifted.position.distanceTo(plain.position) < 1e-6, `camera moved by ${shifted.position.distanceTo(plain.position)}`);
   assert.ok(shifted.forward.angleTo(plain.forward) > 0.05, 'the aim turns toward the screen right');
+});
+
+// --- Crosshair dot and a locked click selects under it (issue #205) ---
+
+test('a locked click selects whatever is under the center dot, not the click position', () => {
+  const document = dom.window.document;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
+  camera.position.set(0, 1, 5);
+  const tombstone = new THREE.Group();
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5));
+  mesh.layers.set(STATIC_SOURCE_LAYER);
+  tombstone.add(mesh);
+  tombstone.position.set(0, 1, 0);
+  scene.add(tombstone);
+  camera.lookAt(tombstone.position); // dead center of the frame, where the dot sits
+  scene.updateMatrixWorld(true);
+  const canvas = document.createElement('canvas');
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1600, height: 900, right: 1600, bottom: 900, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  document.body.appendChild(canvas);
+  const manager = new AgentManager(scene, fixedLayout);
+  const selection = new SelectionState();
+  new ViewController({
+    camera, canvas, scene, selection,
+    agents: () => manager.getAgents(),
+    tombstones: () => [{ id: 'tomb-1', object: tombstone }],
+    keys: dom.window,
+  });
+  Object.defineProperty(document, 'pointerLockElement', { value: canvas, configurable: true });
+  // Clicked at a screen corner, nowhere near the target: a locked click never reads this point.
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10 }));
+  assert.equal(selection.selected, 'tomb-1', 'the center dot, not the click position, picks the target');
+  Object.defineProperty(document, 'pointerLockElement', { value: null, configurable: true });
+});
+
+test('a locked click that misses never selects and never clears the existing selection (issue #133 behavior unchanged)', () => {
+  const { manager, selection, canvas } = setup();
+  const document = dom.window.document;
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  Object.defineProperty(document, 'pointerLockElement', { value: canvas, configurable: true });
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10 }));
+  assert.equal(selection.selected, 'a', 'a locked miss leaves the selection exactly as it was');
+  Object.defineProperty(document, 'pointerLockElement', { value: null, configurable: true });
+});
+
+test('a locked click never leaves pointer lock and never changes the view mode', () => {
+  const { view, manager, selection, canvas } = setup();
+  const document = dom.window.document;
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  Object.defineProperty(document, 'pointerLockElement', { value: canvas, configurable: true });
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10 }));
+  assert.equal(view.mode, 'first-person');
+  assert.equal(document.pointerLockElement, canvas, 'the click never exits pointer lock itself');
+  Object.defineProperty(document, 'pointerLockElement', { value: null, configurable: true });
+  assert.equal(selection.selected, null);
+});
+
+test('the crosshair dot shows only in first person while the pointer is locked', () => {
+  const dot = dom.window.document.createElement('div');
+  const { canvas, press } = setup('', undefined, undefined, { crosshair: dot });
+  const document = dom.window.document;
+  assert.equal(dot.style.display, 'none', 'hidden by default: first person, not locked');
+
+  Object.defineProperty(document, 'pointerLockElement', { value: canvas, configurable: true });
+  document.dispatchEvent(new dom.window.Event('pointerlockchange'));
+  assert.equal(dot.style.display, 'block', 'shown: first person and locked');
+
+  press('KeyI');
+  assert.equal(dot.style.display, 'none', 'hidden in the isometric view, even with the lock flag still set');
+
+  press('KeyI'); // back to first person; the mock lock flag never actually changed
+  assert.equal(dot.style.display, 'block', 'shown again on return to first person');
+
+  Object.defineProperty(document, 'pointerLockElement', { value: null, configurable: true });
+  document.dispatchEvent(new dom.window.Event('pointerlockchange'));
+  assert.equal(dot.style.display, 'none', 'hidden once the lock exits');
+});
+
+test('the crosshair dot is untouched without a crosshair option at all (graceful degradation)', () => {
+  const { view, press } = setup();
+  assert.doesNotThrow(() => press('KeyI'));
+  assert.equal(view.mode, 'isometric');
 });
