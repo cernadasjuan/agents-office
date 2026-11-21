@@ -78,7 +78,11 @@ export class RoomFrame {
     this.inward = new THREE.Vector3(nx, 0, nz);
     this.along = new THREE.Vector3(-nz, 0, nx);
     const center = new THREE.Vector3((rect.minX + rect.maxX) / 2, 0, (rect.minZ + rect.maxZ) / 2);
-    this.doorWallCenter = center.addScaledVector(this.inward, -ROOM_SIZE / 2);
+    // Issue #123 review (blocking defect 1): the door-to-far-wall depth is the rect's own
+    // extent along the inward axis, not always `ROOM_SIZE` — a war room's door on its east or
+    // west wall has `WAR_ROOM_WIDTH` of depth in that direction, not the generic room depth.
+    const depth = door.side === 'north' || door.side === 'south' ? rect.maxZ - rect.minZ : rect.maxX - rect.minX;
+    this.doorWallCenter = center.addScaledVector(this.inward, -depth / 2);
   }
 
   point(a: number, d: number, y = 0): THREE.Vector3 {

@@ -185,12 +185,8 @@ test('AC1: a new war room has its must-have furniture from the start, built from
 });
 
 test('desk-like furniture grows with the peak live count and never shrinks back', () => {
-  // Index 0 sits in the first ring's first wing column. Its door sits 4.5 m off the room's
-  // own center (`missionSlot`'s `WING_COLUMNS`, issue #193 review: column 0 grows much wider
-  // than column 1 to keep the whole wing clear of the rented ring and the hall's whiteboard,
-  // which pushes its door further from center than column 1's). That drops the `a = 2.4` and
-  // both `a = 4.6` slots (all in the door's path), shrinking this room's physical fit from
-  // MAX_DESK_SLOTS (8) to 5.
+  // Issue #123: every war room's door opens onto the mission corridor at its own row's
+  // center, so every index (not just a later ring) gets the grid's full, door-centered fit.
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   const countOf = (name: string) => {
     let n = 0;
@@ -210,15 +206,15 @@ test('desk-like furniture grows with the peak live count and never shrinks back'
   assert.equal(countOf('desk'), 2);
   assert.equal(countOf('debugStation'), 1);
 
-  // A later, bigger peak grows it further, up to this room's own physical fit (5 slots)
+  // A later, bigger peak grows it further, up to this room's own physical fit
   missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
-  assert.equal(countOf('desk'), 3);
+  assert.equal(countOf('desk'), 6);
   assert.equal(countOf('debugStation'), 2);
 });
 
 test('the desk grid never exceeds the room\'s physical fit', () => {
-  // Index 2 is in the second ring, where the door sits at the column's own center
-  // (`missionSlot`), so this room's fit is the grid's full, door-centered MAX_DESK_SLOTS.
+  // Every row's door sits at the column's own center (`missionSlot`, issue #123), so every
+  // room's fit is the grid's full, door-centered MAX_DESK_SLOTS.
   const missionRoom = buildMissionRoom(room('a', 'open'), 2);
   missionRoom.updateCounts({ deskLike: 20, debugging: 5 });
   let total = 0;
@@ -278,4 +274,64 @@ test('the issue board is pickable, and its pick id points at this room', () => {
   const target = missionRoom.issuesBoardPickTarget();
   assert.equal(target.id, 'issues:a');
   assert.ok(target.object instanceof THREE.Object3D);
+});
+
+// --- Issue #123 review (blocking defect 1): RoomFrame used a fixed ROOM_SIZE depth
+// regardless of door orientation, and the war room's own rect kept WAR_ROOM_WIDTH on the
+// wrong axis once the corridor fix moved the door to the east/west wall — together, these put
+// most of a war room's own furniture outside its own walls. ---
+
+/** Every wall's own thickness, and a door frame's own post width, legitimately straddle the
+ * rect boundary they sit on by half their own size — never more. A room full of furniture
+ * genuinely spilling out of its own walls (the regression this guards) measures in whole
+ * meters, not fractions of this margin. */
+const WALL_STRADDLE_TOLERANCE = 0.2;
+
+test('issue #123 review: every mesh of a built war room stays inside its own room rect, at several rows', () => {
+  const failures: string[] = [];
+  for (const index of [0, 1, 2, 3, 20]) {
+    const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index);
+    missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
+    missionRoom.group.updateMatrixWorld(true);
+    const { rect } = missionRoom.slot;
+    const bounds = new THREE.Box3(
+      new THREE.Vector3(rect.minX - WALL_STRADDLE_TOLERANCE, -1, rect.minZ - WALL_STRADDLE_TOLERANCE),
+      new THREE.Vector3(rect.maxX + WALL_STRADDLE_TOLERANCE, 10, rect.maxZ + WALL_STRADDLE_TOLERANCE),
+    );
+    missionRoom.group.traverse((object) => {
+      if (!(object as THREE.Mesh).isMesh) return;
+      const box = new THREE.Box3().setFromObject(object);
+      if (!bounds.containsBox(box)) {
+        failures.push(`room ${index}: ${object.name || object.userData.piece || '(unnamed mesh)'} at ${JSON.stringify(box)} falls outside rect ${JSON.stringify(rect)}`);
+      }
+    });
+  }
+  assert.deepEqual(failures, []);
+});
+
+// --- Issue #123 review round 2: the kanban board's own along-the-door-wall offset still used
+// the rect's x-span unconditionally (left over from when the door wall always ran along x),
+// so once the corridor fix put war room doors on the east/west wall, the board floated meters
+// off the side wall it is meant to sit flush against, instead of touching it. ---
+
+test('issue #123 review round 2: the kanban board sits flush against a side wall, in both wing columns', () => {
+  for (const index of [0, 1]) {
+    const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index);
+    missionRoom.group.updateMatrixWorld(true);
+    const { rect, door } = missionRoom.slot;
+    assert.ok(door.side === 'east' || door.side === 'west', `expected an east/west door, got ${door.side}`);
+    let kanban: THREE.Mesh | undefined;
+    missionRoom.group.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      const geometry = mesh.geometry as THREE.PlaneGeometry | undefined;
+      if (mesh.isMesh && geometry?.parameters?.width === 3.6 && geometry?.parameters?.height === 1.8) kanban = mesh;
+    });
+    if (!kanban) throw new Error(`room ${index}: kanban board mesh not found`);
+    const position = kanban.getWorldPosition(new THREE.Vector3());
+    // A side wall runs the room's full depth at the rect's own z-extremes (the door wall's
+    // east/west rows run along z); flush against one of them means within wall thickness of
+    // minZ or maxZ, never floating meters toward the room's own z-center.
+    const distanceToNearestWall = Math.min(Math.abs(position.z - rect.minZ), Math.abs(position.z - rect.maxZ));
+    assert.ok(distanceToNearestWall < 0.2, `room ${index}: kanban board at z=${position.z} is ${distanceToNearestWall.toFixed(2)}m from the nearest side wall (rect ${JSON.stringify(rect)})`);
+  }
 });

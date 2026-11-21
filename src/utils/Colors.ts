@@ -23,8 +23,15 @@ export const Colors = {
 
   // Stickman
   skin: new THREE.Color(0xf5deb3),
-  limb: new THREE.Color(0x333344),
+  // Issue #165 round 3 (review follow-up): a skin-adjacent tone, not the old near-black
+  // navy — the Hero body reads as a toy figure with bare arms and legs under its torso
+  // color, not a wireframe stick wearing a colored shirt.
+  limb: new THREE.Color(0xe0b894),
   shoe: new THREE.Color(0x222233),
+  // Hero face + hair (issue #165): a dark near-black for eyes and the mouth, one
+  // shared brown for every hair style, so face/hair never spend a bucket per color.
+  face: new THREE.Color(0x241c15),
+  hair: new THREE.Color(0x3a2a1f),
 
   // Accent colors for agents
   accents: [

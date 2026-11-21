@@ -5,11 +5,19 @@ import { OFFICE_WALLS, type Station } from '../../scene/Office.js';
 import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, RoomView, Seat } from '../../layout/LayoutStrategy.js';
 import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type Rect, type RoomSlot } from './RoomPlanner.js';
-import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, wallRects, type RoomKind, type WallRect } from './rooms.js';
+import { buildCeiling, buildRoom, buildWalls, markCutaway, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, wallRects, type RoomKind, type WallRect } from './rooms.js';
 import { deskCameraPose, deskTalkSpotPose, monitorWorldCorners } from './deskGeometry.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
-import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
+import {
+  buildMissionRoom,
+  MISSION_CORRIDOR_DOOR,
+  MISSION_CORRIDOR_HALL_DOOR,
+  missionCorridorFloor,
+  missionCorridorRect,
+  missionSlot,
+  type MissionRoom,
+} from './missionRooms.js';
 import { tombstoneNameBatchFor } from './tombstoneNames.js';
 import type { WarRoomCounts } from './warRoomFurnishing.js';
 import type { WorldRoom } from '../../extensions.js';
@@ -159,7 +167,9 @@ export class BuildingLayout implements LayoutStrategy {
   private agents = new Map<string, AgentState>();
   private rooms: RoomRecord[] = [];
   private hallWalls: THREE.Group | null = null;
-  private missionRooms = new Map<string, MissionRoom & { extraDoors: Door[] }>();
+  /** Issue #123: the one shared frontage every war room's door opens onto, grown each time a new row is rented. */
+  private missionCorridor: THREE.Group | null = null;
+  private missionRooms = new Map<string, MissionRoom>();
   private now: () => number;
   private wallClock: () => number;
   private dwellMs: number;
@@ -204,6 +214,7 @@ export class BuildingLayout implements LayoutStrategy {
     // Unset `this.floor` is `ALL_FLOORS` (`src/addons/building.ts` never passes a floor option
     // for it), the original behavior: every room shows, repo tag or none.
     const rooms = this.floor === undefined ? worldRooms : worldRooms.filter((room) => matchesFloor(this.floor!, room.repo));
+    let grew = false;
     for (const room of rooms) {
       const known = this.missionRooms.get(room.id);
       if (known) {
@@ -211,7 +222,7 @@ export class BuildingLayout implements LayoutStrategy {
         continue;
       }
       const index = this.missionRooms.size;
-      const built = Object.assign(buildMissionRoom(room, index, this.rememberedMissionCounts(room.id)), { extraDoors: [] as Door[] });
+      const built = buildMissionRoom(room, index, this.rememberedMissionCounts(room.id));
       this.missionRooms.set(room.id, built);
       this.scene.add(built.group);
       roomLabelBatchFor(this.scene).collect(built.group);
@@ -219,16 +230,14 @@ export class BuildingLayout implements LayoutStrategy {
       // fresh mission) creates its nameplates before `this.scene.add` above; this catches them.
       tombstoneNameBatchFor(this.scene).collect(built.group);
       for (const [key, station] of built.stations) this.stations.set(key, station);
-      if (built.slot.ring === 0) this.rebuildHallWalls();
-      else {
-        const inner = [...this.missionRooms.values()][index - 2];
-        inner.extraDoors.push(matchingDoor(built.slot));
-        const old = inner.group.getObjectByName('room-walls');
-        if (old) inner.group.remove(old);
-        const walls = buildWalls(missionSlot(inner.index).rect, [missionSlot(inner.index).door, ...inner.extraDoors]);
-        walls.name = 'room-walls';
-        inner.group.add(walls);
-      }
+      grew = true;
+    }
+    // Issue #123: every war room's door opens directly onto the mission corridor, never
+    // through another room, so a new room never touches another room's own walls — only the
+    // hall (once, for the corridor's own doorway) and the corridor itself need a rebuild.
+    if (grew) {
+      this.rebuildHallWalls();
+      this.rebuildMissionCorridor();
     }
     this.missionBoardEntries = rooms.filter((room) => room.kind === 'mission')
       .map((room) => ({ title: room.title, state: room.state, createdAt: room.createdAt, closedAt: room.closedAt }));
@@ -356,16 +365,21 @@ export class BuildingLayout implements LayoutStrategy {
    */
   wallColliders(): WallRect[] {
     const hallDoors = [
-      ...this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0),
-      ...[...this.missionRooms.values()].map((room) => room.slot).filter((slot) => slot.ring === 0),
-    ].map(matchingDoor);
+      ...this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0).map(matchingDoor),
+      ...(this.missionRooms.size > 0 ? [MISSION_CORRIDOR_HALL_DOOR] : []),
+    ];
     const colliders: WallRect[] = [...wallRects(HALL, hallDoors)];
     for (const record of this.rooms) {
       const slot = slotFor(record.index);
       colliders.push(...wallRects(slot.rect, [slot.door, ...record.extraDoors]));
     }
+    // Issue #123: every war room has only its own door now (no `extraDoors` chain), plus the
+    // mission corridor's own walls, the one shared frontage they all open onto.
     for (const room of this.missionRooms.values()) {
-      colliders.push(...wallRects(room.slot.rect, [room.slot.door, ...room.extraDoors]));
+      colliders.push(...wallRects(room.slot.rect, [room.slot.door]));
+    }
+    if (this.missionRooms.size > 0) {
+      colliders.push(...wallRects(missionCorridorRect(this.missionRooms.size), this.missionCorridorDoors()));
     }
     return colliders;
   }
@@ -736,14 +750,39 @@ export class BuildingLayout implements LayoutStrategy {
   private rebuildHallWalls(): void {
     if (this.hallWalls) this.scene.remove(this.hallWalls);
     const doors = [
-      ...this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0),
-      ...[...this.missionRooms.values()].map((room) => room.slot).filter((slot) => slot.ring === 0),
-    ].map(matchingDoor);
+      ...this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0).map(matchingDoor),
+      // Issue #123: the hall's own one doorway into the whole mission wing, through the
+      // corridor — never a door per war room (that chained through `extraDoors` before).
+      ...(this.missionRooms.size > 0 ? [MISSION_CORRIDOR_HALL_DOOR] : []),
+    ];
     this.hallWalls = buildWalls(HALL, doors, OFFICE.height, ['south', 'west']);
     this.hallWalls.name = 'building-hall-walls';
     // Its own zone: the overview lowers the hall walls like the room walls
     markStatic(this.hallWalls, { zone: 'hall-walls', overviewLower: OFFICE.height });
     this.scene.add(this.hallWalls);
+  }
+
+  /** Every war room's own door onto the mission corridor (issue #123), the corridor's one
+   * doorway back into the hall included. Shared by `rebuildMissionCorridor` and `wallColliders`
+   * so the collision list can never drift from what the corridor's walls actually build. */
+  private missionCorridorDoors(): Door[] {
+    return [MISSION_CORRIDOR_DOOR, ...[...this.missionRooms.values()].map((room) => matchingDoor(room.slot))];
+  }
+
+  private rebuildMissionCorridor(): void {
+    if (this.missionRooms.size === 0) return;
+    if (this.missionCorridor) this.scene.remove(this.missionCorridor);
+    const rect = missionCorridorRect(this.missionRooms.size);
+    const group = new THREE.Group();
+    group.name = 'mission-corridor';
+    group.add(missionCorridorFloor(rect));
+    const walls = buildWalls(rect, this.missionCorridorDoors());
+    walls.name = 'room-walls';
+    markCutaway(walls);
+    group.add(walls);
+    group.add(buildCeiling(rect));
+    this.scene.add(group);
+    this.missionCorridor = group;
   }
 
   /**

@@ -14,6 +14,7 @@ const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { FrameLoop } = await import('../src/scene/FrameLoop.js');
 const { isAnimationAsleep, setAnimationAsleep, ANIMATION_DISTANCE } = await import('../src/scene/AnimationSleep.js');
 const { FrameStats } = await import('../src/scene/RenderScheduler.js');
+const { HIP_HEIGHT } = await import('../src/characters/StickFigureParts.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -131,8 +132,9 @@ function sleeper(activity: 'implementing' | 'idle' = 'implementing') {
   return { manager, managed, places, run };
 }
 
-const SEATED_HIPS = 0.5;
-const STANDING_HIPS = 0.9;
+// Issue #165's Hero body shortened the legs, moving these off the pre-Hero 0.5/0.9.
+const SEATED_HIPS = HIP_HEIGHT - 0.4;
+const STANDING_HIPS = HIP_HEIGHT;
 const RAISED_ARM = -2.9;
 
 test('a figure asleep from its first frame shows its activity pose, not the rest pose', () => {

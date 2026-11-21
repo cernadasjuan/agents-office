@@ -12,6 +12,9 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { StickFigure } = await import('../src/characters/StickFigure.js');
 const { formatWait, formatWaitShort } = await import('../src/ui/attention.js');
+const { HIP_HEIGHT } = await import('../src/characters/StickFigureParts.js');
+// Issue #165's Hero body shortened the legs, moving the seated hip height off the pre-Hero 0.5.
+const SEATED_HIPS = HIP_HEIGHT - 0.4;
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -31,7 +34,7 @@ test('a waiting agent raises its right hand and keeps the rest of its pose', () 
   run(figure, 3);
 
   assert.ok(figure.joints.rightUpperArm.rotation.x < -2.7, `right arm ${figure.joints.rightUpperArm.rotation.x}`);
-  assert.ok(Math.abs(figure.joints.hips.position.y - 0.5) < 0.02, 'still seated');
+  assert.ok(Math.abs(figure.joints.hips.position.y - SEATED_HIPS) < 0.02, 'still seated');
   assert.ok(Math.abs(figure.joints.leftForearm.rotation.x + 1.3) < 0.2, 'left hand still types');
   assert.equal(activityText(figure), 'Waiting for you · 12 min');
 });

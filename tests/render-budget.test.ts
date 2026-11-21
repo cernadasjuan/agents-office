@@ -121,15 +121,18 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // `origin/main` (ceilings plus the mission furniture package). Issue #159's tombstone
   // engraving adds one more on top of that merge: a single instanced draw call for the whole
   // scene's engraved names (`TombstoneNameBatch`), however many tombstones exist, landing it
-  // at 403. Issue #209 then recovers 3: every mission wing's war room lost its sofa and low
-  // table (2 fewer static pieces), and gained a guaranteed base desk and debug station in a
-  // room this fixture happens to build with none live yet (2 more, net -3 after the merge,
-  // not 2 for 2 — the pieces were never a 1:1 draw-call cost, the merge already folded them
-  // into the room's shared batch), landing it at 400. Pinned here at 403, 400 plus 3: real
-  // headroom above the number this fixture actually and repeatably measures, not a number
-  // nobody reproduces. Each PR gets up to 5 more against the 400 baseline before it must
-  // recover headroom elsewhere, not just add to the margin left by the last one.
-  assert.ok(after.total <= 403, `worst case ${after.total} exceeds the pinned baseline (400) + 3`);
+  // at 403. Issue #209 recovers 3 (war-room sofa and low table gone, a guaranteed base desk
+  // and debug station added), landing it at 400 on #209 alone. The Hero look (issue #165
+  // round 2: a face and seeded hair on every figure, chunky proportions on the existing body
+  // shapes) adds 6 more on top of that: 1 bucket for the shared eye shape, 1 for the mouth
+  // (every agent in this fixture starts idle, so all 40 share the one 'neutral' bucket), and
+  // the rest for however many of the 3 non-'none' hair kinds (cap, spiky, bun) this fixture's
+  // 40 seeded names land on — re-measured with both changes in, landing it at 406, not a
+  // hand-picked 400 + 6. Pinned here at 409, 406 plus 3: real headroom above the number this
+  // fixture actually and repeatably measures, not a number nobody reproduces. Each PR gets a
+  // deliberate, reviewed addition against the 406 baseline before it must recover headroom
+  // elsewhere, not just add to the margin left by the last one.
+  assert.ok(after.total <= 409, `worst case ${after.total} exceeds the pinned baseline (406) + 3`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -153,8 +156,12 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // one per tombstone (`TombstoneNameBatch`), so the full MAX_TOMBSTONES cap across all 9
   // mission rooms this fixture builds still only costs +1. Issue #209's war-room base work
   // set (sofa and low table removed, a base desk and debug station guaranteed) drops it to
-  // 400; see the baseline comment above. Still exactly one value across all 8 runs.
-  assert.deepEqual([...totals], [400], `expected every one of 8 runs to measure 400, got ${[...totals]}`);
+  // 400 on #209 alone; see the baseline comment above. The Hero look (issue #165 round 2)
+  // adds its own 6 buckets on top of that, re-measured at 406, not a hand-picked 400 + 6.
+  // Still exactly one value across all 8 runs — the fixture's own seeded names
+  // (`tests/real-size-office.ts`) never change which hair style or face state an agent lands
+  // on between runs.
+  assert.deepEqual([...totals], [406], `expected every one of 8 runs to measure 406, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {
