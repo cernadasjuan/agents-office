@@ -179,7 +179,9 @@ test('AC1: a new war room has its must-have furniture from the start, built from
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   const names: string[] = [];
   missionRoom.group.traverse((o) => { if (typeof o.userData.piece === 'string') names.push(o.userData.piece); });
-  for (const must of ['clock', 'whiteboard', 'bookshelf', 'sofa', 'lowTable']) assert.ok(names.includes(must), `missing ${must}`);
+  for (const must of ['clock', 'whiteboard', 'bookshelf', 'desk', 'debugStation']) assert.ok(names.includes(must), `missing ${must}`);
+  assert.ok(!names.includes('sofa'), 'issue #209: no sofa in a war room');
+  assert.ok(!names.includes('lowTable'), 'issue #209: no coffee table in a war room');
 });
 
 test('desk-like furniture grows with the peak live count and never shrinks back', () => {
@@ -191,7 +193,9 @@ test('desk-like furniture grows with the peak live count and never shrinks back'
     missionRoom.group.traverse((o) => { if (o.userData.piece === name) n++; });
     return n;
   };
-  assert.equal(countOf('desk') + countOf('debugStation'), 0, 'no agents yet, no desks');
+  // Issue #209: the base work set, even with no agents yet, is 1 workstation + 1 debug station.
+  assert.equal(countOf('desk'), 1, 'the base work set: one workstation, even with no agents yet');
+  assert.equal(countOf('debugStation'), 1, 'the base work set: one debug station, even with no agents yet');
 
   missionRoom.updateCounts({ deskLike: 2, debugging: 1 });
   assert.equal(countOf('desk'), 2);
