@@ -4,9 +4,9 @@
 // Spotlight or the Dock, and the warm path (AC2) has a 1 s budget, so it skips the TS loader.
 //
 // Cold start (AC1): nothing answers the office port yet. Starts the fork dev server
-// (AGENTS_OFFICE_PLUGINS=herdr,github,bmad,missions,library,peek,skills,floor-library, same
-// set as `pnpm dev:fork`) detached, with BROWSER=none (vite's own server.open would otherwise
-// open a second browser window), waits for it to answer, then opens the browser itself.
+// (AGENTS_OFFICE_PLUGINS=herdr,github,bmad,missions,library,peek,skills,floor-library,repos,
+// same set as `pnpm dev:fork`) detached, with BROWSER=none (vite's own server.open would
+// otherwise open a second browser window), waits for it to answer, then opens the browser itself.
 //
 // Warm start (AC2): the port already answers with this office's own HTML. Opens the browser
 // only; starts nothing.
@@ -35,7 +35,7 @@ const port = DEFAULT_PORT;
 const officeUrl = `http://127.0.0.1:${port}`;
 
 // Fork plugin list the launcher starts with, kept identical to package.json's `dev:fork` script.
-const FORK_PLUGINS = 'herdr,github,bmad,missions,library,peek,skills,floor-library';
+const FORK_PLUGINS = 'herdr,github,bmad,missions,library,peek,skills,floor-library,repos';
 const COLD_START_BUDGET_MS = 4500; // AC1 allows 5 s total; leaves headroom for the open command.
 const POLL_INTERVAL_MS = 150;
 const PROBE_TIMEOUT_MS = 1000;

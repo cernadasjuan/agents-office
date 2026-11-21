@@ -232,3 +232,75 @@ test('a worktree .git file with a relative gitdir pointer resolves the real main
 
   assert.equal(new FloorResolver().resolve(worktree), 'orgs/relative-pointer-repo');
 });
+
+// --- remoteOwnerRepoOf (issue #249: the Repos column's transcript-derived entries) ---
+
+test('remoteOwnerRepoOf resolves a repo with a real remote, the same owner/repo the floor itself would use', () => {
+  const repo = makeRepoWithRemote('second-repo', 'https://github.com/gabriel-amyot/second-repo.git');
+  assert.equal(new FloorResolver().remoteOwnerRepoOf(repo), 'gabriel-amyot/second-repo');
+});
+
+test('remoteOwnerRepoOf resolves from a nested directory inside the repo, the same walk-up the floor uses', () => {
+  const repo = makeRepoWithRemote('nested-repo', 'https://github.com/gabriel-amyot/nested-repo.git');
+  const nested = path.join(repo, 'src', 'deep');
+  fs.mkdirSync(nested, { recursive: true });
+  assert.equal(new FloorResolver().remoteOwnerRepoOf(nested), 'gabriel-amyot/nested-repo');
+});
+
+test('remoteOwnerRepoOf is undefined for a repo with no remote, unlike the floor itself (no directory-name fallback)', () => {
+  const repo = makeRepo('no-remote-repo', 'projects');
+  const resolver = new FloorResolver();
+  assert.equal(resolver.resolve(repo), 'projects/no-remote-repo', 'the floor itself still falls back to the parent-dir qualifier');
+  assert.equal(resolver.remoteOwnerRepoOf(repo), undefined, 'remoteOwnerRepoOf never falls back — a bare directory name is not a trustworthy second-repo signal');
+});
+
+test('remoteOwnerRepoOf is undefined for a directory with no repository at all, and for a missing or relative path', () => {
+  const resolver = new FloorResolver();
+  assert.equal(resolver.remoteOwnerRepoOf(path.join(root, 'nowhere', 'at', 'all')), undefined);
+  assert.equal(resolver.remoteOwnerRepoOf('relative/path'), undefined);
+});
+
+test('remoteOwnerRepoOf resolves a worktree to its main repository\'s own remote, not the worktree directory', () => {
+  const mainRepo = makeRepoWithRemote('worktree-main-repo', 'https://github.com/gabriel-amyot/worktree-main-repo.git');
+  const worktree = makeWorktree(mainRepo, 'wt-remote');
+  assert.equal(new FloorResolver().remoteOwnerRepoOf(worktree), 'gabriel-amyot/worktree-main-repo');
+});
+
+test('remoteOwnerRepoOf caches its own directory walk (review #249 round 2): a repeated call for the same directory does not re-walk the filesystem', () => {
+  const repo = makeRepoWithRemote('repeated-remote-check', 'https://github.com/gabriel-amyot/repeated-remote-check.git');
+  const resolver = new FloorResolver();
+  const lstatSync = fs.lstatSync;
+  let calls = 0;
+  (fs as unknown as { lstatSync: typeof fs.lstatSync }).lstatSync = ((...args: Parameters<typeof fs.lstatSync>) => {
+    calls++;
+    return lstatSync(...args);
+  }) as typeof fs.lstatSync;
+  try {
+    resolver.remoteOwnerRepoOf(repo);
+    const callsAfterFirst = calls;
+    assert.ok(callsAfterFirst > 0, 'the first call actually walked the filesystem');
+    for (let i = 0; i < 50; i++) resolver.remoteOwnerRepoOf(repo);
+    assert.equal(calls, callsAfterFirst, 'fifty repeated calls for the same directory reused the walk cache, not one lstat per call');
+  } finally {
+    fs.lstatSync = lstatSync;
+  }
+});
+
+test('remoteOwnerRepoOf also caches a miss (no repository at this directory), not just a hit', () => {
+  const dir = path.join(root, 'nowhere', 'repeated');
+  const resolver = new FloorResolver();
+  const lstatSync = fs.lstatSync;
+  let calls = 0;
+  (fs as unknown as { lstatSync: typeof fs.lstatSync }).lstatSync = ((...args: Parameters<typeof fs.lstatSync>) => {
+    calls++;
+    return lstatSync(...args);
+  }) as typeof fs.lstatSync;
+  try {
+    resolver.remoteOwnerRepoOf(dir);
+    const callsAfterFirst = calls;
+    resolver.remoteOwnerRepoOf(dir);
+    assert.equal(calls, callsAfterFirst, 'a repeated miss also reused the cache rather than re-walking to confirm there is still nothing there');
+  } finally {
+    fs.lstatSync = lstatSync;
+  }
+});
