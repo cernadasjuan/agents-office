@@ -5,6 +5,7 @@ import { BuildingLayout } from '../src/addons/building/BuildingLayout.js';
 import { MAX_TOMBSTONES } from '../src/addons/building/missionRooms.js';
 import { AgentManager } from '../src/agents/AgentManager.js';
 import { bmadHats } from '../plugins/bmad/client.js';
+import { skillsEquipment } from '../plugins/skills/client.js';
 import { GithubOfficeExtension } from '../plugins/github/client.js';
 import { setFreeCameraLook } from '../src/scene/FreeCamera.js';
 import { overviewBounds } from '../src/scene/OverviewCamera.js';
@@ -49,6 +50,68 @@ function issuesFor(i: number): Array<{ number: number; title: string }> | undefi
 }
 
 /**
+ * Issue #167 v1 (skills equipment): a sequence that cycles through every hand-item
+ * kind this catalog maps (one per `HAND_MAP` entry, plus the unmapped-skill toolbox
+ * fallback), and both face items (`glasses`, from 2+ skills; `headphones`, from a
+ * dedicated skill) — so the budget fixture's worst case actually pins the real
+ * bucket count this feature spends, not an undercount from a fixture that never
+ * wears any of it. Every 6th agent carries no skills at all, the same "not every
+ * agent wears one" shape `badgesFor` already follows.
+ */
+const SKILL_SEQUENCES: string[][] = [
+  ['git'],
+  ['jira'],
+  ['klever-mr'],
+  ['crit:crit'],
+  ['code-review'],
+  ['bibliotheque-librarian'],
+  ['dataviz'],
+  ['research'],
+  ['investigate'],
+  ['totally-unmapped-skill'],
+  ['git', 'jira'],
+  ['klever-test'],
+  ['git', 'klever-test'],
+];
+
+function skillsFor(i: number): string[] | undefined {
+  if (i % 6 === 5) return undefined;
+  return SKILL_SEQUENCES[i % SKILL_SEQUENCES.length];
+}
+
+/**
+ * Round 2 (issue #167): the raw built-in tool allow-list (`plugins/skills/index.ts`'s
+ * `TOOL_ALLOWLIST`), cycled the same way `SKILL_SEQUENCES` is, so this fixture's worst
+ * case also pins the 3 new buckets this round actually spends (`terminal-screen`,
+ * `pencil`, `globe` — `magnifier` and `open-book` are reused from the skills side, no
+ * new bucket). `lastEquipSourceFor` alternates which list actually wins the hand slot
+ * (`handItemFor`'s own tie-break otherwise always prefers `skills` when both are
+ * present), so both the tool-triggered and the skill-triggered items are exercised,
+ * not just whichever the default preference always picks.
+ */
+const TOOL_SEQUENCES: string[][] = [['Bash'], ['Grep'], ['Glob'], ['Read'], ['Edit'], ['Write'], ['WebSearch'], ['WebFetch'], ['Task']];
+
+function toolsFor(i: number): string[] {
+  return TOOL_SEQUENCES[i % TOOL_SEQUENCES.length];
+}
+
+/**
+ * Review (issue #167 round 2): alternating on `i % 2` let `code-review`'s loupe silently
+ * never win the hand slot — its only two non-suppressed occurrences (agents 4 and 30,
+ * `SKILL_SEQUENCES[4]`) both landed on the `i % 2 === 0` ("tool wins") side, so the fixture
+ * never actually equipped it despite the comment above claiming full coverage. Alternating
+ * on which full lap of `SKILL_SEQUENCES` this agent falls in, instead of on the agent's own
+ * index, guarantees every sequence's first lap (agents 0-12, repeat 0) wins the hand slot
+ * via `skill` before any `tool` override can suppress it — the fixture's worst case must
+ * equip every mapped kind at least once, not just the ones a lucky index happens to land on.
+ */
+function lastEquipSourceFor(i: number): 'skill' | 'tool' | undefined {
+  if (!skillsFor(i)) return 'tool';
+  const lap = Math.floor(i / SKILL_SEQUENCES.length);
+  return lap % 2 === 0 ? 'skill' : 'tool';
+}
+
+/**
  * Build the office at the real size without a browser. The caller sets up a
  * jsdom `document` with a canvas stub first (toon gradients, signs, boards, cards).
  */
@@ -80,7 +143,10 @@ export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManag
   for (let i = 0; i < REAL_SIZE.agents; i++) {
     manager.addAgent({
       id: `a${i}`, name: `agent ${i}`, activity: 'implementing',
-      extras: { group: { id: `g${i % 11}`, label: `ws${i % 11}` }, badges: badgesFor(i), issues: issuesFor(i) },
+      extras: {
+        group: { id: `g${i % 11}`, label: `ws${i % 11}` }, badges: badgesFor(i), issues: issuesFor(i),
+        skills: skillsFor(i), tools: toolsFor(i), lastEquipSource: lastEquipSourceFor(i),
+      },
     });
   }
   // Worst case for war-room furniture: push every open mission room past its desk cap
@@ -99,6 +165,7 @@ export function buildRealSizeOffice(): { scene: THREE.Scene; manager: AgentManag
   const github = new GithubOfficeExtension();
   github.start(scene);
   bmadHats.agentsChanged?.(manager.getAgents());
+  skillsEquipment.agentsChanged?.(manager.getAgents());
   github.agentsChanged(manager.getAgents());
   return { scene, manager, layout, github };
 }

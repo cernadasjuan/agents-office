@@ -14,6 +14,16 @@ export interface AgentExtras {
   badges?: string[];
   /** Skills used at least once this session, newest-loaded last (issue #166, the `skills` plugin). Without it the card falls back to personas only. */
   skills?: string[];
+  /** A fixed allow-list of built-in tool calls used at least once this session, newest-loaded
+   * last (issue #167 round 2, same `skills` plugin): `Bash`, `Grep`, `Glob`, `Read`, `Edit`,
+   * `Write`, `WebSearch`, `WebFetch`, `Task`. The equipment catalog's search/bash/edit items
+   * (`plugins/skills/items.ts`) key on this, never on `skills` alone — a `Skill` tool call is
+   * a structurally different kind of event and can never carry a raw tool name. */
+  tools?: string[];
+  /** Which of `skills` or `tools` had the more recently introduced entry (issue #167 round 2):
+   * one true "newest" across both lists, for the equipment catalog's hand item. Absent only
+   * when neither list has ever gained an entry. */
+  lastEquipSource?: 'skill' | 'tool';
   /** `color` is the card border color as `rrggbb` (the issue's label color). */
   issues?: Array<{ number: number; title: string; column?: string; repo?: string; color?: string }>;
   room?: string;
