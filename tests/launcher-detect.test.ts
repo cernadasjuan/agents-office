@@ -72,11 +72,19 @@ test('probeOffice: a raw TCP server that sends headers then stalls the body coun
     socket.write('HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 1000\r\n\r\n<ht');
     // Deliberately never writes the rest of the body and never ends the socket.
   });
+  // Server readiness is explicit: this resolves only on the `listening` event, so `probeOffice`
+  // below never connects before the OS has actually bound and accepted on the port.
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('expected a bound TCP address');
   try {
-    const result = await probeOffice(address.port, { timeoutMs: 100 });
+    // A generous, bounded timeout: the previous 100 ms raced the same budget against both
+    // "wait for the headers to land" and "declare the stalled body dead", which was comfortable
+    // in isolation but flaked under full-suite CPU contention, when the loopback write-then-read
+    // round trip can take longer than 100 ms to actually land. 2 s is still bounded — the body
+    // never arrives, so the probe always resolves well inside it — and gives that round trip
+    // enough room even when the machine is busy running the rest of the suite.
+    const result = await probeOffice(address.port, { timeoutMs: 2000 });
     assert.deepEqual(result, { reachable: true, isOffice: false });
   } finally {
     // `server.close()` alone waits forever for a connection nobody ever ends; the stalled
