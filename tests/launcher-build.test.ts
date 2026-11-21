@@ -142,6 +142,42 @@ test('highest_installed_nvm_node falls back correctly when no default resolves',
   }
 });
 
+// --- Launcher app icon (issue #205) ---
+
+test('the built app bundle carries the committed icon and points Info.plist at it', () => {
+  const repoRoot = fakeRepoRoot('icon-repo');
+  const destDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-launcher-dest-'));
+  try {
+    execFileSync('bash', [BUILD_SCRIPT, repoRoot, destDir], { stdio: 'pipe' });
+    const resourcesDir = path.join(destDir, 'Agents Office.app', 'Contents', 'Resources');
+    assert.ok(fs.existsSync(path.join(resourcesDir, 'AgentsOffice.icns')), 'the icon is copied into the bundle');
+    const plist = fs.readFileSync(path.join(destDir, 'Agents Office.app', 'Contents', 'Info.plist'), 'utf8');
+    assert.match(plist, /<key>CFBundleIconFile<\/key>\s*<string>AgentsOffice<\/string>/, 'Info.plist names the icon file (no extension, the macOS convention)');
+  } finally {
+    fs.rmSync(path.dirname(repoRoot), { recursive: true, force: true });
+    fs.rmSync(destDir, { recursive: true, force: true });
+  }
+});
+
+test('a checkout missing the committed .icns still builds the app, just without an icon (graceful degradation)', () => {
+  const repoRoot = fakeRepoRoot('no-icon-repo');
+  const destDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-launcher-dest-'));
+  const iconPath = path.join(REPO_ROOT, 'scripts', 'launcher', 'AgentsOffice.icns');
+  const backupPath = `${iconPath}.test-backup`;
+  fs.renameSync(iconPath, backupPath);
+  try {
+    execFileSync('bash', [BUILD_SCRIPT, repoRoot, destDir], { stdio: 'pipe' });
+    const resourcesDir = path.join(destDir, 'Agents Office.app', 'Contents', 'Resources');
+    assert.equal(fs.existsSync(path.join(resourcesDir, 'AgentsOffice.icns')), false);
+    const plist = fs.readFileSync(path.join(destDir, 'Agents Office.app', 'Contents', 'Info.plist'), 'utf8');
+    assert.ok(!plist.includes('CFBundleIconFile'), 'no icon key without an icon to point at — the pre-#205 plist shape');
+  } finally {
+    fs.renameSync(backupPath, iconPath);
+    fs.rmSync(path.dirname(repoRoot), { recursive: true, force: true });
+    fs.rmSync(destDir, { recursive: true, force: true });
+  }
+});
+
 test('build-launcher-app.sh refuses a repo root with no built vite binary', () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-launcher-build-'));
   const repoRoot = path.join(parent, 'no-vite-here');
