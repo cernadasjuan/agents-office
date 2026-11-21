@@ -524,6 +524,38 @@ test('issue #252: a room that never appears gives up quietly after enough checks
   assert.equal(view.zoomDistance, baseline.view.zoomDistance, 'gave up quietly: still the view\'s own default framing');
 });
 
+test('issue #252 review (codex): the isometric cut actually lands on the room, not just the follow rate — the live pose is re-seeded, not just chasing at DIRECT_FOLLOW_RATES', () => {
+  const room = fixtureRoomView(); // centered far from the view's own default framing
+  let exists = false;
+  const { view } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60);
+
+  exists = true;
+  view.sceneChanged();
+  // No further update() tick yet: a true cut must already be on the room right here, same
+  // frame — a follow (even a fast one) would still be back at the default framing this tick.
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+  camera.updateMatrixWorld();
+  const toRoom = camera.position.distanceTo(room.bounds.getCenter(new THREE.Vector3()));
+  const toDefault = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
+  assert.ok(toRoom < toDefault, `the camera is already closer to the room than to the view's own default center (room ${toRoom}, default ${toDefault})`);
+});
+
+test('issue #252 review (codex): a first-person selection flight in progress is cancelled when the pending room resolves mid-flight', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view, camera, manager, selection } = setup('#room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a'); // starts a first-person flight toward the agent, well away from the room
+  view.update(0, 1 / 60); // flight in progress
+
+  exists = true;
+  view.sceneChanged(); // pending room resolves mid-flight
+
+  view.update(0, 1 / 30); // the next frame: the stale flight tween must not resume and pull away
+  assert.ok(camera.position.distanceTo(room.standing.position) < 1e-6, 'the room landing survives the next frame; the in-flight selection tween was cancelled, not resumed');
+});
+
 test('a click picks a tombstone, not just an agent figure (issue #127)', () => {
   const document = dom.window.document;
   const scene = new THREE.Scene();

@@ -249,9 +249,23 @@ export class ViewController {
       } else {
         this.flight = null;
         this.isometricFollowRates = DIRECT_FOLLOW_RATES;
+        // Review (codex, PR #256): `DIRECT_FOLLOW_RATES` is a faster *follower*, not an
+        // instant snap — left alone, `liveIsometric` stays at its old live pose and only
+        // eases toward this room's target over the next several frames, which for a room far
+        // from wherever the camera already was reads as a multi-second pan, not the cut this
+        // branch promises. A real mode-kind cut (`setMode` entering isometric, just above)
+        // always re-seeds `liveIsometric` from the goal the same way; this is the same
+        // situation — a goal that never had a shown frame to ease from.
+        this.liveIsometric = this.isometric.state();
       }
       this.applyIsometric();
     } else {
+      // Review (codex, PR #256): an in-flight first-person tween (a selection flight still
+      // closing when the pending room resolves) is not cancelled by the isometric branch
+      // above, so without this `update()`'s very next tick would resume that tween and pull
+      // the camera straight back off the room this just landed on. Harmless for the cold-start
+      // case too: at construction no flight has started yet, so this is a no-op there.
+      this.flight = null;
       this.applyPose(room.standing);
       setFreeCameraLook(this.options.camera, room.standing.position, room.standing.lookAt);
     }
