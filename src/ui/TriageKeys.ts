@@ -1,11 +1,12 @@
 /**
- * Keyboard triage (issue #85): N selects the next agent in the queue, F
- * recenters the camera and pulses the ready Focus button (see
- * `AgentCard.pulseFocus`, no request leaves the browser), and / gives the
- * triage panel's filter field the focus. Ignored while typing in a form
- * field, or with a modifier held, so these keys never clash with WASD,
- * Space, Q, Shift, O, I, Shift+L, Esc or ?. / and ? report the same `Slash`
- * code on a US layout; `?` is Shift+Slash, so / only fires without Shift.
+ * Keyboard triage (issue #85; F walked back on #214): N selects the next
+ * agent in the queue, F recenters the camera and runs the ready herdr focus
+ * action directly (see `AgentCard.triageFocus`; falls back to a pulse, no
+ * request sent, when no ready action exists), and / gives the triage panel's
+ * filter field the focus. Ignored while typing in a form field, or with a
+ * modifier held, so these keys never clash with WASD, Space, Q, Shift, O, I,
+ * Shift+L, Esc or ?. / and ? report the same `Slash` code on a US layout; `?`
+ * is Shift+Slash, so / only fires without Shift.
  */
 
 function isFormField(target: EventTarget | null): boolean {
@@ -27,7 +28,7 @@ export interface TriageKeyEvent {
 export interface TriageKeyHandlers {
   /** Key N: select the next agent in the fresh/aging queue. */
   next(): void;
-  /** Key F: recenter the camera and pulse the ready Focus button, without running it. */
+  /** Key F: recenter the camera and run the ready herdr focus action directly. */
   focus(): void;
   /** Key /: give the triage panel's filter field the focus. */
   filter(): void;

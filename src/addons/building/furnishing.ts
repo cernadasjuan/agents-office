@@ -112,6 +112,11 @@ function furnishOffice({ doorAlong, usersOffice = true }: RoomShape): RoomPlan {
       // Side walls: art above, a plant beside the first queue row
       { piece: PIECES.wallArt(0.9, 0.6, Colors.books[5].getHex()), a: -5.9, d: 6, y: 1.6, turn: FACE_PLUS_A },
       { piece: PIECES.wallArt(0.7, 0.9, Colors.books[6].getHex()), a: 5.9, d: 6, y: 1.6, turn: FACE_MINUS_A },
+      // Round 7 feedback (#214): "I'd like to have more screens... on the top right and left."
+      // Same wall spot, same style, a second tier stacked above the pair just above — no new
+      // floor footprint, so nothing else on this wall needs to move.
+      { piece: PIECES.wallArt(0.9, 0.6, Colors.books[2].getHex()), a: -5.9, d: 6, y: 3.0, turn: FACE_PLUS_A },
+      { piece: PIECES.wallArt(0.7, 0.9, Colors.books[3].getHex()), a: 5.9, d: 6, y: 3.0, turn: FACE_MINUS_A },
       { piece: PIECES.plant(), a: -5.5, d: 8.8 },
       { piece: PIECES.plant(), a: 5.5, d: 8.8 },
       // The lounge corner, away from the door: a sofa against the door wall, two armchairs and a low table

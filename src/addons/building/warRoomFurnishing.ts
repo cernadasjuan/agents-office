@@ -83,28 +83,37 @@ export const WAR_ROOM_WIDTH = 18;
 
 /**
  * Up to 8 desk slots (rulebook §3's physical-fit cap, issue #193 review: was 4, at
- * `ROOM_SIZE`-wide rooms). Every desk and debug station carries its own chair (`Desk.ts`,
- * `DebugStation.ts`), so a piece's real depth reaches past its own row. That rules out a
- * second row at the two middle columns:
- * - `a = -2.4` and `a = 2.4` sit under the room's own meeting table and standing ring
- *   (`missionRooms.ts`'s `TABLE_SEATS`/`STANDING_SPOTS`, centered on the room at
- *   `d = 6.2`); a row deep enough to clear the row in front of it would land inside
- *   a seat or a standing spot there.
- * - `a = -4.6` would overlap the ended-session tombstone strip, the same reason the
- *   original grid (12-wide rooms) had only 3 columns instead of 4.
- * `a = 4.6` sits clear of both and keeps its second row from the original grid.
- * `a = ±7.0` is the new width's own outer pair (issue #193): clear of the tombstone strip
- * (anchored on `ROOM_SIZE`, not this wider `WAR_ROOM_WIDTH`, so it never moved), clear of the
- * meeting ring (whose widest spot, the standing ring at radius 3.0, never reaches past
- * `a = ±3.0`), and clear of the near-wall furniture (the sofa, low table, water cooler and
- * TV, all anchored off `nearWall` at a different `d`, so a desk row here shares no depth with
- * any of them) — both columns get the same two-row depth the original `a = 4.6` column did.
+ * `ROOM_SIZE`-wide rooms). Round 7 feedback (#214) dropped the two middle-column slots
+ * (`a = -2.4`, `a = 2.4`) that used to sit right beside the door: "the worst place to put
+ * a desk... everybody from the corridor is going to see" (Gabriel, verbatim). Every slot
+ * now lives in one of three side-wall lanes instead, each turned to face the room center
+ * ("looking from the wall to the center") rather than the door:
+ * - `a = -4.6` is still out: the ended-session tombstone strip runs along the left side
+ *   wall at `a` from about -5.3 to -4.25, the same reason the original grid (12-wide
+ *   rooms) had only 3 columns instead of 4.
+ * - `a = 4.6` sits clear of the tombstone strip and of the meeting table's standing ring
+ *   (radius 3.0 around the room center at `d = 6.2`; `a = 4.6` is already past that
+ *   radius, so every depth in the room is clear, not just the original two rows) — it
+ *   gets a third row.
+ * - `a = -7.0` and `a = 7.0` are the wider room's own outer pair (issue #193): clear of
+ *   the tombstone strip (anchored on `ROOM_SIZE`, not `WAR_ROOM_WIDTH`, so it never
+ *   moved), clear of the meeting ring for the same reason as `a = 4.6`, and clear of the
+ *   near-wall furniture (the water cooler and TV, both anchored off `nearWall`, over 1.5
+ *   m further out than this lane). `a = 7.0` gets the third row too; `a = -7.0` stays at
+ *   two, since the gap to the left wall (bounded by the tombstone strip on one side) does
+ *   not fit a second lane there.
  */
 const DESK_SLOTS: ReadonlyArray<{ a: number; d: number }> = [
-  { a: -2.4, d: 1.4 }, { a: 2.4, d: 1.4 }, { a: 4.6, d: 1.4 },
-  { a: 4.6, d: 3.6 }, { a: -7.0, d: 1.4 }, { a: -7.0, d: 3.6 }, { a: 7.0, d: 1.4 }, { a: 7.0, d: 3.6 },
+  { a: 4.6, d: 1.4 }, { a: 4.6, d: 3.6 }, { a: 4.6, d: 5.8 },
+  { a: -7.0, d: 1.4 }, { a: -7.0, d: 3.6 },
+  { a: 7.0, d: 1.4 }, { a: 7.0, d: 3.6 }, { a: 7.0, d: 5.8 },
 ];
 export const MAX_DESK_SLOTS = DESK_SLOTS.length;
+
+/** Faces a piece toward the room center (`a = 0`) from whichever side wall it stands on. */
+function faceCenterTurn(a: number): number {
+  return a < 0 ? Math.PI / 2 : -Math.PI / 2;
+}
 
 const JITTER_POS = 0.12;
 const JITTER_ROT = (8 * Math.PI) / 180;
@@ -150,10 +159,16 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
     const { a, d } = slots[i];
     const ja = jitter(rand, a, JITTER_POS);
     const jd = jitter(rand, d, JITTER_POS);
-    const turn = jitter(rand, 0, JITTER_ROT);
+    const turn = faceCenterTurn(a) + jitter(rand, 0, JITTER_ROT);
     const isDebug = i < debugSlotCount;
     pieces.push({ piece: isDebug ? PIECES.debugStation() : PIECES.desk(), a: ja, d: jd, turn });
-    stations.push({ type: isDebug ? 'debugging' : 'implementing', a: ja, d: jd - 0.9, look: [ja, jd, 1.2], posture: 'seated' });
+    // Round 7 (#214) review fix: `faceCenterTurn` rotates the piece's built-in chair (local
+    // z = +0.7 in Desk.ts) toward the center side of the desk, not the wall side — an agent
+    // placed on the wall side the way the first pass had it stands about 1.6 m from the chair
+    // it is supposed to be sitting in. Seat the station on the same side the chair actually
+    // lands on, so the agent sits in the chair.
+    const seatA = ja + (a < 0 ? 0.9 : -0.9);
+    stations.push({ type: isDebug ? 'debugging' : 'implementing', a: seatA, d: jd, look: [ja, jd, 1.2], posture: 'seated' });
   }
 
   // --- Must-haves: a clock, plants, a bookshelf, a whiteboard. Issue #209: no sofa, no low
