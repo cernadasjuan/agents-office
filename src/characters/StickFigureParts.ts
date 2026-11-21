@@ -203,27 +203,37 @@ function createHair(style: HairStyle): THREE.Group | null {
   const group = new THREE.Group();
   group.name = 'hero-hair';
   const material = getToonMaterial(Colors.hair);
-  const addPiece = (geometry: THREE.BufferGeometry, position: [number, number, number], rotation?: [number, number, number]): void => {
+  const addPiece = (
+    geometry: THREE.BufferGeometry, position: [number, number, number], rotation?: [number, number, number], scale?: number,
+  ): void => {
     const mesh = part(geometry, material);
     mesh.castShadow = false;
     mesh.position.set(...position);
     if (rotation) mesh.rotation.set(...rotation);
+    if (scale) mesh.scale.setScalar(scale);
     group.add(mesh);
   };
   switch (style) {
     case 'tufts': {
       // Issue #165 round 7 (review: "the hairs... look like little caps, I'm not sure
-      // if I like the hairs" — replaces the old snug-dome 'cap' style). 3 short tufts
-      // at the front hairline, not a full dome or a full ring: reads as "a bit of hair
-      // with a part", the simplest of the less-cap-like options this round considered
-      // (the other being a two-wedge parted-hair shape, more geometry for a subtler
-      // result). Reuses `spiky`'s own cone shape and bucket (`hair:spike`) — a style
-      // with no shape of its own, so this round actually spends one bucket *less* than
-      // before (the removed `hair:cap` dome), not more.
-      const geometry = shared('hair:spike', () => new THREE.ConeGeometry(HEAD_RADIUS * 0.16, HEAD_RADIUS * 0.5, 6));
-      const offsets: Array<[number, number]> = [[-0.35, 0], [0, 0.05], [0.35, 0]];
-      for (const [dx, dy] of offsets) {
-        addPiece(geometry, [dx * HEAD_RADIUS, HEAD_RADIUS * (0.85 + dy), HEAD_RADIUS * 0.55], [-0.6, dx * 0.6, 0]);
+      // if I like the hairs" — replaces the old snug-dome 'cap' style). A review-round
+      // follow-up found the first cut (3 thin cones at their raw geometry size) read as
+      // "small black dots floating around the head", not hair, at both a close-up and
+      // the default zoom: individually tiny (a 0.033-radius base) and spread wide (0.35
+      // head-radii apart), each with a visible gap off the scalp. Fixed per the two
+      // options on the table: fewer, bigger tufts (2, not 3), moved close enough
+      // together their bases overlap into one mass, and sized up with a per-instance
+      // scale (the same "a transform, never a new shape" trick the forearm thin-down
+      // uses) rather than a bigger geometry argument, so this still costs no bucket of
+      // its own. Reuses `spiky`'s own cone shape and bucket (`hair:spike`, now built
+      // with the same dimensions as `spiky`'s own build below, so whichever style's
+      // figure builds first in a scene does not silently decide the other's cone size)
+      // — a style with no shape of its own, so this round still spends one bucket
+      // *less* than before (the removed `hair:cap` dome).
+      const geometry = shared('hair:spike', () => new THREE.ConeGeometry(HEAD_RADIUS * 0.16, HEAD_RADIUS * 0.55, 6));
+      const offsets: number[] = [-0.18, 0.18];
+      for (const dx of offsets) {
+        addPiece(geometry, [dx * HEAD_RADIUS, HEAD_RADIUS * 0.88, HEAD_RADIUS * 0.5], [-0.5, dx * 0.9, 0], 1.8);
       }
       break;
     }

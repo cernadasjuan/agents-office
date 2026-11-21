@@ -198,10 +198,22 @@ function applyStandingBase(j: Joints, dt: number): void {
 // Seated pose: hips, shoulders, neck all drop together
 // Standing: hips=HIP_HEIGHT, shoulders=SHOULDERS_Y, neck=NECK_HEIGHT
 // Seated: each minus SEATED_DROP
+//
+// Round 7 follow-up (subagents sink into the sofa): SEATED_HIP_HEIGHT etc. are tuned
+// against a real sofa/armchair/desk-chair seat top in world space, but these targets
+// are set on a joint local to `j.root`, which AgentManager scales by 0.85 for every
+// subagent (`figure.group.scale.multiplyScalar(SUBAGENT_SCALE)`). Left unscaled here,
+// a subagent's seated hips would land at 0.85 * 0.425 = ~0.361, about 6 cm below the
+// seat it was just tuned to meet, undoing the round 7 fix for the half of the figures
+// the review named ("the sub-agents... and the agents too"). Dividing by the root's
+// own y scale cancels that scale out before the position lands on the parent sofa's
+// local frame, so both a full-scale agent and an 0.85 subagent land hips on the same
+// world-space seat top.
 function applySeatedBase(j: Joints, dt: number): void {
-  j.hips.position.y = approachY(j.hips.position.y, SEATED_HIP_HEIGHT, dt);
-  j.shoulders.position.y = approachY(j.shoulders.position.y, SEATED_SHOULDERS_Y, dt);
-  j.neck.position.y = approachY(j.neck.position.y, SEATED_NECK_HEIGHT, dt);
+  const scale = j.root.scale.y || 1;
+  j.hips.position.y = approachY(j.hips.position.y, SEATED_HIP_HEIGHT / scale, dt);
+  j.shoulders.position.y = approachY(j.shoulders.position.y, SEATED_SHOULDERS_Y / scale, dt);
+  j.neck.position.y = approachY(j.neck.position.y, SEATED_NECK_HEIGHT / scale, dt);
 
   j.leftUpperLeg.rotation.x = approach(j.leftUpperLeg.rotation.x, -1.5, dt);
   j.leftLowerLeg.rotation.x = approach(j.leftLowerLeg.rotation.x, 1.5, dt);

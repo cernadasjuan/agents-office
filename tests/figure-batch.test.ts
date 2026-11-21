@@ -44,10 +44,11 @@ test('all figures draw in one call per part shape and color, each part where its
   const all = figures(scene, [RED, RED, BLUE]);
   scene.updateMatrixWorld();
   // 17 body + face parts (head, torso, 2 hands, 2 feet, 8 limbs, 2 eyes, 1 mouth) per
-  // figure, plus hair (issue #165 round 2; round 7 replaced 'cap' with 'tufts', 3 cones
-  // reusing the 'spiky' shape, not 1): f0 seeds 'tufts' (3 pieces), f1 and f2 both seed
-  // 'spiky' (5 cones each) — 3 * 17 + 3 + 5 + 5 = 64.
-  assert.equal(countDrawCalls(scene).main, 64);
+  // figure, plus hair (issue #165 round 2; round 7 replaced 'cap' with 'tufts', 2 cones
+  // reusing the 'spiky' shape, not 1 — a round 7 follow-up dropped the middle tuft and
+  // scaled the remaining 2 up, so it no longer reads as floating dots): f0 seeds 'tufts'
+  // (2 pieces), f1 and f2 both seed 'spiky' (5 cones each) — 3 * 17 + 2 + 5 + 5 = 63.
+  assert.equal(countDrawCalls(scene).main, 63);
 
   const batch = new FigureBatch(scene);
   batch.sync(all.map((figure) => figure.group));

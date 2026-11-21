@@ -216,3 +216,21 @@ test('issue #165 round 7 (review: "the sub-agents when sitting on a sofa look th
   assert.ok(SEATED_HIP_HEIGHT >= seatTop - 0.02 && SEATED_HIP_HEIGHT <= seatTop + 0.05,
     `seated hips at ${SEATED_HIP_HEIGHT} should rest on the sofa's own seat top ${seatTop}, not sink below it`);
 });
+
+test('issue #165 round 7 follow-up (review: "the sub-agents... and the agents too"): a 0.85-scaled subagent\'s seated hips still land on the sofa seat top, in world space', () => {
+  // AgentManager scales a subagent's whole figure group (`root`) by 0.85, the same
+  // group the seated hip/shoulder/neck targets are local to. A fix tuned only against
+  // the unscaled (agent) case would still land a subagent's hips below the seat.
+  const sofa = createSofa();
+  const seat = sofa.children.find((child) => (child as THREE.Mesh).geometry instanceof THREE.BoxGeometry
+    && (child as THREE.Mesh).position.y > 0.3 && (child as THREE.Mesh).position.y < 0.4) as THREE.Mesh;
+  const seatGeometry = seat.geometry as THREE.BoxGeometry;
+  const seatTop = seat.position.y + seatGeometry.parameters.height / 2;
+
+  const joints = buildSkeleton(RED);
+  joints.root.scale.setScalar(0.85);
+  for (let i = 0; i < 300; i++) animateActivity(joints, 'idle', i * 0.016, 0.016, 'seated');
+  const worldHipsY = joints.hips.position.y * joints.root.scale.y;
+  assert.ok(worldHipsY >= seatTop - 0.02 && worldHipsY <= seatTop + 0.05,
+    `a subagent's world-space seated hips at ${worldHipsY} should rest on the sofa's own seat top ${seatTop}, not sink below it`);
+});
