@@ -269,9 +269,16 @@ function repoShortName(value: unknown): string | undefined {
  * path of two or more segments, a single-segment absolute path (review round 2: `/tmp`, `/etc`
  * alone, with nothing after, were not caught by the two-or-more-segment rule), a relative path
  * (`./x`, `../x`) and a Windows drive path. The lookbehind keeps a bare `/` or `.` mid-sentence
- * (a fraction, an ellipsis) from being mistaken for the start of a path.
+ * (a fraction, an ellipsis) from being mistaken for the start of a path, while still catching a
+ * single-segment or relative path introduced by a quote, backtick, paren, `=` or `:` (review
+ * round 2 follow-up: `Read "/tmp"`, `` `/etc` `` and `TMPDIR=/private` all read unchanged
+ * without this — ordinary quoting should not defeat the privacy boundary).
  */
-const PATH_LIKE = /file:\/\/\S+|~\/\S+|(?<=^|\s)\.{1,2}\/\S+|\/(?:[\w.-]+\/)+[\w.-]+|(?<=^|\s)\/[\w.-]+|[A-Za-z]:[\\/]\S*/g;
+const PATH_START = "^|[\\s\"'`(=:,[]";
+const PATH_LIKE = new RegExp(
+  `file://\\S+|~/\\S+|(?<=${PATH_START})\\.{1,2}/\\S+|/(?:[\\w.-]+/)+[\\w.-]+|(?<=${PATH_START})/[\\w.-]+|[A-Za-z]:[\\\\/]\\S*`,
+  'g',
+);
 
 function redactPaths(value: unknown): string {
   return typeof value === 'string' ? value.replace(PATH_LIKE, '[path]') : '';

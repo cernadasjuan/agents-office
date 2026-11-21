@@ -213,6 +213,17 @@ test('review round 2: a single-segment absolute path and a relative path are als
   assert.deepEqual(story?.doneList, ['Ran [path]', 'Compared against [path]', 'A plain line with no path at all', '50/50 split, not a path']);
 });
 
+test('review round 2 follow-up: a quoted, backticked or env-assigned path is redacted too', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter', story: {
+      intent: 'Set TMPDIR=/private/tmp before running the build',
+      doneList: ['Read "/tmp" for the scratch file', 'Checked `/etc` for the config', '3/4 of the work is done, not a path'],
+    } }] }] }], ['missions'], publicId);
+  const story = world.rooms[0].sleepers![0].story;
+  assert.equal(story?.intent, 'Set TMPDIR=[path] before running the build');
+  assert.deepEqual(story?.doneList, ['Read "[path]" for the scratch file', 'Checked `[path]` for the config', '3/4 of the work is done, not a path']);
+});
+
 test('a mission issue keeps a clean owner/repo, and drops one that does not match the shape (#146)', () => {
   const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
     walls: { issues: [
