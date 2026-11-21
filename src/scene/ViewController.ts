@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
-import { focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
+import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
 import { IsometricController, IsometricTween, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
 import { OverviewController, PoseTween, floorUnder, frameForBounds, overviewBounds, zoomTowardCursor as zoomOverviewTowardCursor, type CameraPose } from './OverviewCamera.js';
 import type { RoomView } from '../layout/LayoutStrategy.js';
@@ -9,7 +9,6 @@ import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, ty
 
 const FLIGHT_SECONDS = 0.6;
 const FIRST_PERSON_FOCUS_DISTANCE = 4;
-const FIRST_PERSON_FOCUS_HEIGHT = 1.2;
 const FIGURE_CHEST = 1.1;
 const PAN_SPEED_PER_DISTANCE = 0.9;
 const FAST_MULTIPLIER = 2.5;
@@ -408,8 +407,11 @@ export class ViewController {
     away.y = 0;
     if (away.lengthSq() < 1e-6) away.set(0, 0, 1);
     away.normalize();
-    // Inside the figure's room: the camera stays on the figure's side of every wall
-    const position = focusPosition(lookAt, away, floorUnder(this.options.scene, point), FIRST_PERSON_FOCUS_DISTANCE, FIRST_PERSON_FOCUS_HEIGHT);
+    // Inside the figure's room: the camera stays on the figure's side of every wall. The
+    // height lands exactly at ground-walk's own eye height (issue #174/#185 review): a fixed
+    // offset above the figure's chest used to pop down to the standing height one frame after
+    // the flight landed, since ground-walk forces that height on every later frame regardless.
+    const position = focusPosition(lookAt, away, floorUnder(this.options.scene, point), FIRST_PERSON_FOCUS_DISTANCE, currentEyeHeight() - lookAt.y);
     away.set(position.x - lookAt.x, 0, position.z - lookAt.z).normalize();
     // Turn only the aim to the screen right, so the figure shows left of the card.
     // The camera stays where the plain flight puts it: a sideways move could end inside a wall.

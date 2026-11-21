@@ -92,6 +92,42 @@ test('Space jumps again once grounded', () => {
   assert.ok(camera.position.y > grounded, 'a fresh jump works again after landing');
 });
 
+test('review #185: standing up mid-air (releasing crouch while still rising) never falsely cancels the jump', () => {
+  const { camera } = setup();
+  press('ShiftLeft'); // crouch first
+  updateFreeCamera(camera, 1 / 60);
+  assert.equal(camera.position.y, CROUCH_EYE_HEIGHT);
+  press('Space'); // jump from the crouch height
+  updateFreeCamera(camera, 1 / 60);
+  const risingFromCrouch = camera.position.y;
+  assert.ok(risingFromCrouch > CROUCH_EYE_HEIGHT, 'rising');
+  release('ShiftLeft'); // stand up mid-air: the live target jumps from crouch height to the (higher) standing height
+  updateFreeCamera(camera, 1 / 60);
+  // The old bug: the camera (still low, from the crouch launch) was now below the new, higher
+  // target, so the landing check fired immediately and zeroed the jump instead of continuing it.
+  assert.ok(camera.position.y > risingFromCrouch, `still rising after standing up mid-air, not snapped to a landed height (${camera.position.y} vs ${risingFromCrouch})`);
+  tick(camera, 2); // let it land for real
+  assert.equal(camera.position.y, EYE_HEIGHT, 'eventually lands at the (now standing) target height');
+});
+
+test('review #185: the jump apex is the same at 30 fps and 60 fps (frame-rate independence)', () => {
+  const apexAt = (fps: number) => {
+    const { camera } = setup();
+    press('Space');
+    let apex = camera.position.y;
+    const step = 1 / fps;
+    for (let t = 0; t < 1; t += step) {
+      updateFreeCamera(camera, step);
+      if (camera.position.y > apex) apex = camera.position.y;
+    }
+    release('Space');
+    return apex - EYE_HEIGHT; // the apex height above standing, so 0 fps-dependent offset cancels out
+  };
+  const apex30 = apexAt(30);
+  const apex60 = apexAt(60);
+  assert.ok(Math.abs(apex30 - apex60) / apex60 < 0.01, `apex at 30 fps (${apex30}) and 60 fps (${apex60}) should match within 1%`);
+});
+
 test('W moves forward at the default walk speed, a little faster than the old 6', () => {
   const { camera } = setup();
   press('KeyW');
@@ -119,16 +155,31 @@ test('double-tapping W runs faster than a single, held W', () => {
   assert.ok(ran > walked, `running (${ran}) should cover more ground than walking (${walked}) in the same second`);
 });
 
-test('releasing W stops the run', () => {
-  const { camera } = setup();
-  press('KeyW');
-  release('KeyW');
-  press('KeyW'); // the second tap: now running
-  updateFreeCamera(camera, 1 / 60);
-  release('KeyW');
-  const beforeRelease = -camera.position.z;
-  updateFreeCamera(camera, 1); // W is up: no WASD held, no horizontal movement at all
-  assert.equal(-camera.position.z, beforeRelease, 'nothing moves once every movement key is up');
+test('releasing W stops the run, confirmed with a different key afterward (review #185)', () => {
+  // The old version of this test only checked that nothing moves with every key up, which
+  // would still pass even with the keyup reset deleted entirely. A's own speed, taken right
+  // after a run, is the real check: a stuck `running` flag would speed up every movement key,
+  // not only W, so comparing against a plain strafe-only run catches that directly.
+  const ranThenStrafed = (() => {
+    const { camera } = setup();
+    press('KeyW');
+    release('KeyW');
+    press('KeyW'); // the second tap: now running
+    updateFreeCamera(camera, 1 / 60);
+    release('KeyW'); // running must clear here
+    press('KeyA');
+    updateFreeCamera(camera, 1);
+    release('KeyA');
+    return camera.position.x;
+  })();
+  const strafedOnly = (() => {
+    const { camera } = setup();
+    press('KeyA');
+    updateFreeCamera(camera, 1);
+    release('KeyA');
+    return camera.position.x;
+  })();
+  assert.ok(Math.abs(ranThenStrafed - strafedOnly) < 1e-6, `a stuck running flag would make the strafe after it faster too (${ranThenStrafed} vs a plain strafe's ${strafedOnly})`);
 });
 
 test('holding Shift crouches: lower eye height and slower movement, not the old "Shift = fast"', () => {
@@ -164,11 +215,28 @@ test('releasing Shift stands back up', () => {
 });
 
 test('looking up or down does not tilt the walk (movement stays on the ground plane)', () => {
-  const { camera } = setup();
-  setFreeCameraLook(camera, camera.position, new THREE.Vector3(0, EYE_HEIGHT + 5, -1)); // look steeply up
-  press('KeyW');
-  updateFreeCamera(camera, 1 / 60);
-  assert.equal(camera.position.y, EYE_HEIGHT, 'walking while looking up never lifts the camera off the ground');
+  // The old version of this test only checked that y stays at EYE_HEIGHT, which would still
+  // pass even with pitch leaking into movement: the grounded branch forces y back to the
+  // target height every frame regardless. The real check is the horizontal distance covered:
+  // if pitch tilted the walk, looking steeply up would shorten the forward (x/z) component of
+  // the same one-second walk, exactly the bug this guards against.
+  const flat = (() => {
+    const { camera } = setup();
+    setFreeCameraLook(camera, camera.position, new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z - 1)); // level look
+    press('KeyW');
+    updateFreeCamera(camera, 1);
+    release('KeyW');
+    return { x: camera.position.x, z: camera.position.z };
+  })();
+  const lookingUp = (() => {
+    const { camera } = setup();
+    setFreeCameraLook(camera, camera.position, new THREE.Vector3(camera.position.x, camera.position.y + 5, camera.position.z - 1)); // same yaw, steep pitch up
+    press('KeyW');
+    updateFreeCamera(camera, 1);
+    release('KeyW');
+    return { x: camera.position.x, z: camera.position.z };
+  })();
+  assert.ok(Math.abs(flat.x - lookingUp.x) < 1e-9 && Math.abs(flat.z - lookingUp.z) < 1e-9, `same horizontal distance regardless of pitch (flat ${JSON.stringify(flat)} vs looking up ${JSON.stringify(lookingUp)})`);
 });
 
 test('issue #174 (desk mode, #161): movement can be disabled without touching look', () => {
@@ -178,5 +246,20 @@ test('issue #174 (desk mode, #161): movement can be disabled without touching lo
   const before = camera.position.clone();
   updateFreeCamera(camera, 1);
   assert.deepEqual(camera.position.toArray(), before.toArray(), 'no movement, no gravity, while disabled');
+  release('KeyW');
+
+  // Review #185: the old version of this test never exercised mouse-look, so a change that
+  // broke look-while-disabled would not be caught. Simulate pointer lock (the same pattern as
+  // tests/view-controller.test.ts), then move the mouse and confirm the camera still rotates.
+  const canvas = dom.window.document.getElementById('c') as unknown as HTMLCanvasElement;
+  Object.defineProperty(dom.window.document, 'pointerLockElement', { value: canvas, configurable: true });
+  dom.window.document.dispatchEvent(new dom.window.Event('pointerlockchange'));
+  const beforeQuaternion = camera.quaternion.clone();
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('mousemove', { movementX: 200, movementY: 0 } as MouseEventInit));
+  updateFreeCamera(camera, 1 / 60);
+  assert.notDeepEqual(camera.quaternion.toArray(), beforeQuaternion.toArray(), 'look still rotates the camera while movement is disabled');
+
+  Object.defineProperty(dom.window.document, 'pointerLockElement', { value: null, configurable: true });
+  dom.window.document.dispatchEvent(new dom.window.Event('pointerlockchange'));
   setMovementEnabled(true);
 });

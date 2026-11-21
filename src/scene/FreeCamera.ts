@@ -26,10 +26,18 @@ let lockFilter: (event: MouseEvent) => boolean = () => true;
 let listenersAttached = false;
 
 // --- Ground-walk state (issue #174): module-level, like yaw/pitch/keys above, one free camera at a time. ---
-/** Upward (positive) or downward (negative) speed while airborne; zero while grounded or crouch-adjusting in place. */
-let verticalVelocity = 0;
 /** False only between a jump's takeoff and its landing: Space is a no-op mid-air, so there is no double jump. */
 let grounded = true;
+/**
+ * Seconds since the current jump's takeoff; meaningful only while `!grounded`. The jump arc
+ * (review, #185) is the closed-form parabola of this elapsed time, not an accumulated
+ * velocity integrated frame by frame (semi-implicit Euler): the old approach's error grew
+ * with the step size, so the same jump's apex measured differently at 30 fps and 60 fps. A
+ * pure function of total elapsed time has no step size to depend on.
+ */
+let jumpElapsed = 0;
+/** The eye height (stand or crouch) the current jump launched from; independent of the live crouch/stand target, so standing up or crouching mid-air changes where gravity is pulling toward, never whether the jump itself is still in progress. */
+let jumpLaunchHeight = EYE_HEIGHT;
 /** True from a double-tap of W until it is released: the held-run state double-tapping sets. */
 let running = false;
 let lastWTapAt = 0;
@@ -51,6 +59,11 @@ export function setPointerLockFilter(filter: (event: MouseEvent) => boolean): vo
 /** Issue #174 (desk mode, #161): turns ground-walk off (no WASD, no gravity, no jump) without touching look or pointer lock. Movement is enabled by default. */
 export function setMovementEnabled(enabled: boolean): void {
   movementEnabled = enabled;
+}
+
+/** The eye height ground-walk is standing at right now (review, #185): crouched or standing, never the old fixed focus-flight height. A first-person flight target (`ViewController.flyToAgent`) uses this, so it lands exactly where grounded ground-walk would put the camera next frame, instead of a fixed height that pops to this one frame later. */
+export function currentEyeHeight(): number {
+  return (keys.has('ShiftLeft') || keys.has('ShiftRight')) ? CROUCH_EYE_HEIGHT : EYE_HEIGHT;
 }
 
 export function initFreeCamera(
@@ -92,7 +105,8 @@ export function initFreeCamera(
       lastWTapAt = now;
     }
     if (e.code === 'Space' && !e.repeat && movementEnabled && grounded) {
-      verticalVelocity = JUMP_SPEED;
+      jumpLaunchHeight = currentEyeHeight();
+      jumpElapsed = 0;
       grounded = false;
     }
     keys.add(e.code);
@@ -110,7 +124,7 @@ export function setFreeCameraLook(camera: THREE.Camera, position: THREE.Vector3,
   yaw = Math.atan2(-dir.x, -dir.z);
   pitch = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)), -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
   camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
-  verticalVelocity = 0;
+  jumpElapsed = 0;
   grounded = true;
   running = false;
   lastWTapAt = -Infinity;
@@ -191,17 +205,26 @@ export function updateFreeCamera(camera: THREE.PerspectiveCamera, delta: number)
 
   // Vertical: gravity and the jump impulse (issue #174), replacing the old Space/Q fly up/down.
   // Grounded, standing or crouching tracks the target eye height directly (a pose change, not
-  // a fall); only an actual jump (`grounded` false) rides gravity down to it, so the apex and
+  // a fall); only an actual jump (`grounded` false) rides gravity toward it, so the apex and
   // the landing both play out as real motion instead of a teleport.
   if (grounded) {
     camera.position.y = targetEyeHeight;
   } else {
-    verticalVelocity -= GRAVITY * delta;
-    camera.position.y += verticalVelocity * delta;
-    if (camera.position.y <= targetEyeHeight) {
+    jumpElapsed += delta;
+    // The closed-form parabola (review, #185): a pure function of elapsed time, so the apex
+    // and the whole arc are identical at any frame rate, unlike integrating velocity and
+    // position by `delta` each frame (semi-implicit Euler), whose error grows with the step.
+    const velocity = JUMP_SPEED - GRAVITY * jumpElapsed;
+    const height = jumpLaunchHeight + JUMP_SPEED * jumpElapsed - 0.5 * GRAVITY * jumpElapsed * jumpElapsed;
+    // Landing requires falling (velocity <= 0), not just being at or below the target height
+    // (review, #185): a posture change mid-air (releasing crouch while still rising) can move
+    // the live target past the camera's current height while it is still going up, and that
+    // must never end the jump early.
+    if (velocity <= 0 && height <= targetEyeHeight) {
       camera.position.y = targetEyeHeight;
-      verticalVelocity = 0;
       grounded = true;
+    } else {
+      camera.position.y = height;
     }
   }
 }

@@ -171,6 +171,19 @@ test('key F fix: refocus flies to an already-selected agent, even though a resel
     'refocus flew back to the same framing');
 });
 
+test('review #185: selecting an agent in first person lands at ground-walk\'s own eye height, with no pop a frame later', () => {
+  const { view, manager, selection, camera } = viewSetup();
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60); // run the flight to completion
+  const justLanded = camera.position.y;
+  assert.ok(Math.abs(justLanded - EYE_HEIGHT) < 1e-6, `the flight itself should land at EYE_HEIGHT (${EYE_HEIGHT}), got ${justLanded}`);
+  // The bug this guards against: the old fixed focus height (2.3) landed there, then the very
+  // next frame's ground-walk rule snapped it down to EYE_HEIGHT (1.75), a visible 0.55 m pop.
+  view.update(1 + 1 / 60, 1 / 60);
+  assert.equal(camera.position.y, justLanded, 'no height change on the frame right after the flight lands');
+});
+
 test('key F fix: refocus on an agent no longer in the scene does nothing', () => {
   const { view, camera } = viewSetup();
   const before = camera.position.clone();
