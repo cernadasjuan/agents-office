@@ -68,4 +68,14 @@ export interface LayoutStrategy {
   roomAt?(x: number, z: number): RoomView | null;
   /** World corners of each desk monitor's face, left then right (issue #161 review, defect 4): lets the label declutter keep queued labels clear of them in desk mode. */
   deskMonitorCorners?(): THREE.Vector3[][];
+  /**
+   * Every wall in the layout, as a flat 2D collision list (issue #194), for first-person
+   * ground-walk. Without it (the original activity layout implements no `wallColliders`),
+   * `FreeCamera` keeps the old, unobstructed walk — the same graceful degradation as every
+   * other optional method here.
+   */
+  wallColliders?(): WallRect[];
 }
+
+/** A wall's 2D floor footprint, world space (issue #194). The same shape `FreeCamera`'s own `WallRect` and `BuildingLayout`'s `wallRects` use; kept here too so a layout can implement `wallColliders` without importing an addon module. */
+export interface WallRect { minX: number; maxX: number; minZ: number; maxZ: number }
