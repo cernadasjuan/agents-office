@@ -132,22 +132,48 @@ export class FloorResolver {
   }
 
   private resolveUncached(cwd: string): string {
-    if (!path.isAbsolute(cwd)) return GENERAL_FLOOR;
-    let current = path.resolve(cwd);
+    const repoDir = this.repoDirOf(cwd);
+    return repoDir ? this.qualifiedFloorName(repoDir) : GENERAL_FLOOR;
+  }
+
+  /**
+   * The repo directory that holds `dir` (a worktree resolves to its main repository),
+   * walking up at most `MAX_WALK_DEPTH` directories. Undefined for a non-absolute `dir`, one
+   * with no repository, or an unreadable or malformed worktree `.git` file — never the
+   * worktree's own directory as a fallback (review: `resolveUncached`'s own earlier bug).
+   * The one piece of the walk both the floor name and `remoteOwnerRepoOf` below share.
+   */
+  private repoDirOf(dir: string): string | undefined {
+    if (!path.isAbsolute(dir)) return undefined;
+    let current = path.resolve(dir);
     for (let depth = 0; depth < MAX_WALK_DEPTH; depth++) {
       const git = path.join(current, '.git');
       try {
         const stat = fs.lstatSync(git);
-        if (!stat.isFile()) return this.qualifiedFloorName(current);
-        const mainDir = worktreeMainDir(git, current);
-        return mainDir ? this.qualifiedFloorName(mainDir) : GENERAL_FLOOR;
+        if (!stat.isFile()) return current;
+        return worktreeMainDir(git, current);
       } catch {
         const parent = path.dirname(current);
-        if (parent === current) return GENERAL_FLOOR;
+        if (parent === current) return undefined;
         current = parent;
       }
     }
-    return GENERAL_FLOOR;
+    return undefined;
+  }
+
+  /**
+   * A directory's own real git remote owner/repo (issue #249: the Repos column's
+   * transcript-derived entries — a session's edits or git commands reaching into a second
+   * repo, a worktree sibling most often). Real remotes only, unlike the floor name itself
+   * (`qualifiedFloorName`): a worktree's bare directory name is a believable *floor* (the one
+   * repo a session's own `cwd` sits in, already disambiguated by that context), but is not a
+   * trustworthy *second* repo signal on its own — two unrelated directories named the same
+   * thing would otherwise collapse into one false "same repo" entry. Undefined on the general
+   * floor (no repository at all) or a repository with no resolvable origin remote.
+   */
+  remoteOwnerRepoOf(dir: string): string | undefined {
+    const repoDir = this.repoDirOf(dir);
+    return repoDir ? this.cachedRemoteOwnerRepo(repoDir) : undefined;
   }
 
   /** `remoteOwnerRepo(repoDir)`, cached per repo root, capped and cleared the same way `cache` is. */
