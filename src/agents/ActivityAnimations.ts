@@ -7,11 +7,24 @@ import type { Posture } from '../layout/LayoutStrategy.js';
  * Hero body changed HIP_HEIGHT/SHOULDERS_Y/NECK_HEIGHT; this drop is a chair-seat
  * relationship, not a body one, so it stays a fixed offset rather than scaling with
  * the figure).
+ *
+ * Issue #165 round 7 (review: "the sub-agents when sitting on a sofa look that
+ * they're sinking in a sofa... And the agents too"): 0.4 was tuned for the old,
+ * taller plain-stick body (seated hips landed at 0.9 - 0.4 = 0.5, a hair above the
+ * seat). The Hero body's shorter `HIP_HEIGHT` (0.74) kept this same fixed drop,
+ * landing seated hips at 0.34 — well *below* every seat surface this office builds
+ * (the sofa's own cushion top, `Sofa.ts`: 0.35 + 0.15 / 2 = 0.425; the armchair's,
+ * `Armchair.ts`: 0.35 + 0.14 / 2 = 0.42; the desk chair's and the stool's, `Desk.ts`/
+ * `Stool.ts`: ~0.445-0.46) — reading as sinking into the cushion instead of resting
+ * on it. Re-tuned so seated hips land at 0.425, the sofa's own seat height (the
+ * piece of furniture the review named): close enough to the desk chair and stool
+ * too (within 2-3 cm) that neither reads as sinking either.
  */
-const SEATED_DROP = 0.4;
-const SEATED_HIP_HEIGHT = HIP_HEIGHT - SEATED_DROP;
-const SEATED_SHOULDERS_Y = SHOULDERS_Y - SEATED_DROP;
-const SEATED_NECK_HEIGHT = NECK_HEIGHT - SEATED_DROP;
+const SEATED_DROP = HIP_HEIGHT - 0.425;
+/** Exported so a test can assert against the real computed seat height, not a second hardcoded copy of it. */
+export const SEATED_HIP_HEIGHT = HIP_HEIGHT - SEATED_DROP;
+export const SEATED_SHOULDERS_Y = SHOULDERS_Y - SEATED_DROP;
+export const SEATED_NECK_HEIGHT = NECK_HEIGHT - SEATED_DROP;
 
 export type Activity =
   | 'idle'

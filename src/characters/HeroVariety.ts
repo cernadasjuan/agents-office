@@ -15,7 +15,7 @@ import type { HairStyle } from './StickFigureParts.js';
  * length, or every agent would mint its own bucket.
  */
 
-const HAIR_STYLES: HairStyle[] = ['cap', 'spiky', 'bun', 'none'];
+const HAIR_STYLES: HairStyle[] = ['tufts', 'spiky', 'bun', 'none'];
 
 /** The narrow range a scaled figure still fits its desk, chair and doorway. */
 const MIN_BODY_SCALE = 0.92;
