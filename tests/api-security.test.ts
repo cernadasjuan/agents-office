@@ -76,10 +76,13 @@ test('local polling returns minimal display fields and stable opaque identities'
   assert.equal(first.headers['x-content-type-options'], 'nosniff');
   const agents = JSON.parse(first.body);
   assert.equal(agents.length, 2);
-  assert.deepEqual(Object.keys(agents[0]).sort(), ['activity', 'id', 'name']);
-  assert.deepEqual(Object.keys(agents[1]).sort(), ['activity', 'id', 'name', 'parentId']);
+  // `floor` (issue #118) is a built-in enricher, always set: the fixture's cwd resolves
+  // to no git repository, so both agents land on the shared general floor.
+  assert.deepEqual(Object.keys(agents[0]).sort(), ['activity', 'floor', 'id', 'name']);
+  assert.deepEqual(Object.keys(agents[1]).sort(), ['activity', 'floor', 'id', 'name', 'parentId']);
   assert.equal(agents[0].name, records[0].name);
   assert.equal(agents[0].activity, records[0].activity);
+  assert.equal(agents[0].floor, 'general');
   assert.match(agents[0].id, /^[a-f0-9]{64}$/);
   assert.equal(agents[1].parentId, agents[0].id);
   assert.notEqual(agents[0].id, agents[1].id);

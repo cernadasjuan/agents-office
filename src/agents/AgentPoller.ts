@@ -1,8 +1,9 @@
 import { AgentManager } from './AgentManager.js';
 import { AgentExtras, AgentInfo } from './AgentData.js';
 import type { Activity } from './ActivityAnimations.js';
+import { GENERAL_FLOOR } from '../floors/FloorRegistry.js';
 
-interface DetectedAgent extends AgentExtras {
+export interface DetectedAgent extends AgentExtras {
   id: string;
   name: string;
   activity: string;
@@ -16,7 +17,7 @@ interface DetectedAgent extends AgentExtras {
  * `projectAgents` call with every field set, so a future field fails in CI instead of only in
  * the office.
  */
-export const EXTRA_KEYS: Array<keyof AgentExtras> = ['parentId', 'provider', 'attention', 'orchestrating', 'waitMinutes', 'group', 'badges', 'skills', 'issues', 'room', 'role', 'actions', 'stuck'];
+export const EXTRA_KEYS: Array<keyof AgentExtras> = ['parentId', 'provider', 'attention', 'orchestrating', 'waitMinutes', 'group', 'badges', 'skills', 'issues', 'room', 'role', 'actions', 'stuck', 'floor'];
 
 /** The optional fields the server sent, or undefined when there are none. */
 function extrasOf(agent: DetectedAgent): AgentExtras | undefined {
@@ -40,10 +41,17 @@ export class AgentPoller {
   private knownIds = new Set<string>();
   private onUpdate: (() => void) | null = null;
   private onHealth: ((health: PollHealth) => void) | null = null;
+  private onAgents: ((agents: DetectedAgent[]) => void) | null = null;
   private pollInFlight = false;
   private health: PollHealth = { loaded: false, lastSuccessAt: null, failures: 0 };
 
-  constructor(agentManager: AgentManager, private now: () => number = () => Date.now()) {
+  /**
+   * `focusFloor` (issue #118 AC4, lazy render): when set, only an agent on that floor is
+   * added or kept. An agent with no `extras.floor` (an old server, or floors inactive) is
+   * treated as the shared general floor, never silently dropped. Unset (the default, and
+   * every layout that is not floor-aware): no filter, every agent shows, the old behavior.
+   */
+  constructor(agentManager: AgentManager, private now: () => number = () => Date.now(), private focusFloor?: string) {
     this.agentManager = agentManager;
   }
 
@@ -51,10 +59,15 @@ export class AgentPoller {
     return { ...this.health };
   }
 
-  /** `onHealth` runs after every finished poll, good or failed. */
-  start(intervalMs = 3000, onUpdate?: () => void, onHealth?: (health: PollHealth) => void): void {
+  /**
+   * `onHealth` runs after every finished poll, good or failed. `onAgents` (issue #118),
+   * when given, runs after every good poll with the raw, unfiltered answer: the floor
+   * switch menu needs every floor with a tracked session, not only the focused one.
+   */
+  start(intervalMs = 3000, onUpdate?: () => void, onHealth?: (health: PollHealth) => void, onAgents?: (agents: DetectedAgent[]) => void): void {
     this.onUpdate = onUpdate ?? null;
     this.onHealth = onHealth ?? null;
+    this.onAgents = onAgents ?? null;
     this.poll();
     this.intervalId = window.setInterval(() => this.poll(), intervalMs);
   }
@@ -94,7 +107,11 @@ export class AgentPoller {
   }
 
   /** The first answer always counts as a change, so an empty office replaces the loading text. */
-  private reconcile(agents: DetectedAgent[], firstAnswer = false): void {
+  private reconcile(rawAgents: DetectedAgent[], firstAnswer = false): void {
+    this.onAgents?.(rawAgents);
+    const agents = this.focusFloor === undefined
+      ? rawAgents
+      : rawAgents.filter((a) => (a.floor ?? GENERAL_FLOOR) === this.focusFloor);
     const currentIds = new Set(agents.map((a) => a.id));
     let changed = firstAnswer;
 

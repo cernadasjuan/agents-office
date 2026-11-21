@@ -7,6 +7,7 @@ import { claudeSource } from './claudeSource.js';
 import { codexSource } from './codexSource.js';
 import { attentionEnricher } from './attention.js';
 import { stuckEnricher } from './stuck.js';
+import { FloorResolver, floorEnricher } from './floor.js';
 import { isOfficePlugin, pluginEntry } from './plugins.js';
 import { describeWorld, observe, projectAgents, projectPeek, projectWorld, VIEW_NAMES, type Observation, type OfficePlugin, type OfficeView } from './seam.js';
 import { defaultAuditLogPath, WriteActions } from './actions.js';
@@ -100,13 +101,16 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
   const idKey = randomBytes(32);
   const publicId = (id: string): string => createHmac('sha256', idKey).update(id).digest('hex');
   const plugins: OfficePlugin[] = [...(settings.plugins ?? [])];
+  // One resolver for the whole server run (issue #118): its directory cache is a performance
+  // bound across polls, not state the result depends on (every poll still recomputes from disk).
+  const floorResolver = new FloorResolver();
 
   const pipeline = () => ({
     core: claudeSource(settings.detect),
     // Codex is built in but runs like a plugin source: its failure drops only its own agents.
     sources: [...(settings.codexHome === null ? [] : [codexSource(settings.codexHome)]),
       ...plugins.flatMap((plugin) => plugin.sources ?? [])],
-    enrichers: [attentionEnricher(), stuckEnricher(), ...plugins.flatMap((plugin) => plugin.enrichers ?? [])],
+    enrichers: [floorEnricher(floorResolver), attentionEnricher(), stuckEnricher(), ...plugins.flatMap((plugin) => plugin.enrichers ?? [])],
     world: plugins.flatMap((plugin) => plugin.world ?? []),
   });
 

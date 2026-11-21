@@ -41,6 +41,13 @@ export interface DisplayExtras {
   role?: string;
   /** Busy with no transcript write for STUCK_AFTER_MINUTES (src/ui/attention.ts). */
   stuck?: boolean;
+  /** The whitelisted floor name the session's working directory resolved to: a repo name, or
+   * that repo name qualified by its parent directory (`org/repo`, review: two repos that
+   * share a leaf folder name under different organizations must resolve to two different
+   * floors), or the shared `'general'` floor (issue #118, `server/floor.ts`'s built-in
+   * enricher). The projection re-validates it through its own whitelist (`floorName`, below),
+   * never trusting the enricher's own output blindly. */
+  floor?: string;
 }
 
 /** One agent as the server sees it. `internal` never leaves the server. */
@@ -263,6 +270,24 @@ function repoShortName(value: unknown): string | undefined {
 }
 
 /**
+ * A floor name (issue #118): one segment (`GENERAL_FLOOR`, a bare repo name, or the `'all'`
+ * sentinel the client never sends but a well-shaped value all the same), or two segments
+ * joined by a slash — the repo's own parent directory name, then the repo name
+ * (`server/floor.ts`'s own org-qualifying rule, review: two repos that share a leaf folder
+ * name under different organizations must resolve to two different floors). Unlike
+ * `repoShortName`, this never keeps only the text after the last slash: a malformed value
+ * with more than one slash, a `.` or `..` segment, or an over-length segment is dropped
+ * whole, not silently shortened to its tail.
+ */
+const FLOOR_SEGMENT = '[A-Za-z0-9_.-]{1,40}';
+const FLOOR_NAME = new RegExp(`^${FLOOR_SEGMENT}(?:/${FLOOR_SEGMENT})?$`);
+
+function floorName(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !FLOOR_NAME.test(value)) return undefined;
+  return value.split('/').some((segment) => segment === '.' || segment === '..') ? undefined : value;
+}
+
+/**
  * Path-like text redacted before it reaches a free-text story field (issue #160's own AC:
  * "No path ... appears anywhere on the card", review round 1 — `displayText` alone only strips
  * control characters and truncates). Catches a `file://` URL, a `~/...` home path, a POSIX
@@ -414,6 +439,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
     const issues = issueList(extras.issues, 5);
     const waitMinutes = wholeNumber(extras.waitMinutes, 100_000);
     const actions = actionList(extras.actions, enabledActions);
+    const floor = floorName(extras.floor);
     return {
       id: publicId(agent.id),
       name: displayText(agent.name, 60),
@@ -431,6 +457,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
       ...(actions ? { actions } : {}),
       ...(typeof extras.role === 'string' && BADGE.test(extras.role) ? { role: extras.role } : {}),
       ...(extras.stuck === true ? { stuck: true as const } : {}),
+      ...(floor ? { floor } : {}),
     };
   });
 }
