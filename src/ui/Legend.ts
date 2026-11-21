@@ -25,6 +25,7 @@ const SECTIONS: LegendSection[] = [
     entries: [
       { sign: 'Beacon', meaning: `An orange diamond over the head. The agent waits for you, and the wait is shorter than ${FRESH}.` },
       { sign: 'Raised hand', meaning: 'The same fresh wait. The agent asks for you now.' },
+      { sign: 'Hands on hips', meaning: 'The agent finished its own turn, but a subagent of its own is still running. Not asking for you.' },
       { sign: 'Small figure', meaning: 'A subagent. It has the color of its main agent.' },
       { sign: DONE_LABEL, meaning: 'A subagent that finished its task.' },
       { sign: 'Cards', meaning: 'GitHub issues of the agent, on the shoulders and arms. The border has the color of the issue label.', plugin: 'github' },

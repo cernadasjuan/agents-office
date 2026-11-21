@@ -52,6 +52,19 @@ test('a fresh wait calls for you: beacon, queue and tab count', () => {
   }
 });
 
+test('an orchestrating your-turn never calls for you, even with a fresh wait (issue #168)', () => {
+  const extras = { attention: 'your-turn' as const, waitMinutes: 3, orchestrating: true };
+  assert.equal(callsForYou(extras), false, 'a true block never fires: it is not blocked on you');
+  // Everything else about the fresh wait is unaffected: it still queues and still counts in the tab.
+  assert.equal(queuesForYou(extras), true);
+  assert.equal(countsInTab(extras), true);
+});
+
+test('orchestrating has no effect on a true block: "waiting" always calls for you (issue #168 AC1)', () => {
+  const extras = { attention: 'waiting' as const, waitMinutes: 3, orchestrating: true as never };
+  assert.equal(callsForYou(extras), true, 'a genuine block on Gabriel keeps the raised hand regardless');
+});
+
 test('an aging wait stays in the queue, with no beacon and no tab count', () => {
   for (const attention of ['waiting', 'your-turn'] as const) {
     const extras = { attention, waitMinutes: 120 };

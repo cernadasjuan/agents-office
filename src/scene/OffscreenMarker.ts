@@ -25,11 +25,13 @@ export interface Projection {
   behind: boolean;
   /** True when the point is ahead of the camera but farther than `camera.far`: the renderer clips it, so it draws no figure there, but it still needs a marker. Not flipped, unlike `behind`. */
   pastFar: boolean;
+  /** True when the point is ahead of the camera but closer than `camera.near`: the renderer clips it there too, and the projection math near that plane is unreliable (it can divide by a near-zero view-space z). */
+  tooClose: boolean;
 }
 
 const view = new THREE.Vector3();
 
-/** The clip-space position of a world point for `offscreenMarker`, and the behind-camera and past-far-plane flags it needs. */
+/** The clip-space position of a world point for `offscreenMarker`, and the behind-camera, past-far-plane and too-close flags it needs. */
 export function projectToClip(position: THREE.Vector3, camera: THREE.Camera): Projection {
   camera.updateMatrixWorld();
   const ndc = position.clone().project(camera);
@@ -37,9 +39,11 @@ export function projectToClip(position: THREE.Vector3, camera: THREE.Camera): Pr
   // The camera looks down its own -Z: ahead is view.z < 0, behind is view.z > 0.
   const ahead = view.z < 0;
   const behind = !ahead && (camera as THREE.PerspectiveCamera).isPerspectiveCamera === true;
+  const near = (camera as THREE.PerspectiveCamera | THREE.OrthographicCamera).near;
   const far = (camera as THREE.PerspectiveCamera | THREE.OrthographicCamera).far;
   const pastFar = ahead && -view.z > far;
-  return { ndc, behind, pastFar };
+  const tooClose = ahead && -view.z < near;
+  return { ndc, behind, pastFar, tooClose };
 }
 
 /**
