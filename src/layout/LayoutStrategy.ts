@@ -66,4 +66,6 @@ export interface LayoutStrategy {
   deskView?(): { position: THREE.Vector3; lookAt: THREE.Vector3 } | null;
   /** The room whose floor contains this world point (issue #175, double-click a room in isometric), or null between rooms. */
   roomAt?(x: number, z: number): RoomView | null;
+  /** World corners of each desk monitor's face, left then right (issue #161 review, defect 4): lets the label declutter keep queued labels clear of them in desk mode. */
+  deskMonitorCorners?(): THREE.Vector3[][];
 }

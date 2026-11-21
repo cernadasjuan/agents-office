@@ -18,7 +18,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   },
   set: () => true,
 })) as never;
-const { DeskMonitorsExtension, drawMiniBoard } = await import('../src/addons/building/deskMonitors.js');
+const { DeskMonitorsExtension, drawMiniBoard, monitorWorldCorners } = await import('../src/addons/building/deskMonitors.js');
 const { countDrawCalls } = await import('../src/scene/RenderBudget.js');
 after(() => {
   dom.window.close();
@@ -124,4 +124,19 @@ test('drawMiniBoard shows the title, up to 5 rows, and an empty message without 
   drawn.length = 0;
   drawMiniBoard(canvas, 'Waiting', [], 'Nobody is waiting');
   assert.ok(drawn.includes('Nobody is waiting'));
+});
+
+test('monitorWorldCorners returns one quad of 4 points per monitor, left then right, each a flat rectangle facing the seat (issue #161 review, defect 4)', () => {
+  const quads = monitorWorldCorners();
+  assert.equal(quads.length, 2, 'left and right monitors');
+  for (const quad of quads) {
+    assert.equal(quad.length, 4, 'a rectangle has 4 corners');
+    const ys = new Set(quad.map((p) => p.y.toFixed(6)));
+    assert.ok(ys.size <= 2, 'only a top edge and a bottom edge, so at most two distinct heights');
+  }
+  const [left, right] = quads;
+  // A rotated-but-still-vertical rectangle: the plane through all 4 points of each quad has
+  // zero area in y, i.e. two corners share each height, and the two monitors sit apart in x+z
+  // (both rotated to face the same way, so x or z differs rather than y).
+  assert.notDeepEqual(left!.map((p) => [p.x, p.z]), right!.map((p) => [p.x, p.z]), 'the two monitors sit at different world positions');
 });

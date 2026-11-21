@@ -36,6 +36,34 @@ function officeFrame(): RoomFrame {
   return new RoomFrame(slot.rect, slot.door);
 }
 
+/** Each monitor's own `a` offset (left negative, right positive): the one list `buildMonitor` and `monitorWorldCorners` both walk, so neither can drift from the other. */
+const MONITOR_A_OFFSETS = [-MONITOR_A_OFFSET, MONITOR_A_OFFSET] as const;
+
+/** Where a monitor's own group sits and faces. Pure geometry, shared by the mesh builder below and `monitorWorldCorners`. */
+function monitorPose(a: number): { position: THREE.Vector3; rotationY: number } {
+  const frame = officeFrame();
+  return { position: frame.point(a, OFFICE_DESK.d - MONITOR_D_OFFSET, MONITOR_Y), rotationY: frame.faceAway };
+}
+
+/**
+ * The world-space corners of each monitor's face, left then right (issue #161 review, defect
+ * 4): lets the label declutter keep a queued agent's label clear of them, in desk mode. Pure —
+ * no scene, no mounted group needed: the office's own slot (ring 0, index 0) is a fixed
+ * assumption the whole module already makes (the same one the Jira wall board makes for its
+ * own slot), so this needs nothing from the live scene to compute.
+ */
+export function monitorWorldCorners(): THREE.Vector3[][] {
+  return MONITOR_A_OFFSETS.map((a) => {
+    const { position, rotationY } = monitorPose(a);
+    const up = new THREE.Vector3(0, 1, 0);
+    return ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as const).map(([sx, sy]) => {
+      const local = new THREE.Vector3(sx * (MONITOR_WIDTH / 2), sy * (MONITOR_HEIGHT / 2), 0);
+      local.applyAxisAngle(up, rotationY);
+      return local.add(position);
+    });
+  });
+}
+
 function canvasEl(width: number, height: number): HTMLCanvasElement {
   const element = document.createElement('canvas');
   element.width = width;
@@ -98,11 +126,10 @@ function disposeAll(items: Array<{ dispose(): void }>): void {
 }
 
 function buildMonitor(a: number): MountedMonitor {
-  const frame = officeFrame();
-  const position = frame.point(a, OFFICE_DESK.d - MONITOR_D_OFFSET, MONITOR_Y);
+  const { position, rotationY } = monitorPose(a);
   const group = new THREE.Group();
   group.position.copy(position);
-  group.rotation.y = frame.faceAway;
+  group.rotation.y = rotationY;
 
   const bezelGeometry = new THREE.BoxGeometry(MONITOR_WIDTH + 0.04, MONITOR_HEIGHT + 0.04, 0.03);
   const bezelMaterial = getToonMaterial(Colors.monitor);

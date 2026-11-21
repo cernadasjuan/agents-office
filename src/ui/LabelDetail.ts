@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { isViewFromAbove, type ViewMode } from '../scene/Selection.js';
 import { projectToClip } from '../scene/OffscreenMarker.js';
 import { attentionBand, BEACON_HINT, callsForYou, type Wait } from './attention.js';
-import { declutterLabels, labelPriority, labelRect, type DeclutterCandidate } from './LabelDeclutter.js';
+import { boundingRect, declutterLabels, labelPriority, labelRect, obscuredByAny, type DeclutterCandidate, type Rect } from './LabelDeclutter.js';
 
 /** `smart` shows full labels only where they matter; `all` is the original behavior. */
 export type LabelMode = 'smart' | 'all';
@@ -184,6 +184,8 @@ export interface LabelDetailOptions {
   indicator?: HTMLElement | null;
   /** Where detail signs (`userData.detailSign`) live. Without it, only agent labels change. */
   scene?: THREE.Object3D;
+  /** World corners of each desk monitor's face, left then right (issue #161 review, defect 4): used only in desk mode, to keep a queued agent's label from covering one. Without it, desk mode declutters normally but protects no monitor. */
+  deskMonitorCorners?: () => THREE.Vector3[][];
   /** A room label changed (pose, face or visibility): the scene needs a new frame. */
   changed?: () => void;
   /**
@@ -252,10 +254,11 @@ export class LabelDetailController {
     const hovered = this.hoveredAgent();
     camera.getWorldPosition(this.cameraPosition);
     const canvasRect = this.options.canvas.getBoundingClientRect();
-    // Declutter only in the isometric view: first person's own queue spacing
-    // can already overlap on screen, and a waiting agent you stand near must
-    // never disappear there (review fix: PR #152).
-    const canDeclutter = view.mode === 'smart' && isViewFromAbove(view.viewMode) && canvasRect.width > 0 && canvasRect.height > 0;
+    // Declutter in the isometric view and in desk mode (issue #161 review, defect 4: the desk
+    // view's own queue can overlap the waiting-list monitor): never in first person, where the
+    // queue spacing can already overlap on screen and a waiting agent you stand near must never
+    // disappear there (review fix: PR #152).
+    const canDeclutter = view.mode === 'smart' && (isViewFromAbove(view.viewMode) || view.viewMode === 'desk') && canvasRect.width > 0 && canvasRect.height > 0;
     const agents = this.options.agents();
     // Pass 1, writes only: every label's class (full/compact) is set here, and nothing in this
     // loop reads layout (getBoundingClientRect, offsetWidth and the like). Pass 2 below reads
@@ -320,7 +323,22 @@ export class LabelDetailController {
     }
     if (canDeclutter) {
       const visible = declutterLabels(candidates);
-      for (const agent of agents) applyLabelVisibility(agent.figure.label.element, visible.has(agent.info.id));
+      // Issue #161 review, defect 4: in desk mode, a visible label that still covers a
+      // monitor's own screen rect hides anyway, unless it is the selection or the hover (the
+      // same exception `labelPriority` already gives them against a plain label-on-label
+      // overlap). The monitor itself never appears as a declutter candidate — it is not a
+      // label — so this runs as a second pass over what `declutterLabels` already kept.
+      const obstructions = view.viewMode === 'desk' ? this.monitorObstructionRects(camera, canvasRect) : [];
+      const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+      for (const agent of agents) {
+        const id = agent.info.id;
+        let show = visible.has(id);
+        if (show && obstructions.length > 0 && id !== selected && id !== hovered) {
+          const candidate = candidateById.get(id);
+          if (candidate && obscuredByAny(candidate.rect, obstructions)) show = false;
+        }
+        applyLabelVisibility(agent.figure.label.element, show);
+      }
     } else {
       // `all` mode or a zero-size canvas: show every label, nothing hides.
       for (const agent of agents) applyLabelVisibility(agent.figure.label.element, true);
@@ -431,6 +449,24 @@ export class LabelDetailController {
 
   private camera(): THREE.Camera {
     return this.options.activeCamera?.() ?? this.options.camera;
+  }
+
+  /**
+   * Each desk monitor's own screen rect (issue #161 review, defect 4), or none without the
+   * option, without a layout that supports it, or while a monitor's own corner falls off the
+   * frustum (its screen rect would not be the true one, so it protects nothing rather than a
+   * wrong one).
+   */
+  private monitorObstructionRects(camera: THREE.Camera, canvasRect: { width: number; height: number }): Rect[] {
+    const quads = this.options.deskMonitorCorners?.() ?? [];
+    const rects: Rect[] = [];
+    for (const quad of quads) {
+      const points = quad.map((corner) => projectToScreen(corner, camera, canvasRect.width, canvasRect.height));
+      if (points.some((point) => point === null)) continue;
+      const rect = boundingRect(points as Array<{ x: number; y: number }>);
+      if (rect) rects.push(rect);
+    }
+    return rects;
   }
 
   private showMode(): void {

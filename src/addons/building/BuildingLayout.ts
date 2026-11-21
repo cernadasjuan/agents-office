@@ -7,6 +7,7 @@ import type { LayoutAgent, LayoutMove, LayoutStrategy, RoomView, Seat } from '..
 import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type Rect, type RoomSlot } from './RoomPlanner.js';
 import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, type RoomKind } from './rooms.js';
 import { OFFICE_DESK } from './furnishing.js';
+import { monitorWorldCorners } from './deskMonitors.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
@@ -274,6 +275,16 @@ export class BuildingLayout implements LayoutStrategy {
     const position = frame.point(OFFICE_DESK.a, OFFICE_DESK.d + DESK_SEAT_OFFSET, DESK_EYE_HEIGHT);
     const lookAt = frame.point(OFFICE_DESK.a, OFFICE_DESK.d - DESK_LOOK_OFFSET, DESK_LOOK_EYE_HEIGHT);
     return { position, lookAt };
+  }
+
+  /**
+   * World corners of each desk monitor's face, left then right (issue #161 review, defect 4):
+   * lets the label declutter keep a queued agent's label clear of them in desk mode. Delegates
+   * to the pure geometry in `deskMonitors.ts` — the one source of where a monitor actually
+   * sits, so this can never drift from what is actually drawn there.
+   */
+  deskMonitorCorners(): THREE.Vector3[][] {
+    return monitorWorldCorners();
   }
 
   /**

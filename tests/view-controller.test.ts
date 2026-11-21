@@ -124,6 +124,59 @@ test('key H without a desk to show is a no-op (graceful degradation, no deskView
   assert.deepEqual(camera.position.toArray(), [-12, EYE_HEIGHT, 11]);
 });
 
+test('review (defect 3): H from the isometric view flies to the desk, the same short fly as from first person', () => {
+  const desk = fixtureDeskView();
+  const { view, camera, press } = setup('', undefined, undefined, { deskView: () => desk });
+  press('KeyI');
+  assert.equal(view.mode, 'isometric');
+  press('KeyH');
+  assert.equal(view.mode, 'desk');
+  // Mid-flight: not yet at the desk pose. Entering desk from isometric used to be a hard
+  // cut (the generic isometric-exit rule), even though the perspective camera itself never
+  // changed kind — only the orthographic camera stopped drawing.
+  view.update(0, 1 / 120);
+  assert.ok(camera.position.distanceTo(desk.position) > 0.01, 'still mid-flight, not an instant cut');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.ok(camera.position.distanceTo(desk.position) < 1e-6, 'lands exactly at the desk pose');
+});
+
+test('review (defect 1): typing in a form field still resets the idle clock, even though the key itself is ignored', () => {
+  const desk = fixtureDeskView();
+  const { view } = setup('', undefined, undefined, { deskView: () => desk, idleTimeoutSeconds: 5 });
+  const input = dom.window.document.createElement('input');
+  dom.window.document.body.appendChild(input);
+  for (let i = 0; i < 4 * 60; i++) view.update(i / 60, 1 / 60);
+  input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { code: 'KeyA', bubbles: true })); // typing "a" in the filter
+  for (let i = 4 * 60; i < 8 * 60; i++) view.update(i / 60, 1 / 60); // 4 more seconds: short of a fresh 5 s timeout
+  assert.equal(view.mode, 'first-person', 'typing in the filter is still camera input for the idle clock');
+  input.remove();
+});
+
+test('review (defect 2): the idle timeout never fires while a movement key is held, even with no further events', () => {
+  const desk = fixtureDeskView();
+  const { view, press } = setup('', undefined, undefined, { deskView: () => desk, idleTimeoutSeconds: 5 });
+  press('KeyW'); // one keydown, then held: a real hold sends no further discrete event
+  for (let i = 0; i < 20 * 60; i++) view.update(i / 60, 1 / 60); // far past the 5 s timeout
+  assert.equal(view.mode, 'first-person', 'a held movement key keeps the idle clock from ever firing');
+
+  dom.window.dispatchEvent(new dom.window.KeyboardEvent('keyup', { code: 'KeyW' }));
+  for (let i = 20 * 60; i < 26 * 60; i++) view.update(i / 60, 1 / 60); // past 5 s since release
+  assert.equal(view.mode, 'desk', 'the clock resumes, and fires, once the key is released');
+});
+
+test('review (defect 2): the idle timeout never fires while the pointer is locked', () => {
+  const desk = fixtureDeskView();
+  const { view, canvas } = setup('', undefined, undefined, { deskView: () => desk, idleTimeoutSeconds: 5 });
+  const document = dom.window.document;
+  Object.defineProperty(document, 'pointerLockElement', { value: canvas, configurable: true });
+  for (let i = 0; i < 20 * 60; i++) view.update(i / 60, 1 / 60); // far past the 5 s timeout, still locked
+  assert.equal(view.mode, 'first-person', 'an engaged pointer lock keeps the idle clock from ever firing');
+
+  Object.defineProperty(document, 'pointerLockElement', { value: null, configurable: true });
+  for (let i = 20 * 60; i < 26 * 60; i++) view.update(i / 60, 1 / 60); // past 5 s since the lock exited
+  assert.equal(view.mode, 'desk', 'the clock resumes, and fires, once the lock exits');
+});
+
 test('desk mode holds its pose every frame: WASD, mouse-look and gravity never move it', () => {
   const desk = fixtureDeskView();
   const { view, camera, press } = setup('', undefined, undefined, { deskView: () => desk });

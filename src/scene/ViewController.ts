@@ -16,6 +16,8 @@ const FAST_MULTIPLIER = 2.5;
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 120;
 /** A ground plane for the isometric double-click room pick (issue #175): where the ray meets `y=0`. */
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+/** Review (defect 2): held, these send no further discrete event, so the idle clock needs its own per-frame check, not just the keydown that started the hold. */
+const MOVEMENT_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 
 export const VIEW_HINTS: Record<ViewMode, string> = {
   'first-person': 'Click to look around — WASD to walk — double-tap W to run — Shift to crouch — Space to jump — ESC to release — Click a figure to select — I = isometric — H = desk — Shift+L = layout — N = next — F = focus — / = filter',
@@ -199,8 +201,11 @@ export class ViewController {
     this.currentMode = mode;
     this.isometricFlight = null;
     this.idleSeconds = 0;
-    // The camera changes kind when the isometric view starts or ends: cut, do not fly
-    const fly = animate && previous !== 'isometric' && mode !== 'isometric';
+    // The camera changes kind when the isometric view starts or ends: cut, do not fly. Desk
+    // is the one exception (review, defect 3): it is a fresh destination, never a "resume",
+    // so it always flies on entry even from isometric — the perspective camera itself never
+    // changed kind, only the isometric camera stopped drawing.
+    const fly = animate && mode !== 'isometric' && (mode === 'desk' || previous !== 'isometric');
     // Desk mode never engages pointer lock (issue #161 AC): exit it even though desk itself is not "from above".
     if (isViewFromAbove(mode) || mode === 'desk') {
       const document = this.options.canvas.ownerDocument;
@@ -278,9 +283,14 @@ export class ViewController {
     }
 
     // Idle default (issue #161): any camera input resets this in `listen()`; without one for
-    // long enough, settle into the desk view. A no-op while already there, and a no-op without
-    // a desk to show (`setMode` itself degrades gracefully).
-    this.idleSeconds += delta;
+    // long enough, settle into the desk view. Review (defect 2): a held movement key or an
+    // active pointer lock sends no further discrete event once it starts, so both count as
+    // ongoing activity every frame here too, not just on the event that started them — the
+    // clock only starts running again once the key is released or the lock exits (checked
+    // fresh each frame, so "on release" needs no separate listener). A no-op while already in
+    // desk mode, and a no-op without a desk to show (`setMode` itself degrades gracefully).
+    if (this.isContinuouslyActive()) this.idleSeconds = 0;
+    else this.idleSeconds += delta;
     if (this.idleSeconds >= this.idleTimeoutSeconds && this.currentMode !== 'desk') this.setMode('desk', true);
 
     const selected = this.selectedAgent();
@@ -310,13 +320,22 @@ export class ViewController {
     this.idleSeconds = 0;
   }
 
+  /** Review (defect 2): a held movement key or an engaged pointer lock, checked fresh every frame. */
+  private isContinuouslyActive(): boolean {
+    const { canvas } = this.options;
+    if (canvas.ownerDocument.pointerLockElement === canvas) return true;
+    return MOVEMENT_KEYS.some((code) => this.panKeys.has(code));
+  }
+
   private listen(): void {
     const { canvas, keys } = this.options;
     const document = canvas.ownerDocument;
 
     keys.addEventListener('keydown', (event: KeyboardEvent) => {
-      if (isFormField(event.target)) return;
+      // Review (defect 1): typing in the triage filter is still camera input for the idle
+      // clock, even though the filter keeps the key itself from reaching I/H/Esc/panKeys below.
       this.markActive();
+      if (isFormField(event.target)) return;
       if (event.code === 'KeyI') this.toggleIsometric();
       else if (event.code === 'KeyH') this.toggleDesk();
       else if (event.code === 'Escape') this.selection.clear();

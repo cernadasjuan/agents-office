@@ -165,6 +165,7 @@ const labelDetail = new LabelDetailController({
   keys: window,
   viewMode: () => view.mode,
   zoomDistance: () => view.zoomDistance,
+  deskMonitorCorners: () => layout.deskMonitorCorners?.() ?? [],
   pick: (x, y) => view.pickAt(x, y),
   selected: () => selectedAgentId(),
   hash: window.location.hash,

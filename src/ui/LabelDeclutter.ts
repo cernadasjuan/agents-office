@@ -69,8 +69,21 @@ export interface DeclutterCandidate {
   waitMinutes: number;
 }
 
-function overlaps(a: Rect, b: Rect): boolean {
+export function overlaps(a: Rect, b: Rect): boolean {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+/** The bounding `Rect` of a set of screen points, or null without any (issue #161 review, defect 4: a monitor whose corners did not all project onto the screen protects nothing). */
+export function boundingRect(points: Array<{ x: number; y: number }>): Rect | null {
+  if (points.length === 0) return null;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
+}
+
+/** True when `rect` overlaps any of `obstructions` (issue #161 review, defect 4). */
+export function obscuredByAny(rect: Rect, obstructions: Rect[]): boolean {
+  return obstructions.some((obstruction) => overlaps(obstruction, rect));
 }
 
 /**

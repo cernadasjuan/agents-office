@@ -390,7 +390,7 @@ function hiddenIds(agents: LabelAgent[]): string[] {
   return agents.filter((a) => a.figure.label.element.style.visibility === 'hidden').map((a) => a.info.id);
 }
 
-function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'isometric'; zoom?: number } = {}) {
+function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'isometric' | 'desk'; zoom?: number; deskMonitorCorners?: () => THREE.Vector3[][]; picked?: string | null } = {}) {
   const document = dom.window.document;
   const canvas = document.createElement('canvas');
   document.body.appendChild(canvas);
@@ -401,7 +401,7 @@ function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'i
   camera.lookAt(0, 1, 0);
   camera.updateMatrixWorld();
   const agents: LabelAgent[] = [];
-  const state = { viewMode: options.viewMode ?? 'isometric', zoom: options.zoom ?? 0, selected: null as string | null, picked: null as string | null };
+  const state = { viewMode: options.viewMode ?? 'isometric', zoom: options.zoom ?? 0, selected: null as string | null, picked: (options.picked ?? null) as string | null };
   const controller = new LabelDetailController({
     agents: () => agents,
     camera,
@@ -412,8 +412,19 @@ function declutterSetup(options: { hash?: string; viewMode?: 'first-person' | 'i
     pick: () => state.picked,
     selected: () => state.selected,
     hash: options.hash,
+    deskMonitorCorners: options.deskMonitorCorners,
   });
   return { controller, agents, state, canvas, camera };
+}
+
+/** A square quad in front of the test camera, centered at `(x, y, 0)`, half-width `half` (issue #161 review, defect 4). */
+function monitorQuad(x: number, y: number, half = 1): THREE.Vector3[] {
+  return [
+    new THREE.Vector3(x - half, y - half, 0),
+    new THREE.Vector3(x + half, y - half, 0),
+    new THREE.Vector3(x + half, y + half, 0),
+    new THREE.Vector3(x - half, y + half, 0),
+  ];
 }
 
 test('declutter: a waiting agent overlapping a plain working one keeps the wait visible, hides the other', () => {
@@ -472,6 +483,64 @@ test('declutter: runs in the isometric view too (review fix)', () => {
   controller.update(0);
   controller.refresh();
   assert.deepEqual(hiddenIds(agents), ['working']);
+});
+
+// --- Issue #161 review, defect 4: desk mode declutters too, and keeps the desk monitors clear ---
+
+test('declutter: runs in desk mode too, not just isometric', () => {
+  const { controller, agents } = declutterSetup({ viewMode: 'desk' });
+  agents.push(agent('working', 0), agent('aging-wait', 0, 'waiting', false, 60));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['working'], 'desk mode now declutters overlapping labels the same as isometric');
+});
+
+test('declutter: in desk mode, a label covering a monitor hides even with a clear screen spot of its own', () => {
+  // The lone agent would normally survive (its own test above, "a clear screen spot"):
+  // nothing else overlaps it. A monitor sitting at the same screen spot still hides it.
+  const { controller, agents } = declutterSetup({ viewMode: 'desk', deskMonitorCorners: () => [monitorQuad(0, 2.1)] });
+  agents.push(agent('alone', 0));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), ['alone'], 'the label sits on top of the monitor, so it hides despite having the screen to itself');
+});
+
+test('declutter: in desk mode, a label clear of every monitor stays visible', () => {
+  const { controller, agents } = declutterSetup({ viewMode: 'desk', deskMonitorCorners: () => [monitorQuad(0, 2.1)] });
+  agents.push(agent('far-away', -8));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), [], 'this agent projects well clear of the monitor rect');
+});
+
+test('declutter: in desk mode, the selected agent stays visible even covering a monitor', () => {
+  const { controller, agents, state } = declutterSetup({ viewMode: 'desk', deskMonitorCorners: () => [monitorQuad(0, 2.1)] });
+  agents.push(agent('selected-one', 0));
+  state.selected = 'selected-one';
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), [], 'selected wins over the monitor obstruction, the same exception label-on-label overlap already gives it');
+});
+
+test('declutter: a monitor with a corner off the frustum protects nothing (never a wrong rect)', () => {
+  // A corner far behind the camera: `projectToScreen` returns null for it, so the whole quad
+  // is skipped rather than building a screen rect from the three corners that did project.
+  const { controller, agents } = declutterSetup({
+    viewMode: 'desk',
+    deskMonitorCorners: () => [[new THREE.Vector3(-1, 1, 0), new THREE.Vector3(1, 1, 0), new THREE.Vector3(1, -1, 0), new THREE.Vector3(-1, -1, -1000)]],
+  });
+  agents.push(agent('alone', 0));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), [], 'an off-frustum monitor corner means no obstruction rect, not a wrong one');
+});
+
+test('declutter: without a deskMonitorCorners option at all, desk mode still declutters, just protects no monitor', () => {
+  const { controller, agents } = declutterSetup({ viewMode: 'desk' });
+  agents.push(agent('alone', 0));
+  controller.update(0);
+  controller.refresh();
+  assert.deepEqual(hiddenIds(agents), [], 'no monitors to protect, so nothing new hides');
 });
 
 test('declutter: a long name\'s real rendered width can overlap a neighbor the fixed estimate alone would miss (review fix)', () => {
