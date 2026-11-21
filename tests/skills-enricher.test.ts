@@ -100,6 +100,28 @@ test('skill text in a prompt or an answer never counts, only a real tool_use blo
   });
 });
 
+test('past MAX_SKILLS distinct skills, display.skills keeps the most recent 8, not the first 8 (issue #167 round 2 review)', async () => {
+  // 9 distinct skills: on the old `.slice(0, MAX_SKILLS)` code this kept skills 1-8 and
+  // dropped skill 9 — the truly newest skill — because `agent.display.skills` starts `{}`
+  // every poll (`server/claudeSource.ts`'s `toObservation`), so "existing" is always empty
+  // and the cap always truncated from the front of the session's full history instead of
+  // the back. The equipment catalog's hand item reads `skills[skills.length - 1]` as the
+  // newest; a session with more than 8 distinct skills (routine for Gabriel) would freeze
+  // on day one under the old code.
+  const skills = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
+  await withTranscript(
+    skills.map((skill) => toolUseLine([{ name: 'Skill', input: { skill } }])),
+    async (transcriptPath) => {
+      const enricher = createSkillsEnricher();
+      const agents = [observation('a', transcriptPath)];
+      await enricher.enrich(agents);
+      assert.deepEqual(agents[0].display.skills, ['b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']);
+      const skillsSeen = agents[0].display.skills!;
+      assert.equal(skillsSeen[skillsSeen.length - 1], 'i', 'the 9th, truly newest skill must still be "newest"');
+    },
+  );
+});
+
 test('a later poll only reads the bytes added since the last one, and keeps accumulating across polls', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'skills-enricher-'));
   const transcriptPath = path.join(dir, 'session.jsonl');

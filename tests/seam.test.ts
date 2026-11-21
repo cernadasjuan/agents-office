@@ -70,6 +70,14 @@ test('tools keeps only allow-listed tool names, dropping anything else (issue #1
   assert.deepEqual(agent.tools, ['Bash', 'Read']);
 });
 
+test('skills past the 8-entry cap keeps the most recent 8, not the first 8 (issue #167 round 2 review: defense in depth against an enricher that forgets to pre-cap)', () => {
+  const [agent] = projectAgents([observation({
+    display: { skills: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] },
+  })], publicId);
+
+  assert.deepEqual(agent.skills, ['b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']);
+});
+
 test('lastEquipSource projects only "skill" or "tool", dropping any other value (issue #167 round 2)', () => {
   const [skill] = projectAgents([observation({ display: { lastEquipSource: 'skill' } })], publicId);
   assert.equal(skill.lastEquipSource, 'skill');

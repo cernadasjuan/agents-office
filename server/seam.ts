@@ -498,11 +498,15 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
   return observations.map((agent) => {
     const extras = agent.display ?? {};
     const badges = Array.isArray(extras.badges) ? extras.badges.filter((b) => BADGE.test(b)).slice(0, 6) : [];
+    // Capped from the end, not the start (review, issue #167 round 2): `skills`/`tools` are
+    // newest-last (the equipment catalog's hand item reads the last entry as "newest"). The
+    // enricher (`plugins/skills/index.ts`) already caps to the same size, so this is normally
+    // a no-op; it only matters as defense in depth against a future enricher that forgets to.
     const skills = Array.isArray(extras.skills)
-      ? extras.skills.filter((s): s is string => typeof s === 'string' && SKILL.test(s)).slice(0, 8)
+      ? extras.skills.filter((s): s is string => typeof s === 'string' && SKILL.test(s)).slice(-8)
       : [];
     const tools = Array.isArray(extras.tools)
-      ? extras.tools.filter((t): t is string => typeof t === 'string' && TOOL_ALLOWLIST.has(t)).slice(0, TOOL_ALLOWLIST.size)
+      ? extras.tools.filter((t): t is string => typeof t === 'string' && TOOL_ALLOWLIST.has(t)).slice(-TOOL_ALLOWLIST.size)
       : [];
     const lastEquipSource = extras.lastEquipSource === 'skill' || extras.lastEquipSource === 'tool' ? extras.lastEquipSource : undefined;
     const issues = issueList(extras.issues, 5);

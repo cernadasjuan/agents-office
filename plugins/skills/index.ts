@@ -15,6 +15,16 @@ import type { Enricher, Observation, OfficePlugin } from '../../server/seam.js';
  * assistant text.
  */
 
+/**
+ * Review (issue #167 round 2): `display.skills`/`display.tools` are rebuilt from an empty
+ * `agent.display` every poll (`server/claudeSource.ts`'s `toObservation` always starts it at
+ * `{}`), so the "combine with existing, then cap" below used to always cap a session's FULL
+ * skill history from the front (`.slice(0, MAX_SKILLS)`), keeping the first 8 skills ever used
+ * and freezing there forever once a session passed 8 distinct skills — the exact "newest"
+ * entry the equipment catalog's hand item depends on would silently go stale. Capping from the
+ * end (`.slice(-MAX_SKILLS)`) keeps the most recent `MAX_SKILLS` instead, in the same
+ * newest-last order, so the hand item never freezes on a session that outgrows the cap.
+ */
 const MAX_SKILLS = 8;
 const READ_CHUNK = 256 * 1024;
 const MAX_BYTES_PER_POLL = 4 * 1024 * 1024;
@@ -140,11 +150,11 @@ export function createSkillsEnricher(): Enricher {
         cache.set(transcriptPath, state);
         if (state.skills.length > 0) {
           const existing = Array.isArray(agent.display.skills) ? agent.display.skills : [];
-          agent.display.skills = [...existing, ...state.skills.filter((skill) => !existing.includes(skill))].slice(0, MAX_SKILLS);
+          agent.display.skills = [...existing, ...state.skills.filter((skill) => !existing.includes(skill))].slice(-MAX_SKILLS);
         }
         if (state.tools.length > 0) {
           const existing = Array.isArray(agent.display.tools) ? agent.display.tools : [];
-          agent.display.tools = [...existing, ...state.tools.filter((tool) => !existing.includes(tool))].slice(0, MAX_TOOLS);
+          agent.display.tools = [...existing, ...state.tools.filter((tool) => !existing.includes(tool))].slice(-MAX_TOOLS);
         }
         if (state.lastKind) agent.display.lastEquipSource = state.lastKind;
       }
