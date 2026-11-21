@@ -378,11 +378,20 @@ interface AgentRoleInfo {
  * scene's own library room (issue #128) already shows the rest. Never a dead loop without a
  * document: on fetch failure, the existing figures simply stay as they were until the next
  * successful poll, the same graceful-degradation rule the shelves themselves follow.
+ *
+ * Review: each live agent now keeps a stable row *slot* (0..MAX_LIBRARIAN_FIGURES-1), not the
+ * index it happens to land at within the current filtered list — a departure used to leave a
+ * hole that the next poll's `index` then reused for a different arriving agent, placing two
+ * figures at the exact same `CORNER_X + 1 + index * LIBRARIAN_SLOT_GAP` spot. And a poll that
+ * actually changes who is seated now tells the camera rig a frame is due (`markDirty`):
+ * `frame()`'s own render gate (`rig.dirty || rig.isActive()`) never saw this interval's own
+ * mutations otherwise, so an arriving or departing librarian stayed invisible until the next
+ * unrelated render (a look, a walk, a resize).
  */
-class LibrarianDesk {
-  private figures = new Map<string, StickFigure>();
+export class LibrarianDesk {
+  private figures = new Map<string, { figure: StickFigure; slot: number }>();
 
-  constructor(private readonly scene: THREE.Scene) {}
+  constructor(private readonly scene: THREE.Scene, private readonly markDirty: () => void) {}
 
   get count(): number {
     return this.figures.size;
@@ -393,30 +402,40 @@ class LibrarianDesk {
     try {
       const response = await fetch('/api/agents', { signal: AbortSignal.timeout(5000) });
       if (!response.ok) return;
-      agents = (await response.json()) as AgentRoleInfo[];
+      const body: unknown = await response.json();
+      if (!Array.isArray(body)) return;
+      agents = body.filter((agent): agent is AgentRoleInfo =>
+        Boolean(agent) && typeof agent === 'object' && typeof (agent as AgentRoleInfo).id === 'string');
     } catch {
       return;
     }
     const librarians = agents.filter((agent) => agent.role === 'librarian').slice(0, MAX_LIBRARIAN_FIGURES);
     const seen = new Set(librarians.map((agent) => agent.id));
-    for (const [id, figure] of this.figures) {
-      if (!seen.has(id)) {
-        figure.group.removeFromParent();
-        this.figures.delete(id);
-      }
+    let changed = false;
+    const freeSlots = new Set(Array.from({ length: MAX_LIBRARIAN_FIGURES }, (_, i) => i));
+    for (const [id, { figure, slot }] of this.figures) {
+      if (seen.has(id)) { freeSlots.delete(slot); continue; }
+      figure.group.removeFromParent();
+      this.figures.delete(id);
+      changed = true;
     }
-    librarians.forEach((agent, index) => {
-      if (this.figures.has(agent.id)) return;
+    for (const agent of librarians) {
+      if (this.figures.has(agent.id)) continue;
+      const slot = freeSlots.values().next().value;
+      if (slot === undefined) continue; // every slot already claimed this poll (should not happen: capped above)
+      freeSlots.delete(slot);
       // Its own name (issue #248 review: a figure named after its own public id read as an
       // opaque hash on the floating label, not as a real session) and a color distinct from
       // the NPC's own, so the real agent and Prospero himself are never visually the same
       // figure twice over.
       const figure = new StickFigure(agent.name, new THREE.Color(LIBRARIAN_AGENT_COLOR));
-      const position = new THREE.Vector3(CORNER_X + 1 + index * LIBRARIAN_SLOT_GAP, 0, CORNER_Z);
+      const position = new THREE.Vector3(CORNER_X + 1 + slot * LIBRARIAN_SLOT_GAP, 0, CORNER_Z);
       figure.teleportTo(position, new THREE.Vector3(CORNER_X, 0, CORNER_Z - 2));
       this.scene.add(figure.group);
-      this.figures.set(agent.id, figure);
-    });
+      this.figures.set(agent.id, { figure, slot });
+      changed = true;
+    }
+    if (changed) this.markDirty();
   }
 }
 
@@ -572,14 +591,19 @@ export async function bootLibraryScene(): Promise<void> {
   // The librarian (issue #248): "doesn't do much... maybe he shows you the catalog" — a click
   // teleports back to the entrance (where the wall index always lives) and gives it a brief
   // highlight, rather than opening a second copy of the same list in a new kind of card.
-  buildLibrarianCorner(scene, () => {
-    rig.teleport(ENTRANCE_STANDING);
-    indexList.classList.add('library-index-highlight');
-    window.setTimeout(() => indexList.classList.remove('library-index-highlight'), 1200);
-  });
-  const librarianDesk = new LibrarianDesk(scene);
-  void librarianDesk.poll();
-  window.setInterval(() => void librarianDesk.poll(), 5000);
+  // Review: gated on an actual configured library, same as every other piece this scene builds
+  // off `libraryId` — without one there is no catalog for Prospero to show and no librarian
+  // row worth polling `/api/agents` for every 5 seconds forever.
+  const librarianDesk = new LibrarianDesk(scene, () => { rig.dirty = true; });
+  if (libraryId !== undefined) {
+    buildLibrarianCorner(scene, () => {
+      rig.teleport(ENTRANCE_STANDING);
+      indexList.classList.add('library-index-highlight');
+      window.setTimeout(() => indexList.classList.remove('library-index-highlight'), 1200);
+    });
+    void librarianDesk.poll();
+    window.setInterval(() => void librarianDesk.poll(), 5000);
+  }
 
   new StaticBatch(scene).update();
 
