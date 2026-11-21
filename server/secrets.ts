@@ -98,15 +98,39 @@ export function cutBeforePlaceholder(text: string, max: number): string {
 }
 
 /**
+ * Keeps the END of `text`, not the start (issue #81 review: a speech bubble shows "the last
+ * few words", not the opening sentence `cutBeforePlaceholder` was built for). Cuts at a word
+ * boundary and marks the cut with a leading ellipsis, the ellipsis itself counted in `max`.
+ * Never shows a mask placeholder split in half: a `]` with no matching `[` before it (the
+ * tail end of a placeholder like `[secret]`) drops along with the rest of that word, the same
+ * "never show part of a token" rule `cutBeforePlaceholder` keeps.
+ */
+export function lastWords(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const ELLIPSIS = '…';
+  let tail = text.slice(text.length - Math.max(1, max - ELLIPSIS.length));
+  const space = tail.indexOf(' ');
+  if (space >= 0 && space < tail.length - 1) tail = tail.slice(space + 1);
+  const close = tail.indexOf(']');
+  if (close >= 0 && tail.indexOf('[') === -1) {
+    const next = tail.indexOf(' ', close);
+    tail = next >= 0 ? tail.slice(next + 1) : '';
+  }
+  return tail.length > 0 ? `${ELLIPSIS}${tail}` : ELLIPSIS;
+}
+
+/**
  * One display line of at most `max` characters: white space and control
  * characters collapse first (newlines kept for the multi-line rules), then the
  * raw cut, then the mask, then the display cut. A cut never shows part of a token.
+ * `cut` picks which end to keep: the default `cutBeforePlaceholder` keeps the start;
+ * `lastWords` keeps the end (issue #81's bubbles).
  */
-export function maskedLine(value: unknown, max: number): string {
+export function maskedLine(value: unknown, max: number, cut: (text: string, max: number) => string = cutBeforePlaceholder): string {
   const raw = String(value ?? '')
     .replace(/[\s\u0000-\u001f\u007f]*\n[\s\u0000-\u001f\u007f]*/g, '\n')
     .replace(/[\t\v\f\r \u0000-\u0009\u000b-\u001f\u007f]+/g, ' ')
     .slice(0, MAX_RAW);
   const masked = maskSecrets(raw).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
-  return cutBeforePlaceholder(masked, max);
+  return cut(masked, max);
 }

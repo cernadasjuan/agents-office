@@ -86,6 +86,59 @@ test('with peek on, the card shows the pinned question, Recent, Assets and Equip
   for (const item of ['tdd', 'crit:crit', 'amelia', 'agents-office']) assert.ok(equipment.includes(item), item);
 });
 
+test('AC5: "Show 100 lines" asks with &lines=100, stays in tail mode, and the button goes away', async (t) => {
+  const { calls, fetchFn } = fakeFetch({ [alpha.id]: peekBody });
+  const { card, selection, root } = setup(t, new PeekPanel({ fetch: fetchFn, isOn: () => true }));
+  card.render([alpha]);
+  selection.select(alpha.id);
+  await flush();
+  const button = () => root().querySelector<HTMLButtonElement>('.peek-tail-button');
+  assert.equal(button()?.textContent, 'Show 100 lines');
+  button()!.click();
+  await flush();
+  assert.deepEqual(calls, [`${PEEK_URL}?agent=${alpha.id}`, `${PEEK_URL}?agent=${alpha.id}&lines=100`]);
+  assert.equal(button(), null, 'the button is gone once tail mode is on');
+  assert.equal(root().querySelector('.peek-recent h4')?.textContent, 'Recent (last 100)');
+});
+
+test('review: a short-view poll that resolves after "Show 100 lines" never overwrites the tail', async (t) => {
+  // Two deferred replies: the short one (in flight when the user clicks) resolves LAST, the
+  // tail one resolves first — the exact race the review found: "the normal 10-line request
+  // resolves after the 100-line one".
+  const pending = new Map<string, { resolve: (body: unknown) => void }>();
+  const calls: string[] = [];
+  const fetchFn = (url: string) => {
+    calls.push(url);
+    return new Promise((resolve) => {
+      pending.set(url, { resolve: (body: unknown) => resolve({ ok: true, status: 200, json: async () => body }) });
+    });
+  };
+  const { card, selection, root } = setup(t, new PeekPanel({ fetch: fetchFn as never, isOn: () => true }));
+  card.render([alpha]);
+  selection.select(alpha.id);
+  await flush();
+  const shortUrl = `${PEEK_URL}?agent=${alpha.id}`;
+  assert.deepEqual(calls, [shortUrl], 'the initial short request is in flight');
+
+  const button = () => root().querySelector<HTMLButtonElement>('.peek-tail-button');
+  button()!.click(); // fires the tail request while the short one is still unresolved
+  await flush();
+  const tailUrl = `${PEEK_URL}?agent=${alpha.id}&lines=100`;
+  assert.deepEqual(calls, [shortUrl, tailUrl]);
+
+  // The tail request resolves first...
+  pending.get(tailUrl)!.resolve({ ...peekBody, lines: Array.from({ length: 100 }, (_, i) => ({ kind: 'text', text: `line ${i}` })) });
+  await flush();
+  assert.equal(root().querySelector('.peek-recent h4')?.textContent, 'Recent (last 100)');
+  assert.equal(root().querySelectorAll('.peek-recent li').length, 100);
+
+  // ...then the older short request finally resolves. It must never overwrite the tail view.
+  pending.get(shortUrl)!.resolve(peekBody);
+  await flush();
+  assert.equal(root().querySelector('.peek-recent h4')?.textContent, 'Recent (last 100)', 'the stale short reply did not win the race');
+  assert.equal(root().querySelectorAll('.peek-recent li').length, 100);
+});
+
 test('with peek off, the card has no peek sections and sends no request', async (t) => {
   const { calls, fetchFn } = fakeFetch({ [alpha.id]: peekBody });
   const { card, selection, root } = setup(t, new PeekPanel({ fetch: fetchFn, isOn: () => false }));

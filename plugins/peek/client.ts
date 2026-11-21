@@ -1,6 +1,9 @@
 import type { AgentInfo } from '../../src/agents/AgentData.js';
 import { currentWorld } from '../../src/extensions.js';
 import { registerCardPanel, type CardPanel } from '../../src/ui/AgentCard.js';
+// Speech bubbles and the live tail's scene part (issue #81): a separate module, registered as
+// its own extension, but bundled here since the plugin loader only globs `client.ts`.
+import './bubbles.js';
 
 /**
  * Browser part of the peek plugin. It adds three sections to the agent card:
@@ -13,6 +16,8 @@ import { registerCardPanel, type CardPanel } from '../../src/ui/AgentCard.js';
 
 export const PEEK_URL = '/api/views/peek';
 export const PEEK_REFRESH_MS = 5000;
+/** AC5's tail: "Show 100 lines" asks for this many instead of the default 10. */
+export const PEEK_TAIL_LINES = 100;
 
 export interface PeekReply { ok: boolean; status: number; json(): Promise<unknown> }
 export type PeekFetch = (url: string) => Promise<PeekReply>;
@@ -69,6 +74,15 @@ export class PeekPanel implements CardPanel {
   private inFlightFor: string | null = null;
   private drawnKey = '';
   private textHidden = false;
+  /** AC5: "Show 100 lines" was pressed for the agent currently shown. Resets on agent switch. */
+  private tailMode = false;
+  /** Review: `showTail()` fires a load without waiting for an in-flight one to finish (the
+   * normal throttle is for "nothing changed yet", not for a request the user just asked for),
+   * so two requests for the same agent can race. Each `load()` call tags itself with the next
+   * number; a reply only applies if it is still the newest one asked for, so an older,
+   * slower reply (for example the short view's own scheduled poll) never overwrites a newer
+   * one still in flight (for example "Show 100 lines"). */
+  private requestSeq = 0;
   private timer: unknown = null;
   private readonly now: () => number;
   private readonly setTimer: (run: () => void, ms: number) => unknown;
@@ -97,6 +111,7 @@ export class PeekPanel implements CardPanel {
       this.data = null;
       this.failed = false;
       this.fetchedAt = -Infinity;
+      this.tailMode = false;
     }
     this.draw();
     if (this.inFlightFor === agent.id) return;
@@ -134,12 +149,24 @@ export class PeekPanel implements CardPanel {
     this.applyTextHidden();
   }
 
+  /** AC5: "Show 100 lines" was pressed. Loads at once (the normal throttle is for "nothing
+   * changed yet", not for a request the user just asked for) and stays in tail mode for this
+   * agent until the card switches to another one. */
+  private showTail(): void {
+    if (this.tailMode) return;
+    this.tailMode = true;
+    this.fetchedAt = -Infinity;
+    if (this.agentId !== null) void this.load(this.agentId);
+  }
+
   private async load(agentId: string): Promise<void> {
+    const seq = ++this.requestSeq;
     this.inFlightFor = agentId;
     this.fetchedAt = this.now();
+    const lines = this.tailMode ? `&lines=${PEEK_TAIL_LINES}` : '';
     let data: PeekData | null = null;
     try {
-      const reply = await this.options.fetch(`${PEEK_URL}?agent=${encodeURIComponent(agentId)}`);
+      const reply = await this.options.fetch(`${PEEK_URL}?agent=${encodeURIComponent(agentId)}${lines}`);
       if (reply.ok) data = parse(await reply.json());
     } catch (error) {
       console.debug('peek request failed', error);
@@ -147,6 +174,9 @@ export class PeekPanel implements CardPanel {
       if (this.inFlightFor === agentId) this.inFlightFor = null;
     }
     if (agentId !== this.agentId) return;
+    // A newer request for this agent (for example "Show 100 lines") already started: this
+    // reply is stale, whatever it answers, and must never overwrite what the newer one finds.
+    if (seq !== this.requestSeq) return;
     this.data = data;
     this.failed = data === null;
     this.draw();
@@ -158,7 +188,7 @@ export class PeekPanel implements CardPanel {
     const root = this.root;
     const agent = this.agent;
     if (!root || !agent) return;
-    const key = JSON.stringify([agent.id, agent.extras?.badges, this.data, this.failed]);
+    const key = JSON.stringify([agent.id, agent.extras?.badges, this.data, this.failed, this.tailMode]);
     if (key === this.drawnKey && root.childElementCount > 0) return;
     this.drawnKey = key;
     const doc = root.ownerDocument;
@@ -180,15 +210,22 @@ export class PeekPanel implements CardPanel {
     question.hidden = !data?.question;
     question.dataset.empty = data?.question ? 'false' : 'true';
 
-    const recent = section('peek-recent', 'Recent');
+    const recent = section('peek-recent', this.tailMode ? 'Recent (last 100)' : 'Recent');
     if (!data) {
       recent.appendChild(el('p', '', this.failed ? 'Recent lines are not available' : 'Loading recent lines…'));
     } else if (data.lines.length === 0) {
       recent.appendChild(el('p', '', 'No recent lines'));
     } else {
-      const list = el('ul');
+      const list = el('ul', 'peek-tail-list');
       for (const line of data.lines) list.appendChild(el('li', line.kind === 'tool' ? 'peek-tool' : 'peek-text', line.text));
       recent.appendChild(list);
+    }
+    // AC5: the live 100-line tail, one button, never on while already in tail mode.
+    if (!this.tailMode) {
+      const button = el('button', 'peek-tail-button', 'Show 100 lines') as HTMLButtonElement;
+      button.type = 'button';
+      button.addEventListener('click', () => this.showTail());
+      recent.appendChild(button);
     }
 
     const assets = section('peek-assets', 'Assets');

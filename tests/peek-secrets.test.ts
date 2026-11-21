@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cutBeforePlaceholder, maskedLine, maskSecrets } from '../server/secrets.js';
-import { projectPeek } from '../server/seam.js';
+import { cutBeforePlaceholder, lastWords, maskedLine, maskSecrets } from '../server/secrets.js';
+import { projectBubble, projectPeek } from '../server/seam.js';
 
 // Every token below is fake: the right shape, random filler, never a real credential.
 const FAKE = {
@@ -122,6 +122,39 @@ test('the display cut never cuts a placeholder in half', () => {
   }
   assert.equal(cutBeforePlaceholder('abc [secret]', 7), 'abc');
   assert.equal(cutBeforePlaceholder('abc [x] def', 7), 'abc [x]');
+});
+
+test('lastWords (issue #81 review): keeps the end, not the start, cut at a word boundary with a leading ellipsis', () => {
+  const text = 'the opening sentence goes on for a while before THE ACTUAL LAST WORDS appear';
+  const cut = lastWords(text, 30);
+  assert.ok(cut.length <= 30, cut);
+  assert.ok(cut.startsWith('…'), cut);
+  assert.ok(cut.endsWith('THE ACTUAL LAST WORDS appear'), cut);
+  assert.equal(cut.includes('opening sentence'), false, cut);
+});
+
+test('lastWords: text already within the limit is returned unchanged, no ellipsis added', () => {
+  assert.equal(lastWords('short', 40), 'short');
+  assert.equal(lastWords('exactly forty characters long, no more!', 40), 'exactly forty characters long, no more!');
+});
+
+test('lastWords: a cut that would split a mask placeholder in half drops the fragment, not half a token', () => {
+  const text = `some words before the token ghp_${'a'.repeat(40)} and some words after`;
+  const masked = maskSecrets(text);
+  assert.ok(masked.includes('[secret]'));
+  const cut = lastWords(masked, 20);
+  assert.doesNotMatch(cut, /^…?[a-z]*\]/, cut);
+  assert.equal(cut.includes('ecret]'), false, cut);
+});
+
+test('projectBubble keeps the last words for a text bubble, masked, within the 40-character cap', () => {
+  const token = 'ghp_' + 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8';
+  const bubble = projectBubble({ kind: 'text', text: `opening words then a token ${token} then THE LAST WORDS HERE` });
+  assert.ok(bubble);
+  assert.ok(bubble!.text.length <= 40, bubble!.text);
+  assert.ok(bubble!.text.endsWith('THE LAST WORDS HERE'), bubble!.text);
+  assert.equal(bubble!.text.includes(token), false);
+  assert.equal(bubble!.text.includes('opening words'), false);
 });
 
 test('projectPeek masks again and keeps only https assets without credentials', () => {

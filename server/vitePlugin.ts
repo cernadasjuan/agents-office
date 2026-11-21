@@ -9,7 +9,7 @@ import { attentionEnricher } from './attention.js';
 import { stuckEnricher } from './stuck.js';
 import { FloorResolver, floorEnricher } from './floor.js';
 import { isOfficePlugin, pluginEntry } from './plugins.js';
-import { describeWorld, observe, projectAgents, projectPeek, projectWorld, VIEW_NAMES, type Observation, type OfficePlugin, type OfficeView } from './seam.js';
+import { describeWorld, observe, projectAgents, projectBubble, projectPeek, projectWorld, VIEW_NAMES, type BubbleSource, type Observation, type OfficePlugin, type OfficeView } from './seam.js';
 import { defaultAuditLogPath, WriteActions } from './actions.js';
 import { portraitPathFrom, readPortrait } from './portrait.js';
 
@@ -149,7 +149,10 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
       for (const view of plugins.flatMap((plugin) => plugin.views ?? [])) {
         if ((VIEW_NAMES as readonly string[]).includes(view.name) && !views.has(view.name)) views.set(view.name, view);
       }
-      const remembersAgents = writeActions !== undefined || views.size > 0;
+      // The bubble source (issue #81): at most one, the first plugin that offers it, the same
+      // "first wins" rule `views` uses per name.
+      const bubbleSource = plugins.map((plugin) => plugin.bubbles).find((source): source is BubbleSource => source !== undefined);
+      const remembersAgents = writeActions !== undefined || views.size > 0 || bubbleSource !== undefined;
 
       if (writeActions) {
         server.middlewares.use((_req, res, next) => {
@@ -196,7 +199,9 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
         }
       });
 
-      // GET /api/views/<name>?agent=<public id>. Mounted always, so a missing view is a plain 404.
+      // GET /api/views/<name>?agent=<public id>[&lines=N]. Mounted always, so a missing view is
+      // a plain 404. `lines` (issue #81 AC5): the card's "Show 100 lines" tail; a missing or
+      // out-of-range value falls back to the view's own default inside `projectPeek`.
       server.middlewares.use('/api/views', async (req, res) => {
         if (!admit(server, req, res)) return;
         const url = new URL(req.url ?? '/', 'http://local');
@@ -210,12 +215,39 @@ export function agentDetectorPlugin(options: AgentDetectorOptions | (() => Detec
         }
         const agent = agentsByPublicId.get(agentId);
         if (!agent) return notFound(res);
+        // Absent stays `undefined`, so both `view.read` and `projectPeek` fall back to their own
+        // default (10) through their own default parameter, rather than a route-level guess.
+        const linesParam = url.searchParams.get('lines');
+        const requestedLines = linesParam === null ? undefined : Number(linesParam);
         try {
-          res.end(JSON.stringify(projectPeek(await view.read(agent))));
+          res.end(JSON.stringify(projectPeek(await view.read(agent, requestedLines), requestedLines)));
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: 'Unable to read the view' }));
         }
+      });
+
+      // GET /api/bubbles: every known agent's speech-bubble event, keyed by public id (issue
+      // #81). Mounted always; without a loaded bubble source it answers 404, the same shape as
+      // a missing view, so the client treats "plugin off" as one case, no error (AC6). A single
+      // agent's read failing drops only that agent's entry, the same isolation `/api/agents`
+      // gives a failing enricher.
+      server.middlewares.use('/api/bubbles', async (req, res) => {
+        if (!admit(server, req, res)) return;
+        if (!bubbleSource || !isExactPath(req)) return notFound(res);
+        // Issue #81 review: a bubble source bounded by "forget what's gone", not a fixed
+        // cache size, needs the current live set every request.
+        bubbleSource.forget?.([...agentsByPublicId.values()]);
+        const out: Record<string, { kind: 'text' | 'tool'; text: string }> = {};
+        for (const [id, agent] of agentsByPublicId) {
+          try {
+            const bubble = projectBubble(await bubbleSource.read(agent));
+            if (bubble) out[id] = bubble;
+          } catch {
+            // this agent only: a broken transcript for one agent never blanks the rest.
+          }
+        }
+        res.end(JSON.stringify(out));
       });
 
       // Read-only and opt-in: without a valid portrait file the answer is 204 and the office shows a placeholder

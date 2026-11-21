@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { displayText, type Observation, type PeekInput } from '../../server/seam.js';
-import { maskedLine } from '../../server/secrets.js';
+import { displayText, type BubbleReply, type Observation, type PeekInput } from '../../server/seam.js';
+import { lastWords, maskedLine } from '../../server/secrets.js';
 
 /**
  * Peek reader: the last lines, the assets (links) and the equipment (skills,
@@ -9,11 +9,21 @@ import { maskedLine } from '../../server/secrets.js';
  * calls count. A tool call shows its name and a short safe summary, never its
  * raw input. Text collapses, then is masked, then cut (`maskedLine`), so a cut
  * never leaves part of a token.
+ *
+ * `BubbleTailReader` (below, issue #81) is a separate, lighter reader for speech bubbles:
+ * review found that sharing this reader's own 20-file cache between "one selected agent,
+ * changes rarely" (this class) and "every known agent, every 3 s" (bubbles) thrashed the
+ * cache past ~20 live agents, re-reading full tails and re-emitting old lines as new bubbles.
  */
 
 export const PEEK_MAX_LINES = 10;
+/** The card's "Show 100 lines" tail (issue #81 AC5): the cache itself keeps this many lines,
+ * so the tail is already warm the moment the button is pressed. */
+export const PEEK_TAIL_LINES = 100;
 export const PEEK_LINE_MAX = 200;
 export const PEEK_MAX_ASSETS = 10;
+/** A bubble's "last words" (issue #81 AC1, SBE-2: locked at 40 characters). */
+export const BUBBLE_TEXT_MAX = 40;
 const MAX_EQUIPMENT = 10;
 const TAIL_BYTES = 2 * 1024 * 1024;
 const MAX_BYTES_PER_READ = 4 * 1024 * 1024;
@@ -137,6 +147,34 @@ function toolSummary(name: string, input: Record<string, unknown>): string {
   }
 }
 
+/**
+ * A tool-call bubble's own text (issue #81 review): the verb and tool name only, nothing
+ * derived from the call's input — not even a file's base name or a command's first word,
+ * both of which `toolSummary` above puts in the card's "Recent" panel. The card is opt-in and
+ * per-agent; a bubble floats over every agent's head without a click, so it needs the
+ * stricter rule, not a cut-down version of the same string. Unknown tool names still show
+ * literally (the same closed `TOKEN` shape `toolSummary` checks), never silently as "Tool".
+ */
+const BUBBLE_TOOL_LABEL: Readonly<Record<string, string>> = Object.freeze({
+  Read: 'Reading a file',
+  Write: 'Writing a file',
+  Edit: 'Editing a file',
+  NotebookEdit: 'Editing a notebook',
+  Bash: 'Running a command',
+  Grep: 'Searching',
+  Glob: 'Finding files',
+  WebFetch: 'Fetching a page',
+  WebSearch: 'Searching the web',
+  Skill: 'Using a skill',
+  Agent: 'Running a subagent',
+  Task: 'Running a subagent',
+  TodoWrite: 'Updating the to-do list',
+});
+
+function bubbleToolSummary(name: string): string {
+  return BUBBLE_TOOL_LABEL[name] ?? (TOKEN.test(name) ? name : 'Tool');
+}
+
 /** Every string in a tool input, depth and size capped. */
 function inputStrings(value: unknown, out: string[] = [], depth = 0, budget = { left: MAX_INPUT_CHARS }): string[] {
   if (budget.left <= 0 || depth > 4) return out;
@@ -212,7 +250,10 @@ export class PeekReader {
     this.tailBytes = options.tailBytes ?? TAIL_BYTES;
   }
 
-  read(agent: Observation): PeekInput {
+  /** `maxLines`: how many of the cached lines to return (default 10, the card's "Recent"; up to
+   * `PEEK_TAIL_LINES` for the "Show 100 lines" tail, issue #81 AC5). The cache itself always
+   * keeps `PEEK_TAIL_LINES`, so asking for more costs no extra read. */
+  read(agent: Observation, maxLines = PEEK_MAX_LINES): PeekInput {
     const file = agent.internal.transcriptPath;
     const empty: PeekInput = { lines: [], assets: [], skills: [], repos: [] };
     if (typeof file !== 'string' || !file.endsWith('.jsonl')) return empty;
@@ -221,8 +262,12 @@ export class PeekReader {
     if (!state) return empty;
     const newest = state.lines[state.lines.length - 1];
     const waits = agent.display?.attention === 'waiting' || agent.display?.attention === 'your-turn';
+    // An out-of-range request (negative, not a whole number) falls back to the normal default,
+    // the same rule `projectPeek` applies on the way out: a route-level guess is never trusted
+    // over the view's own sane default.
+    const limit = Number.isInteger(maxLines) && maxLines >= 1 ? maxLines : PEEK_MAX_LINES;
     return {
-      lines: state.lines.slice(),
+      lines: state.lines.slice(-limit),
       assets: state.assets.slice(),
       skills: state.skills.slice(),
       repos: state.repos.slice(),
@@ -298,7 +343,7 @@ export class PeekReader {
 
   private addLine(state: FileState, line: Line): void {
     state.lines.push(line);
-    if (state.lines.length > PEEK_MAX_LINES) state.lines.shift();
+    if (state.lines.length > PEEK_TAIL_LINES) state.lines.shift();
   }
 
   private takeTool(state: FileState, name: string, input: Record<string, unknown>, cwd: string | undefined): void {
@@ -364,5 +409,129 @@ function worktreeMain(gitFile: string): string | undefined {
     return undefined;
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+interface TailLine {
+  kind: 'text' | 'tool';
+  /** Masked assistant text for a `'text'` line; empty for a `'tool'` line — its own text
+   * (`bubbleToolSummary`) never depends on anything in the transcript but the tool name. */
+  text: string;
+  toolName?: string;
+}
+
+interface TailState {
+  offset: number;
+  carry: string;
+  skipFirst: boolean;
+  decoder: TextDecoder;
+  /** Every line ever appended (issue #81): the only way to tell "a new line arrived" from
+   * "no change since last call", since this reader keeps just the newest one, not a window. */
+  totalLines: number;
+  /** How many of `totalLines` a bubble has already reported. */
+  bubbleSeen: number;
+  newest?: TailLine;
+}
+
+function freshTailState(offset = 0): TailState {
+  return { offset, carry: '', skipFirst: offset > 0, decoder: new TextDecoder('utf-8'), totalLines: 0, bubbleSeen: 0 };
+}
+
+/**
+ * A separate, lighter transcript reader just for speech bubbles (issue #81 review). The
+ * all-agent `/api/bubbles` poll touches every known agent's transcript every 3 s — a very
+ * different access pattern from `PeekReader`'s "one selected agent, changes rarely" cache.
+ * Sharing one 20-file cache between them thrashed it past ~20 live agents: `PeekReader.update`
+ * clears its whole cache (not one entry) the moment a 21st distinct file shows up, so a busy
+ * office re-read full transcript tails and re-emitted old lines as "new" bubbles on every
+ * poll. This reader tracks only what a bubble needs (the newest line, its kind, and the raw
+ * tool name `bubbleToolSummary` turns into a safe label) and is bounded by `forget()`, not a
+ * fixed cache size: the set of agents a poll still knows already excludes a session the
+ * moment it ends, so this reader's own size is bounded by the real, live agent count.
+ */
+export class BubbleTailReader {
+  private readonly files = new Map<string, TailState>();
+
+  read(agent: Observation): BubbleReply | undefined {
+    const file = agent.internal.transcriptPath;
+    if (typeof file !== 'string' || !file.endsWith('.jsonl')) return undefined;
+    const state = this.update(file);
+    if (!state || !state.newest || state.totalLines <= state.bubbleSeen) return undefined;
+    state.bubbleSeen = state.totalLines;
+    const { kind, text, toolName } = state.newest;
+    return kind === 'tool' ? { kind, text: bubbleToolSummary(toolName ?? '') } : { kind, text: lastWords(text, BUBBLE_TEXT_MAX) };
+  }
+
+  /** Drops any cached file not among the agents the latest `/api/agents` poll still knows,
+   * so this reader's size tracks the real agent count instead of an arbitrary cap. */
+  forget(liveTranscriptPaths: ReadonlySet<string>): void {
+    for (const file of [...this.files.keys()]) if (!liveTranscriptPaths.has(file)) this.files.delete(file);
+  }
+
+  private update(file: string): TailState | undefined {
+    let fd: number | undefined;
+    try {
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile()) return undefined;
+      let state = this.files.get(file);
+      if (!state || stat.size < state.offset || stat.size - state.offset > MAX_BYTES_PER_READ) {
+        state = freshTailState(Math.max(0, stat.size - TAIL_BYTES));
+      }
+      this.files.set(file, state);
+      if (stat.size <= state.offset) return state;
+      fd = fs.openSync(file, 'r');
+      const buffer = Buffer.alloc(READ_CHUNK);
+      while (state.offset < stat.size) {
+        const bytesRead = fs.readSync(fd, buffer, 0, Math.min(READ_CHUNK, stat.size - state.offset), state.offset);
+        if (bytesRead <= 0) break;
+        state.offset += bytesRead;
+        this.takeText(state, state.decoder.decode(buffer.subarray(0, bytesRead), { stream: true }));
+      }
+      return state;
+    } catch {
+      return undefined;
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
+    }
+  }
+
+  private takeText(state: TailState, text: string): void {
+    const parts = (state.carry + text).split('\n');
+    state.carry = parts.pop() ?? '';
+    for (const line of parts) {
+      if (state.skipFirst) {
+        state.skipFirst = false;
+        continue;
+      }
+      this.takeLine(state, line);
+    }
+    if (state.carry.length > MAX_LINE) {
+      state.carry = '';
+      state.skipFirst = true;
+    }
+  }
+
+  private takeLine(state: TailState, line: string): void {
+    if (!line.includes('"assistant"')) return;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      return;
+    }
+    const message = (entry as { message?: { role?: unknown; content?: unknown } } | null)?.message;
+    if (message?.role !== 'assistant' || !Array.isArray(message.content)) return;
+    for (const block of message.content as Array<Record<string, unknown>>) {
+      if (block?.type === 'text' && typeof block.text === 'string') {
+        const text = cleanText(block.text, PEEK_LINE_MAX);
+        if (text) {
+          state.newest = { kind: 'text', text };
+          state.totalLines++;
+        }
+      } else if (block?.type === 'tool_use' && typeof block.name === 'string') {
+        state.newest = { kind: 'tool', text: '', toolName: block.name };
+        state.totalLines++;
+      }
+    }
   }
 }

@@ -76,6 +76,31 @@
       color: #ffb020;
     }
 
+    /* Speech bubbles (issue #81, SBE-2): the outer element is a 0x0 anchor the CSS2DRenderer
+       centers on the world point between the label (y=2.1) and the beacon (y=2.55). The inner
+       box is absolutely positioned from that anchor's top edge, so it only grows downward,
+       toward the label, and never upward into the beacon (AC4). */
+    .agent-bubble { width: 0; height: 0; pointer-events: none; }
+    .agent-bubble-box {
+      position: absolute;
+      top: 2px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 20, 40, 0.92);
+      color: #e0e0ff;
+      border: 1px solid rgba(120, 120, 255, 0.4);
+      border-radius: 10px;
+      padding: 3px 9px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11px;
+      white-space: nowrap;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .agent-bubble-box:empty { display: none; }
+    .agent-bubble-box.tool { color: #9fe0c0; font-style: italic; }
+
     #ui-panel {
       position: fixed;
       top: 16px;
@@ -316,6 +341,20 @@
     }
     .peek-question[hidden], .peek-recent[hidden], .peek-assets[hidden], .peek-equipment[hidden] { display: none; }
     .peek-recent li.peek-tool { color: #8888ff; font-size: 11px; }
+    /* AC5: the live 100-line tail scrolls inside the card rather than growing it unbounded. */
+    .peek-tail-list { max-height: 240px; overflow-y: auto; }
+    .peek-tail-button {
+      margin-top: 4px;
+      background: none;
+      border: 1px solid rgba(120, 120, 255, 0.4);
+      border-radius: 6px;
+      color: #a8b8ff;
+      font: inherit;
+      font-size: 10px;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+    .peek-tail-button:hover { background: rgba(120, 120, 255, 0.15); }
     .inspector-link {
       background: none; border: none; padding: 0; color: #a8b8ff; font: inherit;
       cursor: pointer; text-align: left; text-decoration: underline;
