@@ -176,11 +176,16 @@ export interface LibrarySectionInput {
 /** A floor's own library (issue #191 AC1, #119): read from `<repo>/documentation/bibliotheque/`
  * when that structure exists there, else this floor gets none (graceful degradation, never a
  * folder-structure guess). `repo` is the same whitelist and client matching rule as
- * `RoomInput.repo`/`BoardInput.repo`. */
+ * `RoomInput.repo`/`BoardInput.repo` — it also carries the directory-name fallback `server/
+ * floor.ts`'s own `qualifiedFloorName` falls back to when a repo has no git remote, which
+ * reads exactly like a real `owner/repo` pair. `remoteRepo` (issue #221 review) is the one
+ * this layer actually builds a GitHub link from: `FloorResolver.resolveRemoteOwnerRepo`'s own
+ * output, absent whenever there is no real git remote, never the directory fallback. */
 export interface LibraryInput {
   key: string;
   sections: LibrarySectionInput[];
   repo?: string;
+  remoteRepo?: string;
 }
 
 export interface WorldInput {
@@ -677,14 +682,18 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
   const jiraTickets = parts.flatMap((part) => part.jiraTickets ?? []).slice(0, 50)
     .map(jiraTicket).filter((ticket): ticket is NonNullable<ReturnType<typeof jiraTicket>> => ticket !== undefined);
   const libraries = parts.flatMap((part) => part.libraries ?? []).slice(0, 4).map((library) => {
-    // Resolved once per library (issue #221 AC3): a GitHub blob link only ever builds against
-    // the owner/repo this floor's own git remote resolved, never a plugin-supplied URL. A
-    // bare repo name (no remote resolved, `server/floor.ts`'s own fallback) is not an
-    // `owner/repo` pair, so `ownerRepo` below rejects it and every entry's `githubUrl` is
-    // simply absent — graceful degradation, the same shape every other optional field here
-    // already follows.
+    // Resolved once per library (issue #221 AC3, review): a GitHub blob link only ever builds
+    // against `remoteRepo` — `FloorResolver.resolveRemoteOwnerRepo`'s own output, present only
+    // when the floor's root actually has a git `origin` remote. `library.repo` (used below for
+    // the client's own floor-matching, unchanged) is the wrong field for this: its own
+    // fallback, a bare `parent-dir/repo-dir` pair when there is no remote at all, has the exact
+    // same `owner/repo` shape as a real one and would otherwise build a link to an unrelated
+    // GitHub repo that merely shares that directory name. No remote at all: every entry's
+    // `githubUrl` is simply absent — graceful degradation, the same shape every other optional
+    // field here already follows.
     const repo = repoTag(library.repo);
-    const ownerName = repo && OWNER_REPO.test(repo) ? repo.split('/') : undefined;
+    const remoteRepo = repoTag(library.remoteRepo);
+    const ownerName = remoteRepo && OWNER_REPO.test(remoteRepo) ? remoteRepo.split('/') : undefined;
     return {
       id: publicId(`library:${library.key}`),
       // Section names and entry titles come straight from a repo's own committed markdown

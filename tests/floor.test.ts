@@ -149,6 +149,33 @@ test('a repo with no remote at all falls back to the parent-dir qualifier, uncha
   assert.equal(new FloorResolver().resolve(repo), 'projects/no-remote-repo');
 });
 
+// --- issue #221 review: resolveRemoteOwnerRepo must never answer with the directory fallback ---
+
+test('resolveRemoteOwnerRepo answers the real owner/repo for a repo with a remote, same as resolve()', () => {
+  const repo = makeRepoWithRemote('with-remote', 'https://github.com/gabriel-amyot/agents-office.git', 'projects');
+  assert.equal(new FloorResolver().resolveRemoteOwnerRepo(repo), 'gabriel-amyot/agents-office');
+});
+
+test('resolveRemoteOwnerRepo is undefined for a repo with no remote at all, even though resolve() still answers with its own directory-pair fallback for the exact same repo', () => {
+  const repo = makeRepo('no-remote-repo-2', 'projects');
+  const resolver = new FloorResolver();
+  assert.equal(resolver.resolve(repo), 'projects/no-remote-repo-2', 'resolve() still falls back, unchanged');
+  assert.equal(resolver.resolveRemoteOwnerRepo(repo), undefined, 'but the fallback never masquerades as a real remote');
+});
+
+test('resolveRemoteOwnerRepo is undefined for a relative cwd, undefined cwd, or one outside any repo', () => {
+  const resolver = new FloorResolver();
+  assert.equal(resolver.resolveRemoteOwnerRepo(undefined), undefined);
+  assert.equal(resolver.resolveRemoteOwnerRepo('relative/path'), undefined);
+  assert.equal(resolver.resolveRemoteOwnerRepo(path.join(root, 'nowhere')), undefined);
+});
+
+test('resolveRemoteOwnerRepo follows a worktree to its main repository\'s own remote, same as resolve()', () => {
+  const mainRepo = makeRepoWithRemote('worktree-main-repo-2', 'https://github.com/gabriel-amyot/agents-office.git', 'projects');
+  const worktree = makeWorktree(mainRepo, '221-worktree-remote');
+  assert.equal(new FloorResolver().resolveRemoteOwnerRepo(worktree), 'gabriel-amyot/agents-office');
+});
+
 test('a repo whose config has no origin remote, or an unparsable url, falls back to the parent-dir qualifier', () => {
   const noOrigin = makeRepo('no-origin', 'projects');
   fs.writeFileSync(path.join(noOrigin, '.git', 'config'), '[core]\n\trepositoryformatversion = 0\n');

@@ -108,6 +108,9 @@ export interface SignFacts {
   distance: number;
   /** A sign that shows only on hover (or with labels: all), never from zoom alone. */
   hoverOnly: boolean;
+  /** Overrides `FIRST_PERSON_SIGN_DISTANCE` for a sign meant to read from anywhere in its own
+   * room (round 7, #214: the library's shelf labels), not just up close like a war room sign. */
+  maxDistance?: number;
 }
 
 /**
@@ -118,7 +121,7 @@ export function signVisible(facts: SignFacts, view: LabelView): boolean {
   if (view.mode === 'all' || facts.hovered) return true;
   if (facts.hoverOnly) return false;
   if (isViewFromAbove(view.viewMode)) return view.zoomDistance <= ISOMETRIC_SIGN_ZOOM;
-  return facts.distance <= FIRST_PERSON_SIGN_DISTANCE;
+  return facts.distance <= (facts.maxDistance ?? FIRST_PERSON_SIGN_DISTANCE);
 }
 
 /** Show or hide a sign with `visibility`, which CSS2DRenderer leaves alone. Returns true only when the DOM changed. */
@@ -133,6 +136,8 @@ export function applySignVisibility(element: HTMLElement, visible: boolean): boo
 interface DetailSign {
   rect: { minX: number; maxX: number; minZ: number; maxZ: number };
   hoverOnly?: boolean;
+  /** See `SignFacts.maxDistance`. */
+  maxDistance?: number;
 }
 
 /** `#labels=all` restores every full label. Anything else is the smart default. */
@@ -388,7 +393,12 @@ export class LabelDetailController {
       const element = (object as THREE.Object3D & { element?: HTMLElement }).element;
       if (!detail || !element) continue;
       object.getWorldPosition(this.signPosition);
-      const facts: SignFacts = { hovered: inRect(pointed, detail.rect), distance: this.signPosition.distanceTo(this.cameraPosition), hoverOnly: detail.hoverOnly === true };
+      const facts: SignFacts = {
+        hovered: inRect(pointed, detail.rect),
+        distance: this.signPosition.distanceTo(this.cameraPosition),
+        hoverOnly: detail.hoverOnly === true,
+        maxDistance: detail.maxDistance,
+      };
       applySignVisibility(element, signVisible(facts, view));
     }
     if (changed) this.options.changed?.();
