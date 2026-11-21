@@ -119,6 +119,28 @@ test('readCapped never hands the parser a partial trailing line: the cut lands o
   assert.deepEqual(library?.sections.map((s) => s.name), ['vendors'], 'the link found near the top parses cleanly regardless of where the cap lands further down');
 });
 
+test('a section index cut by the byte cap is marked truncated even with only a few rows before the cut (review: row-count truncated alone missed a byte-cut section under MAX_ENTRIES)', () => {
+  // 2 rows before the cap, well under MAX_ENTRIES (6), then ~290 KB of bulk hiding a 3rd row
+  // past the cut: parseSectionEntries alone would say truncated=false since it only ever sees
+  // 2 rows, but the shelf is incomplete and the UI needs to know that.
+  const sectionIndex = [
+    '| [Placer.ai](placer.md) | Foot traffic |',
+    '| [Foursquare](foursquare.md) | POI |',
+    'x'.repeat(300_000),
+    '| [Hidden past the cap](hidden.md) | never read |',
+  ].join('\n');
+  write('section-byte-truncated/documentation/bibliotheque/INDEX.md', '| [vendors/INDEX.md](vendors/INDEX.md) | Vendors |');
+  write('section-byte-truncated/documentation/bibliotheque/vendors/INDEX.md', sectionIndex);
+  const library = readBibliotheque(path.join(root, 'section-byte-truncated'));
+  assert.deepEqual(library, {
+    sections: [{
+      name: 'vendors',
+      entries: [{ title: 'Placer.ai', archived: false }, { title: 'Foursquare', archived: false }],
+      truncated: true,
+    }],
+  }, 'the byte cap cut content the row count alone would not catch, so truncated must still be true');
+});
+
 test('a section directory symlinked outside the bibliotheque root contributes nothing (review: checking only the leaf INDEX.md\'s own lstat missed a symlinked parent directory escaping the root)', () => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-outside-bibliotheque-'));
   fs.writeFileSync(path.join(outside, 'INDEX.md'), '| [Private](private.md) | not meant to be read as a floor library |');

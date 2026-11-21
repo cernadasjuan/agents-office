@@ -42,6 +42,16 @@ function withinRoot(real: string, root: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+/** `readCapped`'s own result: the readable prefix, and whether the file ran past
+ * `MAX_INDEX_BYTES` so content past the cap was never read at all (review: a section whose
+ * table has entries before the cap and more rows after it still fits under `MAX_ENTRIES`, so
+ * `parseSectionEntries`'s own row-count `truncated` stayed false — the byte cut has to carry
+ * its own truncation signal forward, not be inferred from entry count alone). */
+interface CappedRead {
+  text: string;
+  truncated: boolean;
+}
+
 /**
  * A regular file inside `allowedRoot` once every symlink resolves, read up to `MAX_INDEX_BYTES`
  * (issue: a real top `INDEX.md` can run well past a round number once a wiki grows — reading a
@@ -54,7 +64,7 @@ function withinRoot(real: string, root: string): boolean {
  * anywhere on disk, the same escape `findStoryFile` already guards against for a session
  * record). Never throws: a malformed or escaping index is the same as no library.
  */
-function readCapped(file: string, allowedRoot: string): string | undefined {
+function readCapped(file: string, allowedRoot: string): CappedRead | undefined {
   let fd: number | undefined;
   try {
     const real = fs.realpathSync(file);
@@ -66,9 +76,9 @@ function readCapped(file: string, allowedRoot: string): string | undefined {
     fd = fs.openSync(real, 'r');
     fs.readSync(fd, buffer, 0, readBytes, 0);
     const text = buffer.toString('utf-8');
-    if (stat.size <= MAX_INDEX_BYTES) return text;
+    if (stat.size <= MAX_INDEX_BYTES) return { text, truncated: false };
     const lastNewline = text.lastIndexOf('\n');
-    return lastNewline >= 0 ? text.slice(0, lastNewline) : '';
+    return { text: lastNewline >= 0 ? text.slice(0, lastNewline) : '', truncated: true };
   } catch {
     return undefined;
   } finally {
@@ -134,15 +144,15 @@ export function readBibliotheque(root: string): Bibliotheque | undefined {
   } catch {
     return undefined;
   }
-  const topIndex = readCapped(path.join(base, 'INDEX.md'), realBase);
-  if (topIndex === undefined) return undefined;
+  const topRead = readCapped(path.join(base, 'INDEX.md'), realBase);
+  if (topRead === undefined) return undefined;
   const sections: LibrarySection[] = [];
-  for (const segment of topLevelSections(topIndex).slice(0, MAX_SECTIONS)) {
-    const sectionIndex = readCapped(path.join(base, segment, 'INDEX.md'), realBase);
-    if (sectionIndex === undefined) continue;
-    const { entries, truncated } = parseSectionEntries(sectionIndex);
+  for (const segment of topLevelSections(topRead.text).slice(0, MAX_SECTIONS)) {
+    const sectionRead = readCapped(path.join(base, segment, 'INDEX.md'), realBase);
+    if (sectionRead === undefined) continue;
+    const { entries, truncated } = parseSectionEntries(sectionRead.text);
     if (entries.length === 0) continue;
-    sections.push({ name: segment, entries, truncated });
+    sections.push({ name: segment, entries, truncated: truncated || sectionRead.truncated });
   }
   return { sections };
 }
