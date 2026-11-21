@@ -1,8 +1,5 @@
 import type * as THREE from 'three';
-import { OFFICE } from '../utils/Constants.js';
-
-/** Above this camera height the ceiling hides, so the rooms show from above. */
-export const CEILING_HEIGHT = OFFICE.height;
+import { CEILING_ZONE_NAME } from '../addons/building/rooms.js';
 
 /** In the overview, cutaway zones drop to this height (a dollhouse cut-away), so the room floors show. */
 export const OVERVIEW_WALL_HEIGHT = 0.5;
@@ -16,13 +13,13 @@ export const OVERVIEW_WALL_HEIGHT = 0.5;
  * Call it every frame after the static merge: zones built later follow the
  * mode at once. Returns true when a zone changed (render and redraw shadows).
  */
-export function applyCutaway(scene: THREE.Object3D, overview: boolean): boolean {
+export function applyCutaway(scene: THREE.Object3D, fromAbove: boolean): boolean {
   let changed = false;
   for (const zone of scene.children) {
     const height = zone.userData.overviewLower;
     if (typeof height !== 'number' || !(height > 0)) continue;
     const target = typeof zone.userData.overviewHeight === 'number' ? zone.userData.overviewHeight : OVERVIEW_WALL_HEIGHT;
-    const scaleY = overview ? Math.min(1, target / height) : 1;
+    const scaleY = fromAbove ? Math.min(1, target / height) : 1;
     if (zone.scale.y === scaleY) continue;
     zone.scale.y = scaleY;
     zone.updateMatrixWorld(true);
@@ -40,13 +37,31 @@ export function findCeilings(root: THREE.Object3D): THREE.Object3D[] {
   return ceilings;
 }
 
-/** Hide the ceilings in the overview and when the camera is above the ceiling height. True when one changed. */
-export function applyCeilingCut(ceilings: THREE.Object3D[], cameraY: number, overview: boolean): boolean {
-  const visible = !overview && cameraY <= CEILING_HEIGHT;
+/**
+ * Ceilings show in first person and hide only in the isometric view (issue #176): a flown-over
+ * first person used to see over the top of them, but first person now walks on the ground
+ * (#174), so that reason is gone. The isometric view still needs the open roof. True when one
+ * changed.
+ *
+ * `ceilings` is the main room's own, individual ceiling (`Walls.ts`, excluded from any merge,
+ * a single object with nothing to merge with). Every other room's ceiling merges into one
+ * mesh (`rooms.ts`'s `buildCeiling`, `CEILING_ZONE`); this toggles that merged mesh's own
+ * `visible` by name (review, #184 round 2), found fresh every call rather than cached, since a
+ * batch rebuild can replace the container object. Toggling the merged mesh's own `visible`
+ * never changes any source's merge signature, so it never triggers a rebuild and never ejects
+ * a ceiling from the batch for a frame: one more draw call total, not one per room.
+ */
+export function applyCeilingCut(scene: THREE.Object3D, ceilings: THREE.Object3D[], fromAbove: boolean): boolean {
+  const visible = !fromAbove;
   let changed = false;
   for (const ceiling of ceilings) {
     if (ceiling.visible === visible) continue;
     ceiling.visible = visible;
+    changed = true;
+  }
+  const mergedCeilings = scene.getObjectByName(CEILING_ZONE_NAME);
+  if (mergedCeilings && mergedCeilings.visible !== visible) {
+    mergedCeilings.visible = visible;
     changed = true;
   }
   return changed;

@@ -131,15 +131,15 @@ export function isClick(down: ScreenPoint | null, up: ScreenPoint): boolean {
   return Math.hypot(up.x - down.x, up.y - down.y) <= CLICK_TOLERANCE_PX;
 }
 
-export type ViewMode = 'first-person' | 'overview' | 'isometric';
+export type ViewMode = 'first-person' | 'isometric';
 
-/** A view name from a URL or the browser storage: `overview`, `first-person`, `iso` or `isometric`; else null. */
+/** A view name from a URL or the browser storage: `first-person`, `iso` or `isometric`; else null. */
 export function viewModeFromName(value: string | null | undefined): ViewMode | null {
-  if (value === 'overview' || value === 'first-person' || value === 'isometric') return value;
+  if (value === 'first-person' || value === 'isometric') return value;
   return value === 'iso' ? 'isometric' : null;
 }
 
-/** The overview and the isometric view look down on the building: cutaway walls, no ceiling, zoom-based labels. */
+/** The isometric view looks down on the building: cutaway walls, no ceiling, zoom-based labels. */
 export function isViewFromAbove(mode: ViewMode): boolean {
   return mode !== 'first-person';
 }
@@ -163,14 +163,18 @@ function parseZoom(value: string | null): number | null {
 }
 
 /**
- * `#view=overview` starts in the overview, `#view=iso` in the isometric view. `#select=<agent
- * id>` (or `#focus=`, its older name, still read) selects that agent once it appears.
- * `#zoom=<distance>` starts at that camera distance instead of the view's own default framing
- * (issue #89): the overview reads it as `OverviewController.distance` directly, the isometric
- * view converts it to the equivalent `halfHeight`, so one number means the same zoom level in
- * both, the same way `ViewController.zoomDistance` already reports both in one unit.
- * `#room=office`, `#room=library` or `#room=<mission id>` frames that room instead, in the
- * current view (fly to its bounds in the overview or the isometric view, stand inside it
+ * `#view=iso` (or `isometric`) starts in the isometric view; an unknown or retired view name
+ * (`overview`, for example) is `null` here, first person's own value in `ViewHash.view`. The
+ * live app never stops at this fallback alone: `main.ts` picks the start view through
+ * `chooseViewMode` (`ViewMemory.ts`), which tries this hash value first, then the last saved
+ * view, then the active layout's own default — isometric for the building layout, so
+ * `#view=overview` with nothing else saved actually lands in isometric, the closest view from
+ * above, not first person (#173 review). `#select=<agent id>` (or `#focus=`, its
+ * older name, still read) selects that agent once it appears. `#zoom=<distance>` starts at that
+ * camera distance instead of the view's own default framing (issue #89): the isometric view
+ * converts it to the equivalent `halfHeight`, the same way `ViewController.zoomDistance` already
+ * reports it in one unit. `#room=office`, `#room=library` or `#room=<mission id>` frames that
+ * room instead, in the current view (fly to its bounds in the isometric view, stand inside it
  * facing its main wall in first person); unknown names are ignored, read-only, no effect on
  * the scene (issue #89, added so a reviewer can screenshot a room's boards from one URL).
  */

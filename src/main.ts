@@ -54,8 +54,8 @@ const tombstoneCard = new TombstoneCard(document.body, { anchor: document.getEle
 // Mission issues card (issue #146): same dock spot and selection, a click on a war room's issue board opens it.
 const missionIssuesCard = new MissionIssuesCard(document.body, { anchor: document.getElementById('ui-panel')! });
 
-// Camera mode (key O toggles first person and the overview, key I the isometric view) and click to select.
-// Start view: `#view=overview|first-person|iso`, then the last view, then the layout default.
+// Camera mode (key I toggles first person and the isometric view) and click to select.
+// Start view: `#view=first-person|iso`, then the last view, then the layout default.
 // `#select=<agent id>` (`#focus=`, its older name, still works) selects that agent once it
 // appears. `#zoom=<distance>` starts at that camera distance. `#room=<name>` frames a room
 // from the active layout (issue #89); a layout with no rooms, or an unknown name, is a no-op.

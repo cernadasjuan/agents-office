@@ -16,7 +16,7 @@ const { ViewController } = await import('../src/scene/ViewController.js');
 const { SelectionState, parseViewHash } = await import('../src/scene/Selection.js');
 const { IsometricController, isometricDirection, ISO_ELEVATION, floorPointUnderCursor, zoomTowardCursor } = await import('../src/scene/IsometricCamera.js');
 const { chooseViewMode, viewStatusText } = await import('../src/scene/ViewMemory.js');
-const { labelDetail, signVisible, roomLabelVisible, OVERVIEW_FULL_LABEL_ZOOM } = await import('../src/ui/LabelDetail.js');
+const { labelDetail, signVisible, roomLabelVisible, ISOMETRIC_FULL_LABEL_ZOOM } = await import('../src/ui/LabelDetail.js');
 const { renderQuality } = await import('../src/scene/RenderScheduler.js');
 const { roomLabelPose } = await import('../src/addons/building/roomLabels.js');
 const { findCeilings } = await import('../src/scene/Cutaway.js');
@@ -170,11 +170,11 @@ const fixedLayout: LayoutStrategy = {
   release: () => undefined,
 };
 
-function setup(hash = '', options: { figureShiftPx?: () => number; view?: 'first-person' | 'overview' | 'isometric' } = {}) {
+function setup(hash = '', options: { figureShiftPx?: () => number; view?: 'first-person' | 'isometric' } = {}) {
   const document = dom.window.document;
   const scene = new THREE.Scene();
   const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
-  wall.userData.overviewHidden = true;
+  wall.userData.hiddenFromAbove = true;
   scene.add(wall);
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
   camera.position.set(-12, EYE_HEIGHT, 11); // issue #174: first person settles here every frame it is grounded
@@ -218,8 +218,16 @@ test('without the isometric view the active camera stays the perspective camera 
   assert.equal(view.activeCamera, camera);
 });
 
-test('key I enters the isometric view and goes back to the view before it; O from it goes to the overview', () => {
-  const { view, camera, wall, press, modes, settle } = setup();
+test('key O does nothing: the overview mode is gone (#173)', () => {
+  const { view, modes, press } = setup();
+  const before = [...modes]; // the constructor reports the start mode once, before any key press
+  press('KeyO');
+  assert.equal(view.mode, 'first-person');
+  assert.deepEqual(modes, before, 'no further mode change from the key press');
+});
+
+test('key I enters the isometric view and goes back to first person', () => {
+  const { view, camera, wall, press, modes } = setup();
   press('KeyI');
   assert.equal(view.mode, 'isometric');
   assert.equal(wall.visible, false);
@@ -228,18 +236,7 @@ test('key I enters the isometric view and goes back to the view before it; O fro
   assert.equal(wall.visible, true);
   assert.equal(view.activeCamera, camera);
   assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, EYE_HEIGHT, 11)) < 1e-6, 'first person comes back where it was');
-
-  press('KeyO');
-  press('KeyI');
-  assert.equal(view.mode, 'isometric');
-  press('KeyO');
-  assert.equal(view.mode, 'overview');
-  assert.equal(wall.visible, false);
-  press('KeyO');
-  assert.equal(view.mode, 'first-person');
-  settle();
-  assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, EYE_HEIGHT, 11)) < 1e-6, 'first person survives a trip through both views');
-  assert.deepEqual(modes, ['first-person', 'isometric', 'first-person', 'overview', 'isometric', 'overview', 'first-person']);
+  assert.deepEqual(modes, ['first-person', 'isometric', 'first-person']);
 });
 
 test('the given start view can be the isometric view (the remembered view)', () => {
@@ -315,29 +312,28 @@ for (const shift of [0, 300]) {
 
 test('the remembered view and the hash include the isometric view; the header names it', () => {
   const storage = { getItem: () => 'isometric' };
-  assert.equal(chooseViewMode('', storage, 'overview'), 'isometric');
-  assert.equal(chooseViewMode('#view=iso', undefined, 'overview'), 'isometric');
-  assert.equal(chooseViewMode('#view=isometric', undefined, 'overview'), 'isometric');
+  assert.equal(chooseViewMode('', storage, 'isometric'), 'isometric');
+  assert.equal(chooseViewMode('#view=iso', undefined, 'isometric'), 'isometric');
+  assert.equal(chooseViewMode('#view=isometric', undefined, 'isometric'), 'isometric');
   assert.equal(viewStatusText('Building', 'isometric'), 'Building layout · Isometric');
 });
 
-test('label rules in the isometric view follow its zoom like the overview', () => {
+test('label rules in the isometric view follow its own zoom (#173: the only view from above)', () => {
   const facts = { attention: undefined, selected: false, hovered: false, distance: 999 };
-  const near = { mode: 'smart' as const, viewMode: 'isometric' as const, zoomDistance: OVERVIEW_FULL_LABEL_ZOOM - 1 };
+  const near = { mode: 'smart' as const, viewMode: 'isometric' as const, zoomDistance: ISOMETRIC_FULL_LABEL_ZOOM - 1 };
   const far = { ...near, zoomDistance: 40 };
   assert.equal(labelDetail(facts, near), 'full');
   assert.equal(labelDetail(facts, far), 'compact');
   assert.equal(signVisible({ hovered: false, distance: 999, hoverOnly: false }, near), true);
   assert.equal(signVisible({ hovered: false, distance: 999, hoverOnly: false }, far), false);
   assert.equal(roomLabelVisible({ viewMode: 'isometric', cameraInside: true }), true);
-  assert.deepEqual(
-    roomLabelPose({ viewMode: 'isometric', zoomDistance: 30, detail: false }, 3),
-    roomLabelPose({ viewMode: 'overview', zoomDistance: 30, detail: false }, 3),
-  );
+  const pose = roomLabelPose({ viewMode: 'isometric', zoomDistance: 30, detail: false }, 3);
+  assert.ok(pose.onTop, 'drawn on top, like any view from above');
+  assert.ok(pose.height > 0 && pose.width > 0);
 });
 
-test('the isometric view renders with the overview quality', () => {
-  assert.deepEqual(renderQuality('isometric', 2), renderQuality('overview', 2));
+test('the isometric view renders at a lowered pixel ratio with hard shadows', () => {
+  assert.deepEqual(renderQuality('isometric', 2), { pixelRatio: 1.5, shadowType: THREE.BasicShadowMap });
 });
 
 // --- Frame loop ---

@@ -4,6 +4,7 @@ import { getToonMaterial } from '../../utils/Materials.js';
 import { Colors } from '../../utils/Colors.js';
 import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
+import { OFFICE } from '../../utils/Constants.js';
 import { DOOR_WIDTH, ROOM_SIZE, doorPoint, type Door, type Rect, type RoomSlot, type Side, wallPieces } from './RoomPlanner.js';
 import { roomLabel } from './roomLabels.js';
 import { roomFurnishing, type RoomPlan } from './furnishing.js';
@@ -49,7 +50,8 @@ export function roomTitle(kind: RoomKind, earlierKinds: RoomKind[]): string {
   return ROOM_TITLE[kind];
 }
 
-export const WALL_HEIGHT = 2.6;
+/** Issue #176: every room's walls are as tall as the main room's (`OFFICE.height`), not their own shorter constant. */
+export const WALL_HEIGHT = OFFICE.height;
 const WALL_THICKNESS = 0.15;
 const DOOR_FRAME_HEIGHT = 2.35;
 const DOOR_POST_WIDTH = 0.2;
@@ -138,7 +140,7 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
   // Pieces on hidden sides go in one group the overview hides. It merges in place: one draw call, hidden with it
   const hidden = new THREE.Group();
   hidden.name = 'overview-hidden-walls';
-  hidden.userData.overviewHidden = true;
+  hidden.userData.hiddenFromAbove = true;
   markStatic(hidden);
   const material = getToonMaterial(Colors.wall);
   for (const piece of wallPieces(rect, doors)) {
@@ -158,6 +160,35 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
   }
   if (hidden.children.length > 0) group.add(hidden);
   return group;
+}
+
+/** The zone every room's ceiling shares, so they merge into one mesh (review, #184 round 2). */
+export const CEILING_ZONE = 'room-ceilings';
+/** The merged ceiling zone's own name in the scene (`StaticMerge.ts`'s `static-batch-${zone}`), so `FrameLoop` can find and toggle it without caching a reference that a rebuild could orphan. */
+export const CEILING_ZONE_NAME = `static-batch-${CEILING_ZONE}`;
+
+/**
+ * A room's ceiling, at the main room's wall height (issue #176: first person gets it back).
+ * Merged into the shared `CEILING_ZONE`, the one zone every room's ceiling belongs to (review,
+ * #184 round 2): a first attempt toggled each ceiling's own `visible`, which changes a merged
+ * source's signature and forces a batch rebuild, ejecting it for one frame on every view
+ * switch. Marking each one `dynamic` instead (the round before this one) fixed that, at the
+ * cost of a draw call per room, permanently. Merging them all into one zone and toggling the
+ * *merged* mesh's own `visible` (`FrameLoop`, by `CEILING_ZONE_NAME`) costs one draw call for
+ * every room's ceiling together, with nothing to eject: the zone container is not one of the
+ * signature's own sources, so changing its `visible` never triggers a rebuild.
+ */
+export function buildCeiling(rect: Rect, height: number = WALL_HEIGHT): THREE.Mesh {
+  const ceiling = new THREE.Mesh(
+    new THREE.PlaneGeometry(rect.maxX - rect.minX, rect.maxZ - rect.minZ),
+    getToonMaterial(0xf2ede5),
+  );
+  ceiling.rotation.x = Math.PI / 2;
+  ceiling.position.set((rect.minX + rect.maxX) / 2, height, (rect.minZ + rect.maxZ) / 2);
+  ceiling.receiveShadow = true;
+  ceiling.name = 'room-ceiling';
+  markStatic(ceiling, { zone: CEILING_ZONE, castShadow: false });
+  return ceiling;
 }
 
 /** Two posts and a lintel around a doorway, in the room floor color, so doors stand out from the walls. */
@@ -257,6 +288,7 @@ export function buildRoom(kind: RoomKind, slot: RoomSlot, index: number, extraDo
   const doorway = doorFrame(slot.rect, slot.door, FLOOR_TINT[kind]);
   markDoorCutaway(doorway);
   group.add(doorway);
+  group.add(buildCeiling(slot.rect));
   group.add(roomLabel(title ?? roomTitle(kind, []), frame.point(0, ROOM_SIZE / 2), slot.rect));
 
   furnish(group, frame, roomFurnishing(kind, { doorAlong: frame.doorAlong, usersOffice: index === 0 }), slot.rect, stations, key);

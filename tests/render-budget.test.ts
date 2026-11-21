@@ -109,15 +109,20 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // genuinely worn (`tests/real-size-office.ts`'s own PERSONAS list, issue #128 review) and
   // its one source of randomness seeded (the library's bookshelves, same file, issue #128
   // review round 2: an unseeded book count and color made this total drift between runs,
-  // 368 to 372, depending on how many book colors a shelf happened to draw). The mission
+  // 368 to 372, depending on how many book colors a shelf happened to draw). Two more things
+  // land on top of 372, together in this round, 402: issue #176's per-room ceilings (every
+  // room's ceiling merges into the one shared zone `buildCeiling` marks it for, `rooms.ts`'s
+  // `CEILING_ZONE`; `FrameLoop` toggles that *merged* mesh's own `visible` by name on a view
+  // switch, review, #184 round 2, not each source's, so the cost is one call for every room's
+  // ceiling together, war rooms included now that they build one too), and the mission
   // wing's own furniture package (issue #125: a clock, whiteboard, bookshelf, sofa, low
   // table, water cooler, TV, low divider, debug station and desk per war room, up to 9 of
-  // them) lands it at 401: a new piece-type variety the fixture did not carry before, not a
-  // regression in either feature. Pinned here at 406, 401 plus 5: real headroom above the
-  // number this fixture actually and repeatably measures, not a number nobody reproduces.
-  // Each PR gets up to 5 more against the 401 baseline before it must recover headroom
-  // elsewhere, not just add to the margin left by the last one.
-  assert.ok(after.total <= 406, `worst case ${after.total} exceeds the pinned baseline (401) + 5`);
+  // them, a new piece-type variety the fixture did not carry before). Pinned here at 404,
+  // 402 plus 2: real headroom above the number this fixture actually and repeatably
+  // measures, not a number nobody reproduces. Each PR gets up to 5 more against the 402
+  // baseline before it must recover headroom elsewhere, not just add to the margin left by
+  // the last one.
+  assert.ok(after.total <= 404, `worst case ${after.total} exceeds the pinned baseline (402) + 2`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -134,9 +139,11 @@ test('the worst case measures the same total every run: the fixture\'s one rando
     new FigureBatch(scene).sync(agents.map((managed) => managed.figure.group));
     totals.add(countDrawCalls(scene).total);
   }
-  // 401, not 372: the mission wing's own furniture package (issue #125) added to this
-  // fixture; see the baseline comment above. Still exactly one value across all 8 runs.
-  assert.deepEqual([...totals], [401], `expected every one of 8 runs to measure 401, got ${[...totals]}`);
+  // 402, not the pre-#176/#182 372: every room's ceiling merges into one mesh (one more call
+  // together, not one per room), and the mission wing's own furniture package (issue #125)
+  // added to this fixture; see the baseline comment above. Still exactly one value across
+  // all 8 runs.
+  assert.deepEqual([...totals], [402], `expected every one of 8 runs to measure 402, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

@@ -1,19 +1,20 @@
 import * as THREE from 'three';
 import { ROOM_SIZE, type Rect } from './RoomPlanner.js';
+import type { ViewMode } from '../../scene/Selection.js';
 
 /** First person: a small plate high in the room; its top (2.55) stays below the wall top, so walls hide it. */
 export const FIRST_PERSON_LABEL_Y = 2.2;
 export const FIRST_PERSON_LABEL_HEIGHT = 0.7;
 /** Overview: plate height at the reference zoom distance; it grows with the distance beyond it. */
-export const OVERVIEW_LABEL_HEIGHT = 1.6;
-export const OVERVIEW_LABEL_REFERENCE_ZOOM = 40;
+export const ISOMETRIC_LABEL_HEIGHT = 1.6;
+export const ISOMETRIC_LABEL_REFERENCE_ZOOM = 40;
 /** Overview: the plate bottom, above the lowered walls and the door frames. */
-export const OVERVIEW_LABEL_BOTTOM = 1.3;
+export const ISOMETRIC_LABEL_BOTTOM = 1.3;
 /** A plate is never wider than this, so labels of two neighbor rooms do not overlap. */
 export const ROOM_LABEL_MAX_WIDTH = ROOM_SIZE - 1;
-/** Overview: a plate is never taller than this, so labels of two rooms in a column do not overlap. */
-export const OVERVIEW_LABEL_MAX_HEIGHT = 5;
-/** Characters per line: the full face, and the compact face of the default overview. */
+/** Isometric: a plate is never taller than this, so labels of two rooms in a column do not overlap. */
+export const ISOMETRIC_LABEL_MAX_HEIGHT = 5;
+/** Characters per line: the full face, and the compact face of the default isometric view. */
 export const FULL_LABEL_CHARS = 16;
 export const COMPACT_LABEL_CHARS = 7;
 /** Most room labels a scene draws (one instance each). */
@@ -75,7 +76,7 @@ export function roomLabelLines(text: string, maxChars: number, maxLines = 2): st
 }
 
 /**
- * The compact face of the default overview: two short lines. A longer name keeps
+ * The compact face of the default isometric view: two short lines. A longer name keeps
  * its first line and its last word ("MISSION" / "…3"), so rooms with a shared
  * first word stay apart. The last word itself cuts in the middle when it does
  * not fit (`middleEllipsis`), so two names whose last words share a prefix
@@ -92,8 +93,8 @@ export function compactLabelLines(text: string): string[] {
 
 /** What the label controller tells a room label each refresh. */
 export interface RoomLabelView {
-  /** First person, or a view from above (the overview, the isometric view). */
-  viewMode: 'overview' | 'first-person' | 'isometric';
+  /** First person, or the isometric view from above. */
+  viewMode: ViewMode;
   zoomDistance: number;
   /** Zoomed in, pointed at or labels: all: the full name. */
   detail: boolean;
@@ -133,9 +134,9 @@ export function roomLabelPose(view: RoomLabelView, aspect: number): { height: nu
     const height = Math.min(FIRST_PERSON_LABEL_HEIGHT, ROOM_LABEL_MAX_WIDTH / aspect);
     return { height, width: height * aspect, y: FIRST_PERSON_LABEL_Y, onTop: false };
   }
-  const wanted = OVERVIEW_LABEL_HEIGHT * Math.max(1, view.zoomDistance / OVERVIEW_LABEL_REFERENCE_ZOOM);
-  const height = Math.min(wanted, OVERVIEW_LABEL_MAX_HEIGHT, ROOM_LABEL_MAX_WIDTH / aspect);
-  return { height, width: height * aspect, y: OVERVIEW_LABEL_BOTTOM + height / 2, onTop: true };
+  const wanted = ISOMETRIC_LABEL_HEIGHT * Math.max(1, view.zoomDistance / ISOMETRIC_LABEL_REFERENCE_ZOOM);
+  const height = Math.min(wanted, ISOMETRIC_LABEL_MAX_HEIGHT, ROOM_LABEL_MAX_WIDTH / aspect);
+  return { height, width: height * aspect, y: ISOMETRIC_LABEL_BOTTOM + height / 2, onTop: true };
 }
 
 function sceneOf(object: THREE.Object3D): THREE.Scene | null {
@@ -154,7 +155,7 @@ function shownInTree(object: THREE.Object3D): boolean {
  * room center, `name = 'room-label'`): its position and scale are the plate
  * pose, and the scene's `RoomLabelBatch` draws every plate in one call. It has a
  * full face (first person, zoomed in, pointed at) and a compact face (the default
- * overview). The label controller calls `userData.applyView` each refresh; until
+ * isometric view). The label controller calls `userData.applyView` each refresh; until
  * then it keeps the first person pose.
  */
 export function roomLabel(text: string, position: THREE.Vector3, rect: Rect): THREE.Object3D {
