@@ -21,20 +21,24 @@ test('roots parse the same comma-list shape AGENTS_OFFICE_MISSION_ROOTS already 
 });
 
 test('a root with no bibliotheque contributes nothing; its own floor is never guessed at', () => {
-  const resolver = { resolve: () => 'pm-floor' };
+  const resolver = { resolve: () => 'pm-floor', resolveRemoteOwnerRepo: () => undefined };
   assert.deepEqual(readLibraries([path.join(root, 'no-library')], resolver), []);
 });
 
-test('a root with a bibliotheque becomes one library, tagged with its own floor', () => {
+test('a root with a bibliotheque and a real git remote becomes one library, carrying both its floor and its remote owner/repo', () => {
   write('pm/documentation/bibliotheque/INDEX.md', '| [vendors/INDEX.md](vendors/INDEX.md) | Vendors |');
   write('pm/documentation/bibliotheque/vendors/INDEX.md', '| [Placer.ai](placer.md) | Foot traffic |');
   const pmRoot = path.join(root, 'pm');
-  const resolver = { resolve: (cwd: string | undefined) => (cwd === pmRoot ? 'org/project-management' : GENERAL_FLOOR) };
+  const resolver = {
+    resolve: (cwd: string | undefined) => (cwd === pmRoot ? 'org/project-management' : GENERAL_FLOOR),
+    resolveRemoteOwnerRepo: (cwd: string | undefined) => (cwd === pmRoot ? 'gabriel-amyot/klever-project-management' : undefined),
+  };
   const libraries = readLibraries([pmRoot], resolver);
   assert.deepEqual(libraries, [{
     key: pmRoot,
-    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', archived: false }], truncated: false }],
+    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', archived: false, summary: 'Foot traffic' }], truncated: false }],
     repo: 'org/project-management',
+    remoteRepo: 'gabriel-amyot/klever-project-management',
   }]);
 });
 
@@ -42,8 +46,24 @@ test('a root that resolves to the general floor gets no repo tag (it is itself a
   write('general-root/documentation/bibliotheque/INDEX.md', '| [vendors/INDEX.md](vendors/INDEX.md) | Vendors |');
   write('general-root/documentation/bibliotheque/vendors/INDEX.md', '| [x](x.md) | y |');
   const generalRoot = path.join(root, 'general-root');
-  const libraries = readLibraries([generalRoot], { resolve: () => GENERAL_FLOOR });
+  const libraries = readLibraries([generalRoot], { resolve: () => GENERAL_FLOOR, resolveRemoteOwnerRepo: () => undefined });
   assert.equal(libraries[0].repo, undefined);
+});
+
+test('issue #221 review: a floor resolved only through the directory-name fallback (no git remote at all) carries repo but never remoteRepo', () => {
+  write('fallback-floor/documentation/bibliotheque/INDEX.md', '| [vendors/INDEX.md](vendors/INDEX.md) | Vendors |');
+  write('fallback-floor/documentation/bibliotheque/vendors/INDEX.md', '| [x](x.md) | y |');
+  const fallbackRoot = path.join(root, 'fallback-floor');
+  // `resolve()` still answers with the directory-pair fallback (`qualifiedFloorName`'s own
+  // behavior with no remote); `resolveRemoteOwnerRepo()` correctly answers undefined for the
+  // exact same root, since there is no real git remote to report.
+  const resolver = {
+    resolve: () => 'some-parent-dir/fallback-floor',
+    resolveRemoteOwnerRepo: () => undefined,
+  };
+  const libraries = readLibraries([fallbackRoot], resolver);
+  assert.equal(libraries[0].repo, 'some-parent-dir/fallback-floor');
+  assert.equal('remoteRepo' in libraries[0], false);
 });
 
 test('without AGENTS_OFFICE_LIBRARY_ROOTS set, the plugin world provider adds nothing', async () => {

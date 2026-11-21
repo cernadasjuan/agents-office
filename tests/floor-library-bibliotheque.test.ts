@@ -29,7 +29,7 @@ test('top-level sections come from the top INDEX.md own links, deduplicated, nev
   assert.deepEqual(topLevelSections(index), ['vendors', 'domain']);
 });
 
-test('section entries come from table rows with a markdown link in the first column', () => {
+test('section entries come from table rows with a markdown link in the first column, carrying the description as a summary and the raw link for resolution', () => {
   const sectionIndex = `
 # Vendors
 
@@ -41,8 +41,8 @@ test('section entries come from table rows with a markdown link in the first col
 `;
   const { entries, truncated } = parseSectionEntries(sectionIndex);
   assert.deepEqual(entries, [
-    { title: 'Placer.ai', archived: false },
-    { title: 'Old vendor (ARCHIVED)', archived: true },
+    { title: 'Placer.ai', archived: false, summary: 'Foot traffic vendor', link: 'placer/INDEX.md' },
+    { title: 'Old vendor (ARCHIVED)', archived: true, summary: 'No longer in use', link: 'old-vendor.md' },
   ]);
   assert.equal(truncated, false);
 });
@@ -56,10 +56,10 @@ test('a superseded entry, or one filed under an archive/ path, is marked archive
   assert.deepEqual(entries.map((e) => e.archived), [true, true]);
 });
 
-test('entries past the cap are dropped, with truncated set', () => {
-  const rows = Array.from({ length: 9 }, (_, i) => `| [Entry ${i}](e${i}.md) | d |`).join('\n');
+test('entries past the cap (100) are dropped, with truncated set', () => {
+  const rows = Array.from({ length: 101 }, (_, i) => `| [Entry ${i}](e${i}.md) | d |`).join('\n');
   const { entries, truncated } = parseSectionEntries(rows);
-  assert.equal(entries.length, 6);
+  assert.equal(entries.length, 100);
   assert.equal(truncated, true);
 });
 
@@ -79,8 +79,13 @@ test('a real top index with real section indexes builds one section per section 
   // domain/INDEX.md deliberately not written: the section is linked but has no own index yet.
   const library = readBibliotheque(path.join(root, 'has-library'));
   assert.ok(library);
+  // `placer.md`/`old.md` are not written on disk here, so neither entry resolves a
+  // `lastChanged`/`repoPath` (graceful degradation, same as a dangling link today).
   assert.deepEqual(library!.sections, [
-    { name: 'vendors', entries: [{ title: 'Placer.ai', archived: false }, { title: 'Old vendor (archived)', archived: true }], truncated: false },
+    { name: 'vendors', entries: [
+      { title: 'Placer.ai', archived: false, summary: 'Foot traffic' },
+      { title: 'Old vendor (archived)', archived: true, summary: 'gone' },
+    ], truncated: false },
   ]);
 });
 
@@ -104,7 +109,7 @@ test('an oversized top INDEX.md reads as its own capped prefix, not as no librar
   write('too-big/documentation/bibliotheque/vendors/INDEX.md', '| [Placer.ai](placer.md) | Foot traffic |');
   const library = readBibliotheque(path.join(root, 'too-big'));
   assert.deepEqual(library, {
-    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', archived: false }], truncated: false }],
+    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', archived: false, summary: 'Foot traffic' }], truncated: false }],
   }, 'the section link, well within the first 200,000 bytes, still parses even though the whole file does not fit');
 });
 
@@ -135,7 +140,10 @@ test('a section index cut by the byte cap is marked truncated even with only a f
   assert.deepEqual(library, {
     sections: [{
       name: 'vendors',
-      entries: [{ title: 'Placer.ai', archived: false }, { title: 'Foursquare', archived: false }],
+      entries: [
+        { title: 'Placer.ai', archived: false, summary: 'Foot traffic' },
+        { title: 'Foursquare', archived: false, summary: 'POI' },
+      ],
       truncated: true,
     }],
   }, 'the byte cap cut content the row count alone would not catch, so truncated must still be true');
@@ -150,6 +158,46 @@ test('a section directory symlinked outside the bibliotheque root contributes no
   try {
     const library = readBibliotheque(path.join(root, 'escape'));
     assert.deepEqual(library, { sections: [] }, 'the symlinked section is dropped, not read through');
+  } finally {
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+// --- Issue #221 AC2/AC3: an entry's own `lastChanged`/`repoPath`, resolved from its real file ---
+
+test('an entry whose link target is a real file inside the tree resolves a last-changed date and a repo-relative path', () => {
+  write('resolved/documentation/bibliotheque/INDEX.md', '| [vendors/INDEX.md](vendors/INDEX.md) | Vendors |');
+  write('resolved/documentation/bibliotheque/vendors/INDEX.md', '| [Placer.ai](placer.md) | Foot traffic |');
+  write('resolved/documentation/bibliotheque/vendors/placer.md', '# Placer.ai\n');
+  const library = readBibliotheque(path.join(root, 'resolved'));
+  const entry = library?.sections[0]?.entries[0];
+  assert.ok(entry);
+  assert.equal(entry!.repoPath, 'documentation/bibliotheque/vendors/placer.md');
+  assert.match(entry!.lastChanged ?? '', /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('an entry linking to an external URL resolves no lastChanged/repoPath (never a filesystem lookup on a scheme)', () => {
+  write('external-link/documentation/bibliotheque/INDEX.md', '| [vendors/INDEX.md](vendors/INDEX.md) | Vendors |');
+  write('external-link/documentation/bibliotheque/vendors/INDEX.md', '| [Notion page](https://www.notion.so/some-page) | External |');
+  const library = readBibliotheque(path.join(root, 'external-link'));
+  const entry = library?.sections[0]?.entries[0];
+  assert.ok(entry);
+  assert.equal(entry!.repoPath, undefined);
+  assert.equal(entry!.lastChanged, undefined);
+});
+
+test('an entry whose link target escapes the bibliotheque tree through a symlink resolves no lastChanged/repoPath (same escape rule as a symlinked section)', () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-outside-entry-'));
+  fs.writeFileSync(path.join(outside, 'secret.md'), 'not meant to be linked');
+  write('escaping-entry/documentation/bibliotheque/INDEX.md', '| [vendors/INDEX.md](vendors/INDEX.md) | Vendors |');
+  write('escaping-entry/documentation/bibliotheque/vendors/INDEX.md', '| [Escaping link](escape.md) | Points outside |');
+  fs.symlinkSync(path.join(outside, 'secret.md'), path.join(root, 'escaping-entry', 'documentation', 'bibliotheque', 'vendors', 'escape.md'));
+  try {
+    const library = readBibliotheque(path.join(root, 'escaping-entry'));
+    const entry = library?.sections[0]?.entries[0];
+    assert.ok(entry);
+    assert.equal(entry!.repoPath, undefined);
+    assert.equal(entry!.lastChanged, undefined);
   } finally {
     fs.rmSync(outside, { recursive: true, force: true });
   }

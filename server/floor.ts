@@ -140,6 +140,20 @@ export class FloorResolver {
     return floor;
   }
 
+  /**
+   * The floor's own real git remote `owner/repo` (issue #221 review): distinct from
+   * `resolve()`'s own floor name, which falls back to a bare `parent-dir/repo-dir` pair when
+   * there is no remote at all (`qualifiedFloorName`'s own fallback) — a fallback pair reads
+   * exactly like a real `owner/repo` and must never be mistaken for one, e.g. to build a
+   * GitHub link to a repo of the same name that is not actually this one. Undefined for a
+   * relative `cwd`, a `cwd` outside any repo, or a real repo with no `origin` remote at all.
+   */
+  resolveRemoteOwnerRepo(cwd: string | undefined): string | undefined {
+    if (!cwd) return undefined;
+    const repoDir = this.repoDirOf(cwd);
+    return repoDir ? this.cachedRemoteOwnerRepo(repoDir) : undefined;
+  }
+
   private resolveUncached(cwd: string): string {
     const repoDir = this.repoDirOf(cwd);
     return repoDir ? this.qualifiedFloorName(repoDir) : GENERAL_FLOOR;
@@ -150,7 +164,8 @@ export class FloorResolver {
    * walking up at most `MAX_WALK_DEPTH` directories. Undefined for a non-absolute `dir`, one
    * with no repository, or an unreadable or malformed worktree `.git` file — never the
    * worktree's own directory as a fallback (review: `resolveUncached`'s own earlier bug).
-   * The one piece of the walk both the floor name and `remoteOwnerRepoOf` below share.
+   * The one piece of the walk `resolve()`, `remoteOwnerRepoOf()` and `resolveRemoteOwnerRepo()`
+   * all share, so the three never disagree about which directory answers for a given `cwd`.
    */
   private repoDirOf(dir: string): string | undefined {
     if (!path.isAbsolute(dir)) return undefined;

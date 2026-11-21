@@ -15,13 +15,34 @@ import path from 'node:path';
 export const BIBLIOTHEQUE_RELATIVE = 'documentation/bibliotheque';
 
 const MAX_INDEX_BYTES = 200_000;
-const MAX_SECTIONS = 8;
-const MAX_ENTRIES = 6;
+// Gabriel's own call (round 7 part 3): "there's no max sections and max... I wanted to be able
+// to navigate and plus a possibility of an infinite one... you can have like a big cap here".
+// 100 of each, up from 8/6 — a cap at the data layer, not the room's own physical display limit
+// (`plugins/floor-library/client.ts`'s `MAX_SECTIONS_SHOWN`/`MAX_ENTRY_LINES`, a separate,
+// much smaller number: one shared library room cannot seat 100 shelves at once; see that
+// module's own doc comment). 100 rows of a section table run well under MAX_INDEX_BYTES
+// (a real row is well under 200 bytes; 100 of them is ~20 KB against a 200 KB cap), and the
+// top INDEX.md needs only one link line per section to list 100 of them, so the existing byte
+// cap needs no change to carry the new row cap.
+const MAX_SECTIONS = 100;
+const MAX_ENTRIES = 100;
 const SEGMENT = /^[A-Za-z0-9_.-]+$/;
 
 export interface LibraryEntry {
   title: string;
   archived: boolean;
+  /** The row's own description column (issue #221 AC2), trimmed. Already parsed and
+   * discarded before this PR; surfacing it costs nothing new to read. */
+  summary?: string;
+  /** The link target's own last-modified date (`YYYY-MM-DD`), when it resolved to a real file
+   * inside the bibliothèque tree. Absent for an external link, a missing file, or one a
+   * symlink would have to escape the tree to reach — never fabricated. */
+  lastChanged?: string;
+  /** The link target's path relative to the repo root (never the bibliothèque subtree alone),
+   * for building a GitHub blob URL one layer up (`plugins/floor-library/index.ts`). Never sent
+   * to the browser itself (`server/seam.ts` builds the URL from it and drops the path);
+   * absent under the same conditions as `lastChanged`. */
+  repoPath?: string;
 }
 
 export interface LibrarySection {
@@ -115,19 +136,63 @@ const ARCHIVED_PATTERN = /\barchiv(?:ed?)?\b|\bsuperseded\b/i;
 
 const TABLE_ROW = /^\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\|(.*)\|?\s*$/gm;
 
+/** A row parsed straight from markdown, before `readBibliotheque` resolves its link target
+ * against the filesystem: `link` is the raw table-row target, never shown to the browser
+ * itself (`LibraryEntry.repoPath`/`lastChanged`, resolved and sanitized, replace it). */
+interface ParsedEntry {
+  title: string;
+  archived: boolean;
+  summary?: string;
+  link: string;
+}
+
 /** Table-row entries of one section's own `INDEX.md`: `| [Title](link) | Description |`.
  * A row whose first column is not a markdown link (a header, a separator, a prose line)
  * contributes nothing. Capped at `MAX_ENTRIES`; `truncated` says whether more existed. */
-export function parseSectionEntries(sectionIndexMarkdown: string): { entries: LibraryEntry[]; truncated: boolean } {
-  const rows: LibraryEntry[] = [];
+export function parseSectionEntries(sectionIndexMarkdown: string): { entries: ParsedEntry[]; truncated: boolean } {
+  const rows: ParsedEntry[] = [];
   let match: RegExpExecArray | null;
   TABLE_ROW.lastIndex = 0;
   while ((match = TABLE_ROW.exec(sectionIndexMarkdown))) {
     const [, title, link, description] = match;
     const archived = ARCHIVED_PATTERN.test(`${title} ${description} ${link}`);
-    rows.push({ title: title.replace(/\*\*/g, '').trim(), archived });
+    // `TABLE_ROW`'s own `description` group (`(.*)\|?\s*$`, kept exactly as-is since `title`'s
+    // own match depends on the same expression) is greedy: for a normal `| Title | Description |`
+    // row it keeps the real trailing `|` inside the match rather than backtrack onto the
+    // optional one after it. Never surfaced before this PR (the group was parsed and
+    // discarded); stripped here, once, same as the `**` bold markers title already loses.
+    const summary = description.replace(/\*\*/g, '').replace(/\|\s*$/, '').trim();
+    rows.push({ title: title.replace(/\*\*/g, '').trim(), archived, ...(summary ? { summary } : {}), link });
   }
   return { entries: rows.slice(0, MAX_ENTRIES), truncated: rows.length > MAX_ENTRIES };
+}
+
+/** A link target with its own URI scheme (`https:`, `mailto:`, ...): never a local file, so
+ * never worth a filesystem lookup. */
+const EXTERNAL_LINK = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+/**
+ * An entry's own `lastChanged`/`repoPath`, resolved from its row's raw link against the
+ * section's own directory (the same base a relative markdown link already resolves against).
+ * `{}` for an external link, an absolute path, a missing file, a non-file, or a target a
+ * symlink would have to escape `realBase` (the bibliothèque tree) to reach, or `realRoot` (the
+ * repo root) to express as a relative path — never a guess, never a path sent further than
+ * this module (the caller drops `link` and keeps only these two sanitized fields).
+ */
+function resolveEntryTarget(sectionDir: string, link: string, realBase: string, realRoot: string): Pick<LibraryEntry, 'lastChanged' | 'repoPath'> {
+  const target = link.split(/[#?]/)[0].trim();
+  if (!target || EXTERNAL_LINK.test(target) || path.isAbsolute(target)) return {};
+  try {
+    const real = fs.realpathSync(path.join(sectionDir, target));
+    if (!withinRoot(real, realBase)) return {};
+    const stat = fs.lstatSync(real);
+    if (!stat.isFile()) return {};
+    const repoPath = path.relative(realRoot, real).split(path.sep).join('/');
+    if (repoPath === '' || repoPath.startsWith('..') || path.isAbsolute(repoPath)) return {};
+    return { lastChanged: stat.mtime.toISOString().slice(0, 10), repoPath };
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -139,8 +204,10 @@ export function parseSectionEntries(sectionIndexMarkdown: string): { entries: Li
 export function readBibliotheque(root: string): Bibliotheque | undefined {
   const base = path.join(root, BIBLIOTHEQUE_RELATIVE);
   let realBase: string;
+  let realRoot: string;
   try {
     realBase = fs.realpathSync(base);
+    realRoot = fs.realpathSync(root);
   } catch {
     return undefined;
   }
@@ -148,10 +215,17 @@ export function readBibliotheque(root: string): Bibliotheque | undefined {
   if (topRead === undefined) return undefined;
   const sections: LibrarySection[] = [];
   for (const segment of topLevelSections(topRead.text).slice(0, MAX_SECTIONS)) {
-    const sectionRead = readCapped(path.join(base, segment, 'INDEX.md'), realBase);
+    const sectionDir = path.join(base, segment);
+    const sectionRead = readCapped(path.join(sectionDir, 'INDEX.md'), realBase);
     if (sectionRead === undefined) continue;
-    const { entries, truncated } = parseSectionEntries(sectionRead.text);
-    if (entries.length === 0) continue;
+    const { entries: parsed, truncated } = parseSectionEntries(sectionRead.text);
+    if (parsed.length === 0) continue;
+    const entries: LibraryEntry[] = parsed.map(({ title, archived, summary, link }) => ({
+      title,
+      archived,
+      ...(summary ? { summary } : {}),
+      ...resolveEntryTarget(sectionDir, link, realBase, realRoot),
+    }));
     sections.push({ name: segment, entries, truncated: truncated || sectionRead.truncated });
   }
   return { sections };

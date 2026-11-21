@@ -159,10 +159,16 @@ export interface JiraTicketInput {
 }
 
 /** One entry on a library shelf (issue #191/#119). `archived` is Prospero's rule: a superseded
- * or archived entry still shows, with a visible mark, never silently dropped. */
+ * or archived entry still shows, with a visible mark, never silently dropped. `repoPath` is the
+ * link target's own path relative to the repo root (`plugins/floor-library/bibliotheque.ts`'s
+ * `resolveEntryTarget`), used here only to build `githubUrl` below — it never reaches the
+ * browser itself (issue #221 AC3). */
 export interface LibraryEntryInput {
   title: string;
   archived?: boolean;
+  summary?: string;
+  lastChanged?: string;
+  repoPath?: string;
 }
 
 /** One section's own shelf, built from that section's own `INDEX.md` (issue #119 review:
@@ -177,11 +183,16 @@ export interface LibrarySectionInput {
 /** A floor's own library (issue #191 AC1, #119): read from `<repo>/documentation/bibliotheque/`
  * when that structure exists there, else this floor gets none (graceful degradation, never a
  * folder-structure guess). `repo` is the same whitelist and client matching rule as
- * `RoomInput.repo`/`BoardInput.repo`. */
+ * `RoomInput.repo`/`BoardInput.repo` — it also carries the directory-name fallback `server/
+ * floor.ts`'s own `qualifiedFloorName` falls back to when a repo has no git remote, which
+ * reads exactly like a real `owner/repo` pair. `remoteRepo` (issue #221 review) is the one
+ * this layer actually builds a GitHub link from: `FloorResolver.resolveRemoteOwnerRepo`'s own
+ * output, absent whenever there is no real git remote, never the directory fallback. */
 export interface LibraryInput {
   key: string;
   sections: LibrarySectionInput[];
   repo?: string;
+  remoteRepo?: string;
 }
 
 export interface WorldInput {
@@ -481,6 +492,40 @@ function repoTag(value: unknown): string | undefined {
   return typeof value === 'string' && value.includes('/') ? ownerRepo(value) : repoShortName(value);
 }
 
+/** Review: a real document name is not ASCII-only (an accent, a space) — the original
+ * `[A-Za-z0-9_.-]` whitelist rejected those and silently dropped `githubUrl` for an otherwise
+ * valid file (issue #221 AC3 explicitly asks for "nested paths and spaces"). This instead
+ * forbids only what actually matters for a repo-relative path: no control character, no
+ * backslash, no leading slash, no empty/`.`/`..` segment — the same shape `resolveEntryTarget`
+ * already only ever hands back (defense in depth: this whitelist runs again at the boundary
+ * regardless of what the plugin layer sent). Everything else a real filename can hold (spaces,
+ * accents, parentheses) survives, and `githubBlobUrl` below percent-encodes each segment before
+ * it reaches a URL. */
+const FORBIDDEN_PATH_CHARS = /[\x00-\x1f\\]/;
+
+function repoPath(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 300) return undefined;
+  if (value.startsWith('/') || FORBIDDEN_PATH_CHARS.test(value)) return undefined;
+  const segments = value.split('/');
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) return undefined;
+  return value;
+}
+
+/**
+ * A document's own "Open on GitHub" link (issue #221 AC3): `https://github.com/<owner>/<repo>
+ * /blob/main/<path>`, built here from an already-whitelisted owner/repo and repo-relative path,
+ * never a URL a plugin hands over whole — the same reasoning `redactPaths` already applies to
+ * free text: nothing resembling a local filesystem path crosses this boundary, only a URL and
+ * display strings built from parts this function itself validated. Each path segment is
+ * percent-encoded on its own (review: `repoPath` now allows a space or an accent through, which
+ * is not valid raw inside a URL) so the slash that separates segments survives untouched.
+ */
+function githubBlobUrl(owner: string, repo: string, path: string): string | undefined {
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const url = `https://github.com/${owner}/${repo}/blob/main/${encodedPath}`;
+  return httpsUrl(url);
+}
+
 const HEX_COLOR = /^#?([0-9A-Fa-f]{6})$/;
 
 /** A 6-hex color as lowercase `rrggbb`, or undefined. */
@@ -706,22 +751,52 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
   }));
   const jiraTickets = parts.flatMap((part) => part.jiraTickets ?? []).slice(0, 50)
     .map(jiraTicket).filter((ticket): ticket is NonNullable<ReturnType<typeof jiraTicket>> => ticket !== undefined);
-  const libraries = parts.flatMap((part) => part.libraries ?? []).slice(0, 4).map((library) => ({
-    id: publicId(`library:${library.key}`),
-    // Section names and entry titles come straight from a repo's own committed markdown
-    // (issue #119/#191): a title whose own visible link text happens to read as a filesystem
-    // path (a careless `[/Users/alice/notes.md](link)`, the display text rather than the link
-    // itself, which never reaches here) still must not cross this boundary raw (S4) — redacted
-    // the same way free text already is for a tombstone's own story (`redactPaths`, above),
-    // before the display cap, so truncation cannot cut a path in half and leave a fragment.
-    sections: (library.sections ?? []).slice(0, 8).map((section) => ({
-      name: displayText(redactPaths(section.name), 32),
-      entries: (section.entries ?? []).slice(0, 6)
-        .map((entry) => ({ title: displayText(redactPaths(entry.title), 80), ...(entry.archived === true ? { archived: true as const } : {}) }))
-        .filter((entry) => entry.title.length > 0),
-      ...(section.truncated === true ? { truncated: true as const } : {}),
-    })).filter((section) => section.name.length > 0 && section.entries.length > 0),
-    ...(repoTag(library.repo) ? { repo: repoTag(library.repo) } : {}),
-  })).filter((library) => library.sections.length > 0);
+  const libraries = parts.flatMap((part) => part.libraries ?? []).slice(0, 4).map((library) => {
+    // Resolved once per library (issue #221 AC3, review): a GitHub blob link only ever builds
+    // against `remoteRepo` — `FloorResolver.resolveRemoteOwnerRepo`'s own output, present only
+    // when the floor's root actually has a git `origin` remote. `library.repo` (used below for
+    // the client's own floor-matching, unchanged) is the wrong field for this: its own
+    // fallback, a bare `parent-dir/repo-dir` pair when there is no remote at all, has the exact
+    // same `owner/repo` shape as a real one and would otherwise build a link to an unrelated
+    // GitHub repo that merely shares that directory name. No remote at all: every entry's
+    // `githubUrl` is simply absent — graceful degradation, the same shape every other optional
+    // field here already follows.
+    const repo = repoTag(library.repo);
+    const remoteRepo = repoTag(library.remoteRepo);
+    const ownerName = remoteRepo && OWNER_REPO.test(remoteRepo) ? remoteRepo.split('/') : undefined;
+    return {
+      id: publicId(`library:${library.key}`),
+      // Section names and entry titles come straight from a repo's own committed markdown
+      // (issue #119/#191): a title whose own visible link text happens to read as a filesystem
+      // path (a careless `[/Users/alice/notes.md](link)`, the display text rather than the link
+      // itself, which never reaches here) still must not cross this boundary raw (S4) — redacted
+      // the same way free text already is for a tombstone's own story (`redactPaths`, above),
+      // before the display cap, so truncation cannot cut a path in half and leave a fragment.
+      // 100x100 (issue #221 AC1, Gabriel's own cap, round 7 part 3): the data layer's own cap,
+      // not the room's physical display limit — `plugins/floor-library/client.ts` shows far
+      // fewer at once and signs the rest, same as `section.truncated` already does below.
+      sections: (library.sections ?? []).slice(0, 100).map((section) => ({
+        name: displayText(redactPaths(section.name), 32),
+        entries: (section.entries ?? []).slice(0, 100)
+          .map((entry) => {
+            const title = displayText(redactPaths(entry.title), 80);
+            const summary = entry.summary ? displayText(redactPaths(entry.summary), 160) : undefined;
+            const lastChanged = isoDate(entry.lastChanged);
+            const path = repoPath(entry.repoPath);
+            const githubUrl = ownerName && path ? githubBlobUrl(ownerName[0], ownerName[1], path) : undefined;
+            return {
+              title,
+              ...(entry.archived === true ? { archived: true as const } : {}),
+              ...(summary ? { summary } : {}),
+              ...(lastChanged ? { lastChanged } : {}),
+              ...(githubUrl ? { githubUrl } : {}),
+            };
+          })
+          .filter((entry) => entry.title.length > 0),
+        ...(section.truncated === true ? { truncated: true as const } : {}),
+      })).filter((section) => section.name.length > 0 && section.entries.length > 0),
+      ...(repo ? { repo } : {}),
+    };
+  }).filter((library) => library.sections.length > 0);
   return { plugins: pluginNames.filter((name) => /^[a-z0-9-]{1,32}$/.test(name)), rooms, boards, jiraTickets, libraries };
 }
