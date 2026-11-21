@@ -148,3 +148,41 @@ test('a skills field in the answer reaches the new agent\'s extras (issue #166 r
   assert.equal(addAgent.mock.callCount(), 1);
   assert.deepEqual(addAgent.mock.calls[0].arguments[0].extras, { skills: ['write-a-skill', 'klever-mr'] });
 });
+
+test('an orchestrating field in the answer reaches the new agent\'s extras (issue #168 review: EXTRA_KEYS must carry it)', async () => {
+  mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify([
+    { id: 'a', name: 'agent', activity: 'idle', attention: 'your-turn', waitMinutes: 3, orchestrating: true },
+  ])));
+  const addAgent = mock.fn();
+  const orchestratingManager = { getAgents: () => [], addAgent, setActivity: () => undefined, removeAgent: () => undefined } as unknown as AgentManager;
+  const poller = new AgentPoller(orchestratingManager) as unknown as { poll(): Promise<void> };
+
+  await poller.poll();
+
+  assert.equal(addAgent.mock.callCount(), 1);
+  assert.deepEqual(addAgent.mock.calls[0].arguments[0].extras, { attention: 'your-turn', waitMinutes: 3, orchestrating: true });
+});
+
+// --- Guard (review on #183, the third PR with this exact bug): every key projectAgents can
+// emit must be in EXTRA_KEYS, or the poller silently drops it and no client code ever sees it. ---
+
+test('every key projectAgents (server/seam.ts) can emit on a live agent is carried by EXTRA_KEYS', async () => {
+  const { projectAgents } = await import('../server/seam.js');
+  const { EXTRA_KEYS } = await import('../src/agents/AgentPoller.js');
+  const publicId = (raw: string) => raw;
+  const enabledActions = new Set(['focus']);
+  const [agent] = projectAgents([{
+    id: 'a', parentId: 'p', provider: 'codex', name: 'agent', activity: 'implementing',
+    internal: {},
+    display: {
+      attention: 'your-turn', orchestrating: true, waitMinutes: 3, groupKey: 'g', groupLabel: 'Group',
+      badges: ['sally'], skills: ['write-a-skill'], issues: [{ number: 1, title: 'a' }], roomKey: 'r',
+      actions: ['focus'], role: 'librarian', stuck: true,
+    },
+  }], publicId, enabledActions);
+
+  const coreKeys = new Set(['id', 'name', 'activity']);
+  const emittedExtraKeys = Object.keys(agent).filter((key) => !coreKeys.has(key));
+  const missing = emittedExtraKeys.filter((key) => !(EXTRA_KEYS as readonly string[]).includes(key));
+  assert.deepEqual(missing, [], `projectAgents can emit ${JSON.stringify(missing)}, which EXTRA_KEYS never carries to the client`);
+});

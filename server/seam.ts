@@ -18,6 +18,10 @@ export type ActionName = typeof ACTION_NAMES[number];
 /** Data an enricher may set for display. Raw keys are hashed before they leave. */
 export interface DisplayExtras {
   attention?: Attention;
+  /** Only with `attention: 'your-turn'` (issue #168): finished its own turn, but a subagent of
+   * its own is still running. The raised-hand/beacon signal and the figure's posture read this,
+   * never the plain your-turn case, so an orchestrator does not look like it is blocked on you. */
+  orchestrating?: boolean;
   waitMinutes?: number;
   groupKey?: string;
   groupLabel?: string;
@@ -306,6 +310,7 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
       ...(agent.parentId ? { parentId: publicId(agent.parentId) } : {}),
       ...(agent.provider === 'codex' ? { provider: 'codex' as const } : {}),
       ...(extras.attention === 'waiting' || extras.attention === 'your-turn' ? { attention: extras.attention } : {}),
+      ...(extras.attention === 'your-turn' && extras.orchestrating === true ? { orchestrating: true as const } : {}),
       ...(waitMinutes !== undefined ? { waitMinutes } : {}),
       ...(extras.groupKey ? { group: { id: publicId(`group:${extras.groupKey}`), label: displayText(extras.groupLabel, 40) } } : {}),
       ...(badges.length > 0 ? { badges } : {}),

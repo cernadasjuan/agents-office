@@ -76,7 +76,7 @@ export class AgentManager {
     // A new agent appears at its seat (no walk from the origin)
     this.goToSeat(managed, this.layout.seatFor(info, null), true);
     figure.setActivity(info.activity);
-    figure.setAttention(info.extras?.attention, info.extras?.waitMinutes);
+    figure.setAttention(info.extras?.attention, info.extras?.waitMinutes, info.extras?.orchestrating);
     figure.setStuck(info.extras?.stuck === true);
     return figure;
   }
@@ -113,7 +113,7 @@ export class AgentManager {
     managed.figure.setAccentColor(accent, second);
     managed.figure.setSubagent(extras?.parentId !== undefined);
     managed.figure.setTag(extras?.provider);
-    managed.figure.setAttention(extras?.attention, extras?.waitMinutes);
+    managed.figure.setAttention(extras?.attention, extras?.waitMinutes, extras?.orchestrating);
     managed.figure.setStuck(extras?.stuck === true);
     const seat = this.layout.seatFor(managed.info, managed.info.activity);
     if (seat) this.goToSeat(managed, seat, false);

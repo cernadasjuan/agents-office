@@ -42,6 +42,17 @@ test('the agent projection copies only whitelisted, cleaned fields', () => {
   assert.equal(JSON.stringify(agent).includes('4242'), false);
 });
 
+test('orchestrating projects only alongside your-turn, never alone and never under a waiting block (issue #168)', () => {
+  const [yourTurn] = projectAgents([observation({ display: { attention: 'your-turn', orchestrating: true } })], publicId);
+  assert.equal(yourTurn.orchestrating, true);
+
+  const [waiting] = projectAgents([observation({ display: { attention: 'waiting', orchestrating: true } as never })], publicId);
+  assert.equal('orchestrating' in waiting, false, 'a true block on the user never reads as orchestrating, whatever upstream data claims');
+
+  const [plain] = projectAgents([observation({ display: { attention: 'your-turn' } })], publicId);
+  assert.equal('orchestrating' in plain, false);
+});
+
 test('skills keeps only plain string tokens, dropping a non-string value even if it would pass the pattern once coerced to a string (issue #166 review)', () => {
   const [agent] = projectAgents([observation({
     display: { skills: ['write-a-skill', 'BAD SKILL', null, 42, true, ['nested']] as never },

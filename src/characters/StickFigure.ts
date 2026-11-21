@@ -31,6 +31,7 @@ export class StickFigure {
   private tag: string | undefined;
   private attention: string | undefined;
   private waitMinutes: number | undefined;
+  private orchestrating = false;
   private callsForYou = false;
   private subagent = false;
   private stuck = false;
@@ -107,11 +108,17 @@ export class StickFigure {
     this.refreshLabel();
   }
 
-  /** Who needs the user: every wait changes the label; a fresh wait also raises a hand and shows a beacon. */
-  setAttention(attention: string | undefined, waitMinutes: number | undefined): void {
+  /**
+   * Who needs the user: every wait changes the label; a fresh wait also raises a hand and shows
+   * a beacon. `orchestrating` (issue #168) is only meaningful with `attention: 'your-turn'`: it
+   * finished its own turn but a subagent of its own is still running, so it gets the calm
+   * hands-on-hips pose instead, never the raised hand or the beacon.
+   */
+  setAttention(attention: string | undefined, waitMinutes: number | undefined, orchestrating = false): void {
     this.attention = attention;
     this.waitMinutes = waitMinutes;
-    this.callsForYou = callsForYou({ attention: attention as AgentExtras['attention'], waitMinutes });
+    this.orchestrating = orchestrating;
+    this.callsForYou = callsForYou({ attention: attention as AgentExtras['attention'], waitMinutes, orchestrating });
     this.refreshLabel();
     if (this.callsForYou && !this.beacon) {
       this.beacon = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), getToonMaterial(new THREE.Color(0xffb020)));
@@ -133,9 +140,14 @@ export class StickFigure {
     return this.isMoving;
   }
 
-  /** Changes when the pose to show changes: the activity, the posture or the raised hand. */
+  /** Changes when the pose to show changes: the activity, the posture, the raised hand or the hands-on-hips pose. */
   get poseKey(): string {
-    return `${this.targetActivity}|${this.posture ?? ''}|${this.callsForYou ? 1 : 0}`;
+    return `${this.targetActivity}|${this.posture ?? ''}|${this.callsForYou ? 1 : 0}|${this.isOrchestrating ? 1 : 0}`;
+  }
+
+  /** True while this agent stands with hands on hips: it finished its own turn, but a subagent of its own still runs (#168). */
+  get isOrchestrating(): boolean {
+    return !this.callsForYou && this.attention === 'your-turn' && this.orchestrating;
   }
 
   /**
@@ -232,7 +244,7 @@ export class StickFigure {
     }
 
     // Animate activity
-    animateActivity(this.joints, this.activity, elapsed, delta, this.posture, this.isWaiting);
+    animateActivity(this.joints, this.activity, elapsed, delta, this.posture, this.isWaiting, this.isOrchestrating);
     if (this.beacon?.visible) {
       this.beacon.position.y = 2.55 + Math.sin(elapsed * 3) * 0.06;
       this.beacon.rotation.y = elapsed * 1.5;

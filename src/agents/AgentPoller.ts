@@ -8,7 +8,15 @@ interface DetectedAgent extends AgentExtras {
   activity: string;
 }
 
-const EXTRA_KEYS: Array<keyof AgentExtras> = ['parentId', 'provider', 'attention', 'waitMinutes', 'group', 'badges', 'skills', 'issues', 'room', 'role', 'actions', 'stuck'];
+/**
+ * Every optional field `projectAgents` (server/seam.ts) can put on a live agent. A key the
+ * server can emit but this array omits is silently dropped here — no client code ever sees it,
+ * however correctly the server projects it (the third time this exact bug has shipped: skills,
+ * then orchestrating). `tests/poller.test.ts` guards this by comparing against a real
+ * `projectAgents` call with every field set, so a future field fails in CI instead of only in
+ * the office.
+ */
+export const EXTRA_KEYS: Array<keyof AgentExtras> = ['parentId', 'provider', 'attention', 'orchestrating', 'waitMinutes', 'group', 'badges', 'skills', 'issues', 'room', 'role', 'actions', 'stuck'];
 
 /** The optional fields the server sent, or undefined when there are none. */
 function extrasOf(agent: DetectedAgent): AgentExtras | undefined {

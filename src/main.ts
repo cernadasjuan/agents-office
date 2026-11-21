@@ -142,6 +142,15 @@ window.addEventListener('keydown', (event) => {
   });
 });
 
+// The beacon hint tooltip (issue #170 review): labels have `pointer-events: none`, so a title
+// attribute there never shows. A small DOM element near the cursor, shown only while hovering
+// an agent that calls for you; the agent card's own status line is the fallback everywhere else
+// (first person with the pointer locked, no mouse to hover with).
+const beaconTooltip = document.createElement('div');
+beaconTooltip.className = 'beacon-tooltip';
+beaconTooltip.hidden = true;
+document.body.appendChild(beaconTooltip);
+
 // Label detail: full labels only for waiting, selected, hovered or near agents. Key V or `#labels=all` shows all.
 // War room signs show only when zoomed in, near or hovered.
 const labelDetail = new LabelDetailController({
@@ -158,6 +167,13 @@ const labelDetail = new LabelDetailController({
   selected: () => selectedAgentId(),
   hash: window.location.hash,
   indicator: document.getElementById('label-mode'),
+  onHoverHint: (hint, point) => {
+    beaconTooltip.hidden = hint === null || point === null;
+    if (hint === null || point === null) return;
+    beaconTooltip.textContent = hint;
+    beaconTooltip.style.left = `${point.x + 14}px`;
+    beaconTooltip.style.top = `${point.y + 14}px`;
+  },
 });
 onSelectionChange(() => labelDetail.refresh());
 

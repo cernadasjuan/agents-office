@@ -1,6 +1,6 @@
 import { activityLabel, shortAgentId, type AgentExtras, type AgentInfo } from '../agents/AgentData.js';
 import { officeSelection, type SelectionState } from '../scene/Selection.js';
-import { attentionBand, attentionLine } from './attention.js';
+import { attentionBand, attentionLine, BEACON_HINT, callsForYou } from './attention.js';
 
 /**
  * Agent card (inspector, phase 1): a click on a figure or a triage row opens a
@@ -146,6 +146,7 @@ export class AgentCard {
   private readonly idTag: HTMLElement;
   private readonly activity: HTMLElement;
   private readonly wait: HTMLElement;
+  private readonly beaconHint: HTMLElement;
   private readonly band: HTMLElement;
   private readonly provider: HTMLElement;
   private readonly workspace: HTMLElement;
@@ -198,6 +199,11 @@ export class AgentCard {
     this.band = el('span', 'inspector-band');
     state.append(this.activity, this.band);
     this.wait = el('div', 'inspector-wait');
+    // The beacon's meaning, reachable without opening the legend (issue #170 review): labels
+    // have `pointer-events: none`, so a hover title there never shows. This line is the
+    // always-reachable fallback; present only while the beacon itself shows.
+    this.beaconHint = el('div', 'inspector-beacon-hint');
+    this.beaconHint.hidden = true;
 
     const facts = el('dl', 'inspector-facts');
     this.provider = el('dd', 'inspector-provider');
@@ -223,7 +229,7 @@ export class AgentCard {
     this.subagents = section('inspector-subagents', 'Subagents');
     this.issues = section('inspector-issues', 'Issues');
 
-    this.root.append(header, state, this.wait, facts, this.parentRow, this.actionRow, this.status,
+    this.root.append(header, state, this.wait, this.beaconHint, facts, this.parentRow, this.actionRow, this.status,
       this.personaSkills.root, this.subagents.root, this.issues.root);
     parent.appendChild(this.root);
 
@@ -355,12 +361,19 @@ export class AgentCard {
 
   private fill(agent: AgentInfo): void {
     const extras = agent.extras ?? {};
+    // Issue #168: the header line reads the same words as the panel row and the floating
+    // label for the same agent at the same time — attention overrides the raw activity text
+    // here too, not just in the separate wait line below it (which keeps the minutes; the
+    // header line here never did, so it stays short next to the band).
     const activityText = activityLabel(agent);
     this.name.textContent = agent.name;
-    this.activity.textContent = activityText;
+    this.activity.textContent = attentionLine(activityText, extras.attention, undefined);
     const waits = extras.attention !== undefined;
     this.wait.textContent = waits ? attentionLine(activityText, extras.attention, extras.waitMinutes) : '';
     this.wait.hidden = !waits;
+    const beaconOn = callsForYou({ attention: extras.attention, waitMinutes: extras.waitMinutes, orchestrating: extras.orchestrating });
+    this.beaconHint.textContent = beaconOn ? BEACON_HINT : '';
+    this.beaconHint.hidden = !beaconOn;
     const band = attentionBand(extras);
     this.band.textContent = band ?? '';
     this.band.hidden = band === undefined;

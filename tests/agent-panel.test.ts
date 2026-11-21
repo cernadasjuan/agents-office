@@ -89,6 +89,28 @@ test('a needs-you row shows the name, the wait and the activity', (t) => {
   assert.equal(row.querySelector('.agent-activity')?.textContent, 'Waiting for you');
 });
 
+// --- Issue #168: the row's activity text agrees with the card and the floating label ---
+
+test('an idle agent with a your-turn wait reads "Your turn" in the row, not "Taking a break" (issue #168)', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([yourTurn('y1', 3)]);
+  const row = card(list, 'y1');
+  assert.equal(row.querySelector('.agent-activity')?.textContent, 'Your turn', 'the override wins over the raw idle activity, the same as the card and the label');
+});
+
+test('a blocked agent reads "Waiting for you" in the row even when its activity is not meeting (issue #168)', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([{ id: 'n1', name: 'n1', activity: 'implementing', extras: { attention: 'waiting', waitMinutes: 2 } }]);
+  const row = card(list, 'n1');
+  assert.equal(row.querySelector('.agent-activity')?.textContent, 'Waiting for you');
+});
+
+test('without attention, the row still shows the plain activity text, unaffected (issue #168)', (t) => {
+  const { list, panel } = makePanel(t);
+  panel.render([working('w1')]);
+  assert.equal(card(list, 'w1').querySelector('.agent-activity')?.textContent, 'Implementing');
+});
+
 test('subagents nest under their parent in working, indented', (t) => {
   const { list, panel } = makePanel(t);
   panel.render([working('sub-b', 'b'), working('a'), working('b'), working('sub-a', 'a'), working('sub-x', 'gone')]);

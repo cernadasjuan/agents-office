@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { isViewFromAbove, type ViewMode } from '../scene/Selection.js';
 import { projectToClip } from '../scene/OffscreenMarker.js';
-import { attentionBand, type Wait } from './attention.js';
+import { attentionBand, BEACON_HINT, callsForYou, type Wait } from './attention.js';
 import { declutterLabels, labelPriority, labelRect, type DeclutterCandidate } from './LabelDeclutter.js';
 
 /** `smart` shows full labels only where they matter; `all` is the original behavior. */
@@ -31,7 +31,7 @@ const MODE_TEXT: Record<LabelMode, string> = { smart: 'Labels: smart (V)', all: 
  */
 function projectToScreen(position: THREE.Vector3, camera: THREE.Camera, width: number, height: number): { x: number; y: number } | null {
   const projection = projectToClip(position, camera);
-  if (projection.behind || projection.pastFar) return null;
+  if (projection.behind || projection.pastFar || projection.tooClose) return null;
   const { x, y } = projection.ndc;
   if (x < -1 || x > 1 || y < -1 || y > 1) return null;
   return { x: (x + 1) / 2 * width, y: (1 - y) / 2 * height };
@@ -166,7 +166,7 @@ export function applyLabelVisibility(element: HTMLElement, visible: boolean): bo
 
 /** The part of a managed agent this module reads. */
 export interface LabelAgent {
-  info: { id: string; activity?: string; extras?: { attention?: string; waitMinutes?: number; stuck?: boolean } };
+  info: { id: string; activity?: string; extras?: { attention?: string; waitMinutes?: number; stuck?: boolean; orchestrating?: boolean } };
   figure: { group: THREE.Object3D; label: { element: HTMLElement; getWorldPosition: (target: THREE.Vector3) => THREE.Vector3 } };
 }
 
@@ -190,6 +190,14 @@ export interface LabelDetailOptions {
   scene?: THREE.Object3D;
   /** A room label changed (pose, face or visibility): the scene needs a new frame. */
   changed?: () => void;
+  /**
+   * Called each refresh with the beacon's meaning and the cursor position, or both null, for
+   * the hovered agent (issue #170 review): labels have `pointer-events: none`, so a title
+   * attribute there never shows. The caller owns rendering a small DOM tooltip near the point;
+   * this module only decides when one applies, reusing the hover detection it already runs for
+   * label declutter.
+   */
+  onHoverHint?: (hint: string | null, point: { x: number; y: number } | null) => void;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -242,7 +250,10 @@ export class LabelDetailController {
     const camera = this.camera();
     const view: LabelView = { mode: this.currentMode, viewMode: this.options.viewMode(), zoomDistance: this.options.zoomDistance() };
     const selected = this.options.selected();
-    const hovered = view.mode === 'smart' ? this.hoveredAgent() : null;
+    // Hover detection runs in every label mode now (review fix): the beacon hint must still
+    // reach the cursor in `#labels=all`, even though declutter (`canDeclutter` below) stays
+    // smart-only, and `labelDetail` itself ignores `hovered` in `all` mode regardless.
+    const hovered = this.hoveredAgent();
     camera.getWorldPosition(this.cameraPosition);
     const canvasRect = this.options.canvas.getBoundingClientRect();
     // Declutter only in the overview and the isometric view: first person's own
@@ -250,7 +261,14 @@ export class LabelDetailController {
     // near must never disappear there (review fix: PR #152).
     const canDeclutter = view.mode === 'smart' && isViewFromAbove(view.viewMode) && canvasRect.width > 0 && canvasRect.height > 0;
     const agents = this.options.agents();
-    const candidates: DeclutterCandidate[] = [];
+    // Pass 1, writes only: every label's class (full/compact) is set here, and nothing in this
+    // loop reads layout (getBoundingClientRect, offsetWidth and the like). Pass 2 below reads
+    // layout for the agents that need it. Interleaving a write and a read per agent (the old
+    // shape) forces the browser to flush layout once per agent; splitting them into two passes
+    // lets it batch every write first and run the layout pass once for the whole refresh
+    // (review fix: PR #152).
+    interface Candidate { agent: LabelAgent; level: LabelLevel; isSelected: boolean; isHovered: boolean }
+    const prepared: Candidate[] = [];
     for (const agent of agents) {
       agent.figure.group.getWorldPosition(this.figurePosition);
       const isSelected = agent.info.id === selected;
@@ -264,28 +282,45 @@ export class LabelDetailController {
         stuck: agent.info.extras?.stuck,
       }, view);
       applyLabelDetail(agent.figure.label.element, level);
-      if (!canDeclutter) continue;
-      agent.figure.label.getWorldPosition(this.labelPosition);
-      const point = projectToScreen(this.labelPosition, camera, canvasRect.width, canvasRect.height);
-      if (!point) continue; // behind the camera or outside the frustum: never a candidate
-      // The label's own rendered size (set by applyLabelDetail above, this same pass), measured
-      // once here and used only for this candidate: a long name does not silently escape the
-      // fixed-size estimate. Falls back to that estimate when no real layout exists (a test, or
-      // a label not yet in a laid-out document).
-      const box = agent.figure.label.element.getBoundingClientRect();
-      candidates.push({
-        id: agent.info.id,
-        rect: labelRect(point.x, point.y, level, box.width, box.height),
-        priority: labelPriority({
-          selected: isSelected,
-          hovered: isHovered,
-          stuck: agent.info.extras?.stuck === true,
-          attention: agent.info.extras?.attention,
-          waitMinutes: agent.info.extras?.waitMinutes,
-          idle: agent.info.activity === 'idle',
-        }),
-        waitMinutes: agent.info.extras?.waitMinutes ?? -1,
-      });
+      prepared.push({ agent, level, isSelected, isHovered });
+    }
+    // The hovered agent's beacon hint (issue #170 review), reusing the hover detection above.
+    // Pointer-locked (first person): `listen()`'s `pointerlockchange` handler clears
+    // `this.pointer` the moment the lock engages and ignores every pointermove while it holds,
+    // so this never fires there — the card line is the fallback in that view.
+    const hoveredAgent = prepared.find((candidate) => candidate.isHovered)?.agent;
+    const hoveredCallsForYou = hoveredAgent !== undefined && this.pointer !== null && callsForYou({
+      attention: hoveredAgent.info.extras?.attention as NonNullable<Wait>['attention'],
+      waitMinutes: hoveredAgent.info.extras?.waitMinutes,
+      orchestrating: hoveredAgent.info.extras?.orchestrating,
+    });
+    this.options.onHoverHint?.(hoveredCallsForYou ? BEACON_HINT : null, hoveredCallsForYou ? this.pointer : null);
+    // Pass 2, reads only (when declutter runs at all).
+    const candidates: DeclutterCandidate[] = [];
+    if (canDeclutter) {
+      for (const { agent, level, isSelected, isHovered } of prepared) {
+        agent.figure.label.getWorldPosition(this.labelPosition);
+        const point = projectToScreen(this.labelPosition, camera, canvasRect.width, canvasRect.height);
+        if (!point) continue; // behind the camera, outside the frustum, or closer than the near plane: never a candidate
+        // The label's own rendered size (set by applyLabelDetail above, pass 1), measured once
+        // here and used only for this candidate: a long name does not silently escape the
+        // fixed-size estimate. Falls back to that estimate when no real layout exists (a test, or
+        // a label not yet in a laid-out document).
+        const box = agent.figure.label.element.getBoundingClientRect();
+        candidates.push({
+          id: agent.info.id,
+          rect: labelRect(point.x, point.y, level, box.width, box.height),
+          priority: labelPriority({
+            selected: isSelected,
+            hovered: isHovered,
+            stuck: agent.info.extras?.stuck === true,
+            attention: agent.info.extras?.attention,
+            waitMinutes: agent.info.extras?.waitMinutes,
+            idle: agent.info.activity === 'idle',
+          }),
+          waitMinutes: agent.info.extras?.waitMinutes ?? -1,
+        });
+      }
     }
     if (canDeclutter) {
       const visible = declutterLabels(candidates);
@@ -377,10 +412,24 @@ export class LabelDetailController {
       this.cycleMode();
     });
     canvas.addEventListener('pointermove', (event) => {
+      // A locked pointer keeps firing `pointermove`, with `clientX`/`clientY` frozen at the
+      // pre-lock position (the look deltas travel in `movementX`/`movementY` instead): ignored
+      // here, so a locked move can never resurrect a stale cursor position (review fix).
+      if (canvas.ownerDocument.pointerLockElement === canvas) return;
       this.pointer = { x: event.clientX, y: event.clientY };
     });
     canvas.addEventListener('pointerleave', () => {
       this.pointer = null;
+    });
+    // The lock can engage between two pointermove events (a click straight into first person),
+    // so this.pointer may still hold a pre-lock position when it does. Clearing it here, and
+    // telling the caller to hide the tooltip at once, closes that gap instead of waiting for
+    // the next throttled refresh (review fix: a beacon hint must never show a stale screen spot
+    // while the user looks around locked).
+    canvas.ownerDocument.addEventListener('pointerlockchange', () => {
+      if (canvas.ownerDocument.pointerLockElement !== canvas) return;
+      this.pointer = null;
+      this.options.onHoverHint?.(null, null);
     });
   }
 
