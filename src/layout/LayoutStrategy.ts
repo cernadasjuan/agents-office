@@ -62,4 +62,8 @@ export interface LayoutStrategy {
   update?(elapsed: number, delta: number): LayoutMove[] | void;
   /** Where the camera should go to show a named room (issue #89, `#room=`), or null when the name matches no room. */
   roomView?(name: string): RoomView | null;
+  /** Where the fixed desk-view camera sits (issue #161, key `H`), or null without a desk. */
+  deskView?(): { position: THREE.Vector3; lookAt: THREE.Vector3 } | null;
+  /** The room whose floor contains this world point (issue #175, double-click a room in isometric), or null between rooms. */
+  roomAt?(x: number, z: number): RoomView | null;
 }

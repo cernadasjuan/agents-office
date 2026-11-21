@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
-import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
+import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
 import { IsometricController, IsometricTween, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
 import { PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
 import type { RoomView } from '../layout/LayoutStrategy.js';
@@ -12,10 +12,15 @@ const FIRST_PERSON_FOCUS_DISTANCE = 4;
 const FIGURE_CHEST = 1.1;
 const PAN_SPEED_PER_DISTANCE = 0.9;
 const FAST_MULTIPLIER = 2.5;
+/** Issue #161: the office settles into the desk view after this long with no camera input. */
+const DEFAULT_IDLE_TIMEOUT_SECONDS = 120;
+/** A ground plane for the isometric double-click room pick (issue #175): where the ray meets `y=0`. */
+const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
 export const VIEW_HINTS: Record<ViewMode, string> = {
-  'first-person': 'Click to look around — WASD to walk — double-tap W to run — Shift to crouch — Space to jump — ESC to release — Click a figure to select — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
-  isometric: 'Isometric — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — I = back — Shift+L = layout — N = next — F = focus — / = filter',
+  'first-person': 'Click to look around — WASD to walk — double-tap W to run — Shift to crouch — Space to jump — ESC to release — Click a figure to select — I = isometric — H = desk — Shift+L = layout — N = next — F = focus — / = filter',
+  isometric: 'Isometric — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Double-click a room to enter it — Esc clears — I = back — H = desk — Shift+L = layout — N = next — F = focus — / = filter',
+  desk: 'Desk — fixed camera, no WASD or mouse-look — Click a figure to select, click elsewhere to clear — H or I to leave — N = next — F = focus — / = filter',
 };
 
 export interface ViewControllerOptions {
@@ -41,6 +46,12 @@ export interface ViewControllerOptions {
   figureShiftPx?: () => number;
   /** `#room=<name>` (issue #89): where the camera should go to show that room, from the active layout. Without it, or for a layout with no rooms, `#room=` does nothing. */
   roomView?: (name: string) => RoomView | null;
+  /** Issue #161: where the fixed desk-view camera sits, from the active layout. Without it (or a null return), key `H` and the idle timeout do nothing — graceful degradation, there is no desk to show. */
+  deskView?: () => { position: THREE.Vector3; lookAt: THREE.Vector3 } | null;
+  /** Issue #175: the room (if any) whose floor contains this world point, for a double-click in the isometric view. Without it, double-click does nothing. */
+  roomAt?: (x: number, z: number) => RoomView | null;
+  /** Issue #161: seconds of no camera input before the office settles into the desk view. Default 120; tests pass a short one. */
+  idleTimeoutSeconds?: number;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -83,11 +94,15 @@ export class ViewController {
   private marker: SelectionMarker;
   private selection: SelectionState;
   private raycaster = new THREE.Raycaster();
+  /** Seconds since the last camera input (issue #161); the desk view's idle default. */
+  private idleSeconds = 0;
+  private idleTimeoutSeconds: number;
 
   constructor(private options: ViewControllerOptions) {
     this.selection = options.selection ?? officeSelection();
     this.isometricCamera = options.isometricCamera ?? new THREE.OrthographicCamera();
     this.marker = new SelectionMarker(options.scene);
+    this.idleTimeoutSeconds = options.idleTimeoutSeconds ?? DEFAULT_IDLE_TIMEOUT_SECONDS;
     const start = parseViewHash(options.hash ?? '');
     this.pendingFocus = start.focus;
     this.pendingZoomTarget = start.focus;
@@ -99,7 +114,9 @@ export class ViewController {
     this.setHint();
     const startView = options.view ?? start.view;
     if (startView !== 'first-person') this.setMode(startView, false);
-    else options.modeChanged?.(this.currentMode);
+    // `setMode` no-ops for `desk` without a pose to show (graceful degradation): report the
+    // mode actually landed on (first person), which never ran its own `modeChanged` above.
+    if (this.currentMode === 'first-person') options.modeChanged?.(this.currentMode);
     const room = start.room !== null ? (this.options.roomView?.(start.room) ?? null) : null;
     if (room) this.applyStartRoom(room);
     else if (start.zoom !== null) this.applyStartZoom(start.zoom);
@@ -161,29 +178,51 @@ export class ViewController {
     this.setMode(this.currentMode === 'isometric' ? 'first-person' : 'isometric', true);
   }
 
-  setMode(mode: ViewMode, animate: boolean): void {
+  /** Key H (issue #161): into the fixed desk view, and back to first person. A no-op without a desk to show (graceful degradation). */
+  toggleDesk(): void {
+    this.setMode(this.currentMode === 'desk' ? 'first-person' : 'desk', true);
+  }
+
+  /**
+   * @param explicitPose Issue #175: the exact first-person pose to land at (a double-clicked
+   * room's standing pose), instead of the generic "restore the saved first-person pose" a plain
+   * mode toggle uses. Ignored for any mode but `first-person`.
+   */
+  setMode(mode: ViewMode, animate: boolean, explicitPose?: CameraPose): void {
     if (mode === this.currentMode) return;
+    // Desk mode needs a pose to go to; without one (no desk yet, or no layout support) this is a no-op (rule 3).
+    const deskPose = mode === 'desk' ? this.options.deskView?.() ?? null : null;
+    if (mode === 'desk' && !deskPose) return;
     const previous = this.currentMode;
     const from = this.currentPose();
     if (previous === 'first-person') this.savedFirstPerson = from;
     this.currentMode = mode;
     this.isometricFlight = null;
+    this.idleSeconds = 0;
     // The camera changes kind when the isometric view starts or ends: cut, do not fly
     const fly = animate && previous !== 'isometric' && mode !== 'isometric';
-    if (isViewFromAbove(mode)) {
+    // Desk mode never engages pointer lock (issue #161 AC): exit it even though desk itself is not "from above".
+    if (isViewFromAbove(mode) || mode === 'desk') {
       const document = this.options.canvas.ownerDocument;
       if (document.pointerLockElement) document.exitPointerLock?.();
+    }
+    if (isViewFromAbove(mode)) {
       if (!isViewFromAbove(previous)) this.hideNearWalls();
     } else {
       this.showNearWalls();
     }
+    // Ground-walk (FreeCamera) stays off for the whole time the camera is locked at the desk.
+    if (mode === 'desk') setMovementEnabled(false);
+    else if (previous === 'desk') setMovementEnabled(true);
     this.setHint();
     if (mode === 'isometric') {
       this.flight = null;
       this.frameIsometric();
       this.applyIsometric();
+    } else if (mode === 'desk') {
+      this.flyTo(from, deskPose!, fly);
     } else {
-      this.flyTo(from, this.savedFirstPerson ?? from, fly);
+      this.flyTo(from, explicitPose ?? this.savedFirstPerson ?? from, fly);
     }
     this.options.modeChanged?.(mode);
   }
@@ -228,9 +267,21 @@ export class ViewController {
         }
         this.flight = null;
       }
+    } else if (this.currentMode === 'desk') {
+      // Desk mode holds its pose every frame (issue #161): no WASD, and never the module-level
+      // mouse-look `updateFreeCamera` always applies even with movement off, so this bypasses
+      // it entirely instead of calling it with movement disabled.
+      const pose = this.options.deskView?.();
+      if (pose) this.applyPose(pose);
     } else {
       updateFreeCamera(camera, delta);
     }
+
+    // Idle default (issue #161): any camera input resets this in `listen()`; without one for
+    // long enough, settle into the desk view. A no-op while already there, and a no-op without
+    // a desk to show (`setMode` itself degrades gracefully).
+    this.idleSeconds += delta;
+    if (this.idleSeconds >= this.idleTimeoutSeconds && this.currentMode !== 'desk') this.setMode('desk', true);
 
     const selected = this.selectedAgent();
     if (selected) this.marker.follow(selected.figure.group.position, elapsed);
@@ -254,25 +305,35 @@ export class ViewController {
     return pickAgent(this.raycaster, targets);
   }
 
+  /** Any camera input resets the desk view's idle timer (issue #161). */
+  private markActive(): void {
+    this.idleSeconds = 0;
+  }
+
   private listen(): void {
     const { canvas, keys } = this.options;
     const document = canvas.ownerDocument;
 
     keys.addEventListener('keydown', (event: KeyboardEvent) => {
       if (isFormField(event.target)) return;
+      this.markActive();
       if (event.code === 'KeyI') this.toggleIsometric();
+      else if (event.code === 'KeyH') this.toggleDesk();
       else if (event.code === 'Escape') this.selection.clear();
       else this.panKeys.add(event.code);
     });
     keys.addEventListener('keyup', (event: KeyboardEvent) => this.panKeys.delete(event.code));
 
     canvas.addEventListener('pointerdown', (event) => {
+      this.markActive();
       this.pressPoint = { x: event.clientX, y: event.clientY };
       this.dragPoint = isViewFromAbove(this.currentMode) && event.button === 0 ? { ...this.pressPoint } : null;
       this.dragged = false;
     });
     document.addEventListener('pointermove', (event) => {
+      if (document.pointerLockElement === canvas) this.markActive(); // first-person look
       if (!this.dragPoint || !isViewFromAbove(this.currentMode)) return;
+      this.markActive();
       const point = { x: event.clientX, y: event.clientY };
       if (isClick(this.pressPoint, point)) return;
       this.dragged = true;
@@ -292,12 +353,26 @@ export class ViewController {
       // A gesture that panned and returned near the press point is still a drag, not a click
       // (issue #133): `isClick` alone only compares endpoints, so it would misread this as a miss.
       if (this.dragged || !isClick(this.pressPoint, { x: event.clientX, y: event.clientY })) return;
+      // Desk mode (issue #161, Finding J): a ground click (a miss below) only clears the
+      // selection, exactly like first person already does — it never engages pointer lock
+      // (the filter above already guards that) and never switches view.
       const agentId = this.pickAt(event.clientX, event.clientY);
       if (agentId) this.selection.select(agentId);
       else this.selection.clear();
     });
+    canvas.addEventListener('dblclick', (event) => {
+      // Issue #175: double-click a room in the isometric view to enter it in first person,
+      // at the standing pose `#room=` already uses. No-op in any other view, over no room, or
+      // without a layout that supports `roomAt` (graceful degradation).
+      if (this.currentMode !== 'isometric') return;
+      const room = this.roomUnderPoint(event.clientX, event.clientY);
+      if (!room) return;
+      this.markActive();
+      this.setMode('first-person', false, room.standing);
+    });
     canvas.addEventListener('wheel', (event) => {
       if (!isViewFromAbove(this.currentMode)) return;
+      this.markActive();
       event.preventDefault();
       this.flight = null;
       this.isometricFlight = null;
@@ -316,6 +391,19 @@ export class ViewController {
     }, { passive: false });
   }
 
+  /** Issue #175: the room (if any) under a screen point in the isometric view, via a ground-plane raycast. */
+  private roomUnderPoint(clientX: number, clientY: number): RoomView | null {
+    const rect = this.options.canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    const camera = this.activeCamera;
+    camera.updateMatrixWorld();
+    this.raycaster.setFromCamera(ndc, camera);
+    const point = new THREE.Vector3();
+    if (!this.raycaster.ray.intersectPlane(GROUND_PLANE, point)) return null;
+    return this.options.roomAt?.(point.x, point.z) ?? null;
+  }
+
   private selectionChanged(agentId: string | null): void {
     // Any selection other than the one #select= named drops the pending #zoom= for good
     // (issue #89 review, fix round 2): a decoy selected first must never steal it, and the
@@ -331,7 +419,9 @@ export class ViewController {
       return;
     }
     this.marker.show(agent.figure.accentColor);
-    this.flyToAgent(agent.figure.group.position);
+    // Desk mode locks the camera in place (issue #161): the ring and the card still follow
+    // the selection, the camera itself never flies there.
+    if (this.currentMode !== 'desk') this.flyToAgent(agent.figure.group.position);
   }
 
   /**
@@ -343,7 +433,7 @@ export class ViewController {
     const agent = this.options.agents().find((candidate) => candidate.info.id === agentId);
     if (!agent) return;
     this.marker.show(agent.figure.accentColor);
-    this.flyToAgent(agent.figure.group.position);
+    if (this.currentMode !== 'desk') this.flyToAgent(agent.figure.group.position);
   }
 
   private selectedAgent(): ManagedAgent | undefined {
@@ -473,6 +563,8 @@ export class ViewController {
     const hint = this.options.hint;
     if (!hint) return;
     hint.textContent = VIEW_HINTS[this.currentMode];
-    if (isViewFromAbove(this.currentMode)) hint.style.display = 'block';
+    // Isometric and desk never engage pointer lock, so the lock's own show/hide never runs for
+    // them (`FreeCamera`'s `pointerlockchange` listener); show the hint outright instead.
+    if (this.currentMode !== 'first-person') hint.style.display = 'block';
   }
 }

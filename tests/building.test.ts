@@ -626,6 +626,48 @@ test('roomView\'s first-person standing point sits inside the room, facing furth
   assert.ok(facing.lengthSq() > 0, 'looks somewhere other than straight down at its own feet');
 });
 
+// --- deskView and roomAt (issue #161, #175) ---
+
+test('deskView sits inside the office, behind the desk, looking back toward the queue', () => {
+  const { layout } = setup();
+  const view = layout.deskView()!;
+  const rect = slotFor(0).rect;
+  assert.ok(view.position.x > rect.minX && view.position.x < rect.maxX, 'inside the office on x');
+  assert.ok(view.position.z > rect.minZ && view.position.z < rect.maxZ, 'inside the office on z');
+  assert.ok(view.position.y > 0, 'a sitting eye height, not on the floor');
+
+  const officeView = layout.roomView('office')!;
+  assert.ok(view.position.y < officeView.standing.position.y, 'the desk view sits lower than the standing queue view');
+
+  // The office door is on the west wall (`slotFor(0).door.side === 'west'`): the door, and the
+  // queue in front of the desk, sit at a smaller x than the desk itself. Looking back toward
+  // them from behind the desk means looking toward a smaller x than the camera's own position.
+  assert.ok(view.lookAt.x < view.position.x, 'looks toward the door side of the room, where the queue stands');
+});
+
+test('roomAt finds the office by a point inside its rect, and returns null between rooms', () => {
+  const { layout } = setup();
+  const rect = slotFor(0).rect;
+  const centerX = (rect.minX + rect.maxX) / 2;
+  const centerZ = (rect.minZ + rect.maxZ) / 2;
+  const hit = layout.roomAt(centerX, centerZ)!;
+  assert.ok(hit, 'a point inside the office rect finds a room');
+  assert.deepEqual([hit.bounds.min.x, hit.bounds.max.x, hit.bounds.min.z, hit.bounds.max.z], [rect.minX, rect.maxX, rect.minZ, rect.maxZ]);
+
+  assert.equal(layout.roomAt(1000, 1000), null, 'far outside every room');
+});
+
+test('roomAt finds a mission room by its own rect, not just building rooms', () => {
+  const { layout } = setup();
+  layout.syncWorldRooms([{ id: 'm0', kind: 'mission', title: 'Media Plan', state: 'open', walls: {} }]);
+  const rect = missionSlot(0).rect;
+  const centerX = (rect.minX + rect.maxX) / 2;
+  const centerZ = (rect.minZ + rect.maxZ) / 2;
+  const hit = layout.roomAt(centerX, centerZ)!;
+  assert.ok(hit, 'a point inside the mission room rect finds it');
+  assert.deepEqual([hit.bounds.min.x, hit.bounds.max.x, hit.bounds.min.z, hit.bounds.max.z], [rect.minX, rect.maxX, rect.minZ, rect.maxZ]);
+});
+
 // --- Library and librarians ---
 
 test('the Librarian persona badge reaches the Library room before the hall shelves (issue #128)', () => {

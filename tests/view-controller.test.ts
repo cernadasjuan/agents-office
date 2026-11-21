@@ -27,7 +27,18 @@ const fixedLayout: LayoutStrategy = {
   release: () => undefined,
 };
 
-function setup(hash = '', figureShiftPx?: () => number, roomView?: (name: string) => { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null) {
+interface SetupExtras {
+  deskView?: () => { position: THREE.Vector3; lookAt: THREE.Vector3 } | null;
+  roomAt?: (x: number, z: number) => { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null;
+  idleTimeoutSeconds?: number;
+}
+
+function setup(
+  hash = '',
+  figureShiftPx?: () => number,
+  roomView?: (name: string) => { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null,
+  extras: SetupExtras = {},
+) {
   const document = dom.window.document;
   const scene = new THREE.Scene();
   const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
@@ -49,9 +60,15 @@ function setup(hash = '', figureShiftPx?: () => number, roomView?: (name: string
     hash,
     ...(figureShiftPx ? { figureShiftPx } : {}),
     ...(roomView ? { roomView } : {}),
+    ...extras,
   });
   const press = (code: string) => dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { code, key: code }));
   return { view, camera, canvas, manager, selection, wall, hint, press };
+}
+
+/** A fixed desk pose away from the test's default first-person spot, so a flight there is visible. */
+function fixtureDeskView(): { position: THREE.Vector3; lookAt: THREE.Vector3 } {
+  return { position: new THREE.Vector3(20, 1.3, -2), lookAt: new THREE.Vector3(20, 1.2, -6) };
 }
 
 test('first person stays the default and the camera does not move by itself', () => {
@@ -84,6 +101,132 @@ test('key I switches to the isometric view and back, hiding near walls only ther
   assert.equal(view.mode, 'first-person');
   assert.equal(wall.visible, true);
   assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, EYE_HEIGHT, 11)) < 1e-6);
+});
+
+// --- Desk view (issue #161) ---
+
+test('key H flies to the desk pose, in a short fly, not an instant cut', () => {
+  const desk = fixtureDeskView();
+  const { view, camera, press } = setup('', undefined, undefined, { deskView: () => desk });
+  press('KeyH');
+  assert.equal(view.mode, 'desk');
+  // Mid-flight: not yet at the desk pose (it is a fly, issue #161 AC1).
+  view.update(0, 1 / 120);
+  assert.ok(camera.position.distanceTo(desk.position) > 0.01, 'still mid-flight, not an instant cut');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.ok(camera.position.distanceTo(desk.position) < 1e-6, 'lands exactly at the desk pose');
+});
+
+test('key H without a desk to show is a no-op (graceful degradation, no deskView option at all)', () => {
+  const { view, camera, press } = setup();
+  press('KeyH');
+  assert.equal(view.mode, 'first-person', 'stays in the current view; there is no desk to show');
+  assert.deepEqual(camera.position.toArray(), [-12, EYE_HEIGHT, 11]);
+});
+
+test('desk mode holds its pose every frame: WASD, mouse-look and gravity never move it', () => {
+  const desk = fixtureDeskView();
+  const { view, camera, press } = setup('', undefined, undefined, { deskView: () => desk });
+  press('KeyH');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60); // let the fly land
+  press('KeyW');
+  press('Space');
+  for (let i = 0; i < 60; i++) view.update(1 + i / 60, 1 / 60);
+  assert.ok(camera.position.distanceTo(desk.position) < 1e-6, 'WASD and Space never move the desk camera');
+});
+
+test('desk mode never engages pointer lock: a click elsewhere clears the selection, exactly like a ground click in first person', () => {
+  const desk = fixtureDeskView();
+  const { view, manager, selection, canvas, press } = setup('', undefined, undefined, { deskView: () => desk });
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  press('KeyH');
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, clientY: 10 }));
+  assert.equal(selection.selected, null, 'a ground click in desk mode clears the selection');
+  assert.equal(view.mode, 'desk', 'a ground click never switches out of desk mode');
+});
+
+test('selecting an agent in desk mode shows the card but never flies the camera', () => {
+  const desk = fixtureDeskView();
+  const { view, manager, selection, camera, press } = setup('', undefined, undefined, { deskView: () => desk });
+  press('KeyH');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  selection.select('a');
+  for (let i = 0; i < 60; i++) view.update(1 + i / 60, 1 / 60);
+  assert.equal(selection.selected, 'a', 'the card still opens');
+  assert.ok(camera.position.distanceTo(desk.position) < 1e-6, 'the camera stays locked at the desk pose');
+});
+
+test('H toggles back to the saved first-person pose', () => {
+  const desk = fixtureDeskView();
+  const { view, camera, press } = setup('', undefined, undefined, { deskView: () => desk });
+  press('KeyH');
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  press('KeyH');
+  for (let i = 0; i < 60; i++) view.update(1 + i / 60, 1 / 60);
+  assert.equal(view.mode, 'first-person');
+  assert.ok(camera.position.distanceTo(new THREE.Vector3(-12, EYE_HEIGHT, 11)) < 1e-6, 'back at the pose it left');
+});
+
+test('#view=desk starts in the desk view when a deskView is available', () => {
+  const desk = fixtureDeskView();
+  const { view, camera } = setup('#view=desk', undefined, undefined, { deskView: () => desk });
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+  assert.equal(view.mode, 'desk');
+  assert.ok(camera.position.distanceTo(desk.position) < 1e-6);
+});
+
+test('issue #161: idling past the timeout settles the office into the desk view, from first person or isometric', () => {
+  const desk = fixtureDeskView();
+  const { view } = setup('', undefined, undefined, { deskView: () => desk, idleTimeoutSeconds: 5 });
+  for (let i = 0; i < 4 * 60; i++) view.update(i / 60, 1 / 60); // under the timeout
+  assert.equal(view.mode, 'first-person');
+  for (let i = 4 * 60; i < 6 * 60; i++) view.update(i / 60, 1 / 60); // past it
+  assert.equal(view.mode, 'desk');
+});
+
+test('issue #161: any camera input resets the idle timer', () => {
+  const desk = fixtureDeskView();
+  const { view, press } = setup('', undefined, undefined, { deskView: () => desk, idleTimeoutSeconds: 5 });
+  for (let i = 0; i < 4 * 60; i++) view.update(i / 60, 1 / 60);
+  press('KeyW'); // resets the idle clock; a camera input even though it does not move a locked camera
+  for (let i = 4 * 60; i < 8 * 60; i++) view.update(i / 60, 1 / 60); // 4 more seconds: still short of a fresh 5 s timeout
+  assert.equal(view.mode, 'first-person', 'the input reset the idle clock');
+});
+
+test('idling without a deskView option is a no-op forever (graceful degradation)', () => {
+  const { view } = setup('', undefined, undefined, { idleTimeoutSeconds: 1 });
+  for (let i = 0; i < 5 * 60; i++) view.update(i / 60, 1 / 60);
+  assert.equal(view.mode, 'first-person');
+});
+
+// --- Double-click a room in isometric (issue #175) ---
+
+test('double-clicking a room in the isometric view enters it in first person, at its standing pose', () => {
+  const room = { bounds: new THREE.Box3(new THREE.Vector3(20, 0, -6), new THREE.Vector3(32, 2.6, 6)), standing: { position: new THREE.Vector3(24, EYE_HEIGHT, 0), lookAt: new THREE.Vector3(30, EYE_HEIGHT, 0) } };
+  // The fixture scene has no floor geometry for the isometric camera to frame around, so this
+  // stub answers for whatever ground point the ray actually lands on (the real `roomAt`'s own
+  // rect-containment check is covered directly in tests/building.test.ts).
+  const { view, camera, canvas, press } = setup('', undefined, undefined, { roomAt: () => room });
+  press('KeyI');
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1600, height: 900, right: 1600, bottom: 900, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  canvas.dispatchEvent(new dom.window.MouseEvent('dblclick', { clientX: 800, clientY: 450 }));
+  assert.equal(view.mode, 'first-person', 'double-click leaves the isometric view for first person');
+  assert.ok(camera.position.distanceTo(room.standing.position) < 1e-6, 'lands exactly at the room\'s own standing pose, a cut (leaving isometric never flies)');
+});
+
+test('double-click does nothing outside the isometric view, or when no room is under the point', () => {
+  const { view: firstPersonView, canvas: firstPersonCanvas } = setup('', undefined, undefined, { roomAt: () => ({ bounds: new THREE.Box3(), standing: { position: new THREE.Vector3(1, 1, 1), lookAt: new THREE.Vector3() } }) });
+  firstPersonCanvas.dispatchEvent(new dom.window.MouseEvent('dblclick', { clientX: 800, clientY: 450 }));
+  assert.equal(firstPersonView.mode, 'first-person', 'a double-click outside the isometric view does nothing');
+
+  const { view, canvas, press } = setup('', undefined, undefined, { roomAt: () => null });
+  press('KeyI');
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1600, height: 900, right: 1600, bottom: 900, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  canvas.dispatchEvent(new dom.window.MouseEvent('dblclick', { clientX: 800, clientY: 450 }));
+  assert.equal(view.mode, 'isometric', 'a double-click over no room (or without a roomAt option) stays in isometric');
 });
 
 test('#view=iso starts in the isometric view', () => {

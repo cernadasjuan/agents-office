@@ -4,8 +4,9 @@ import type { Activity } from '../../agents/ActivityAnimations.js';
 import { OFFICE_WALLS, type Station } from '../../scene/Office.js';
 import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, RoomView, Seat } from '../../layout/LayoutStrategy.js';
-import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type RoomSlot } from './RoomPlanner.js';
+import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type Rect, type RoomSlot } from './RoomPlanner.js';
 import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, type RoomKind } from './rooms.js';
+import { OFFICE_DESK } from './furnishing.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
@@ -68,6 +69,13 @@ const MISSIONS_BOARD_REFRESH_MS = 1000;
 const ROOM_KINDS: readonly string[] = ['office', 'desks', 'library', 'lab', 'lounge'];
 /** A standing agent's own eye height (issue #89, `#room=` first person; issue #174 aligned this with `FreeCamera`'s own ground-walk eye height). */
 const ROOM_VIEW_EYE_HEIGHT = FIGURE_EYE_HEIGHT;
+/** Issue #161: sitting at the desk reads lower than `ROOM_VIEW_EYE_HEIGHT`'s standing pose, so the desk and its monitors stay in frame. */
+const DESK_EYE_HEIGHT = FIGURE_EYE_HEIGHT * 0.75;
+/** How far behind the desk (away from the door) the desk-view camera sits — inside the chair, not on top of the desk. */
+const DESK_SEAT_OFFSET = 1.0;
+/** Where the desk-view camera looks: toward the queue in front of the desk, at a standing agent's eye level (`queueSpots`'s own `look` height). */
+const DESK_LOOK_OFFSET = 3.0;
+const DESK_LOOK_EYE_HEIGHT = 1.2;
 
 /**
  * Lowercased, non-alphanumeric runs collapsed to one `-`, leading/trailing `-` trimmed
@@ -250,6 +258,39 @@ export class BuildingLayout implements LayoutStrategy {
       }
     }
     return slot ? roomViewFromSlot(slot) : null;
+  }
+
+  /**
+   * Where the fixed desk-view camera (issue #161, key `H`) sits: behind the user's own desk,
+   * a little lower than a standing first-person pose, looking at the queue in front of it.
+   * Null without a rented office room yet (graceful degradation, rule 3) — a layout only ever
+   * has one at construction, so this should not happen in practice, but a fresh office render
+   * mid-rebuild is still handled the same way `roomView` handles an unknown name.
+   */
+  deskView(): { position: THREE.Vector3; lookAt: THREE.Vector3 } | null {
+    const record = this.rooms.find((room) => room.kind === 'office');
+    if (!record) return null;
+    const frame = new RoomFrame(slotFor(record.index).rect, slotFor(record.index).door);
+    const position = frame.point(OFFICE_DESK.a, OFFICE_DESK.d + DESK_SEAT_OFFSET, DESK_EYE_HEIGHT);
+    const lookAt = frame.point(OFFICE_DESK.a, OFFICE_DESK.d - DESK_LOOK_OFFSET, DESK_LOOK_EYE_HEIGHT);
+    return { position, lookAt };
+  }
+
+  /**
+   * The room (building or mission) whose floor contains a world point, or null between rooms
+   * or outside the building (issue #175, double-click a room in isometric). Pure rect
+   * containment: cheap, and exact since rooms never overlap.
+   */
+  roomAt(x: number, z: number): RoomView | null {
+    const inside = (rect: Rect) => x >= rect.minX && x <= rect.maxX && z >= rect.minZ && z <= rect.maxZ;
+    for (const record of this.rooms) {
+      const slot = slotFor(record.index);
+      if (inside(slot.rect)) return roomViewFromSlot(slot);
+    }
+    for (const room of this.missionRooms.values()) {
+      if (inside(room.slot.rect)) return roomViewFromSlot(room.slot);
+    }
+    return null;
   }
 
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
