@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import type { AgentInfo } from '../src/agents/AgentData.js';
 import { SelectionState } from '../src/scene/Selection.js';
 import {
-  AgentCard, CARD_MAX_ISSUES, CARD_WIDTH_PX, figureShiftPx, registerCardAction, registerIssueLinker,
+  AgentCard, CARD_EQUIP_MAX, CARD_MAX_ISSUES, CARD_WIDTH_PX, figureShiftPx, registerCardAction, registerIssueLinker,
   resetCardRegistry, type CardAction,
 } from '../src/ui/AgentCard.js';
 
@@ -64,16 +64,16 @@ test('a cleared selection (Esc) closes the card', (t) => {
   assert.equal(root().hidden, true);
 });
 
-test('the card shows name, activity, attention band and wait, workspace, provider, personas', (t) => {
+test('the card shows name, activity, attention band and wait, workspace, provider, persona column', (t) => {
   const { card, selection, text, root } = makeCard(t);
   card.render([main, sub, codex]);
   selection.select('main-1');
-  assert.equal(text('.inspector-activity'), 'Waiting for you');
-  assert.equal(text('.inspector-wait'), 'Waiting for you · 12 min');
+  assert.equal(text('.inspector-activity'), 'Waiting for you · 12 min');
+  assert.equal(root().querySelector<HTMLElement>('.inspector-wait')!.hidden, true, 'the header already carries the elapsed time; the wait line never repeats it');
   assert.equal(text('.inspector-band'), 'fresh');
   assert.equal(text('.inspector-workspace'), 'personal');
   assert.equal(text('.inspector-provider'), 'Claude Code');
-  assert.deepEqual([...root().querySelectorAll('.inspector-personas li')].map((li) => li.textContent), ['amelia', 'quinn']);
+  assert.deepEqual([...root().querySelectorAll('.equip-col-persona li')].map((li) => li.textContent), ['amelia', 'quinn']);
 
   selection.select('codex-1');
   assert.equal(text('.inspector-provider'), 'Codex');
@@ -81,7 +81,9 @@ test('the card shows name, activity, attention band and wait, workspace, provide
   assert.equal(root().querySelector<HTMLElement>('.inspector-wait')!.hidden, true, 'no wait without attention');
   assert.equal(root().querySelector<HTMLElement>('.inspector-band')!.hidden, true);
   assert.equal(text('.inspector-workspace'), 'No workspace');
-  assert.equal(text('.inspector-personas'), 'No personas or skills');
+  assert.equal(text('.equip-col-persona .equip-empty'), 'No persona');
+  assert.equal(text('.equip-col-skills .equip-empty'), 'No skills');
+  assert.equal(text('.equip-col-repos .equip-empty'), 'No repos');
 });
 
 test('issue #171: the card shows a short, stable id and a provider mark next to the provider text', (t) => {
@@ -98,38 +100,115 @@ test('issue #171: the card shows a short, stable id and a provider mark next to 
   assert.equal(root().querySelectorAll('.inspector-provider svg').length, 1);
 });
 
-test('issue #166: the "Persona / Skills" row lists personas, then every skill used this session', (t) => {
-  const withSkills: AgentInfo = {
+test('AC1: Persona, Skills and Repos are three separate columns, each with its own icon, no other place repeats the text', (t) => {
+  const withEquipment: AgentInfo = {
     id: 'skilled-1', name: 'reviewer', activity: 'reviewing',
-    extras: { badges: ['quinn'], skills: ['code-review', 'simplify'] },
+    extras: { badges: ['quinn', 'sally'], skills: ['code-review', 'simplify', 'write-a-skill'], repos: ['agents-office'] },
   };
   const { card, selection, root } = makeCard(t);
-  card.render([withSkills]);
+  card.render([withEquipment]);
   selection.select('skilled-1');
-  const items = [...root().querySelectorAll('.inspector-personas li')];
-  assert.deepEqual(items.map((li) => li.textContent), ['quinn', 'code-review', 'simplify']);
-  assert.equal(items[0]!.classList.contains('skill'), false, 'a persona badge is not styled as a skill');
-  assert.equal(items[1]!.classList.contains('skill'), true);
-  assert.equal(items[2]!.classList.contains('skill'), true);
+
+  const personaItems = [...root().querySelectorAll('.equip-col-persona li')];
+  const skillItems = [...root().querySelectorAll('.equip-col-skills li')];
+  const repoItems = [...root().querySelectorAll('.equip-col-repos li')];
+  assert.deepEqual(personaItems.map((li) => li.textContent), ['quinn', 'sally']);
+  assert.deepEqual(skillItems.map((li) => li.textContent), ['code-review', 'simplify', 'write-a-skill']);
+  assert.deepEqual(repoItems.map((li) => li.textContent), ['agents-office']);
+  assert.equal(skillItems.every((li) => li.classList.contains('skill')), true, 'skills keep the gear-dot style');
+  assert.equal(personaItems.every((li) => !li.classList.contains('skill')), true, 'a persona badge is not styled as a skill');
+
+  assert.equal(root().querySelectorAll('.equip-col-persona svg.persona-mark').length, 1);
+  assert.equal(root().querySelectorAll('.equip-col-skills .skill-mark').length, 1);
+  assert.equal(root().querySelectorAll('.equip-col-repos svg.repo-mark').length, 1);
+
+  // No other place on the card repeats this text (AC1, AC4: the old merged list is gone).
+  assert.equal(root().querySelector('.inspector-personas'), null);
 });
 
-test('issue #166: without the skills plugin, the row falls back to personas only (graceful degradation)', (t) => {
-  const { card, selection, root } = makeCard(t);
-  card.render([main]); // main has badges, no skills field at all
+test('issue #166: without the skills plugin, the Skills column shows its own empty state (graceful degradation)', (t) => {
+  const { card, selection, root, text } = makeCard(t);
+  card.render([main]); // main has badges, no skills or repos field at all
   selection.select('main-1');
-  const items = [...root().querySelectorAll('.inspector-personas li')];
-  assert.deepEqual(items.map((li) => li.textContent), ['amelia', 'quinn']);
-  assert.equal(items.every((li) => !li.classList.contains('skill')), true);
+  assert.deepEqual([...root().querySelectorAll('.equip-col-persona li')].map((li) => li.textContent), ['amelia', 'quinn']);
+  assert.equal(text('.equip-col-skills .equip-empty'), 'No skills');
+  assert.equal(text('.equip-col-repos .equip-empty'), 'No repos');
+});
+
+test('AC2: columns grow independently — 4 skills and 0 repos never misalign', (t) => {
+  const { card, selection, root } = makeCard(t);
+  card.render([{ ...main, extras: { ...main.extras, skills: ['a', 'b', 'c', 'd'], repos: [] } }]);
+  selection.select('main-1');
+  assert.equal(root().querySelectorAll('.equip-col-skills li').length, 4);
+  assert.equal(root().querySelector('.equip-col-repos .equip-empty')!.textContent, 'No repos');
+});
+
+test('AC3: overflow caps a column at CARD_EQUIP_MAX rows with a final "+N more" row', (t) => {
+  const { card, selection, root } = makeCard(t);
+  const skills = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+  card.render([{ ...main, extras: { ...main.extras, skills } }]);
+  selection.select('main-1');
+  assert.equal(CARD_EQUIP_MAX, 4);
+  const items = [...root().querySelectorAll('.equip-col-skills li')];
+  assert.equal(items.length, 5, '4 rows plus one "+N more" row');
+  assert.deepEqual(items.slice(0, 4).map((li) => li.textContent), ['a', 'b', 'c', 'd']);
+  assert.equal(items[4]!.textContent, '+3 more');
+  assert.equal(items[4]!.classList.contains('equip-more'), true);
+});
+
+test('a column row carries the full label as a hover title, for a truncated cell (column rule: no wrapping)', (t) => {
+  const { card, selection, root } = makeCard(t);
+  card.render([{ ...main, extras: { ...main.extras, skills: ['a-very-long-skill-name-that-would-wrap'] } }]);
+  selection.select('main-1');
+  const item = root().querySelector<HTMLLIElement>('.equip-col-skills li')!;
+  assert.equal(item.title, 'a-very-long-skill-name-that-would-wrap');
+});
+
+test('AC7: the Repos column shows its own empty state when peek is off (no spinner, no gap)', (t) => {
+  const { card, selection, text } = makeCard(t);
+  card.render([main]); // no extras.repos at all, same as peek never having loaded
+  selection.select('main-1');
+  assert.equal(text('.equip-col-repos .equip-empty'), 'No repos');
 });
 
 test('an idle agent with a your-turn wait shows "Your turn" in the header, not "Taking a break" (issue #168)', (t) => {
-  const { card, selection, text } = makeCard(t);
+  const { card, selection, text, root } = makeCard(t);
   const idleYourTurn: AgentInfo = { id: 'idle-1', name: 'idle-1', activity: 'idle', extras: { attention: 'your-turn', waitMinutes: 5 } };
   card.render([idleYourTurn]);
   selection.select('idle-1');
-  assert.equal(text('.inspector-activity'), 'Your turn', 'the override wins over the raw idle activity, the same as the panel row and the label');
-  assert.equal(text('.inspector-wait'), 'Your turn · 5 min');
+  assert.equal(text('.inspector-activity'), 'Your turn · 5 min', 'the override wins over the raw idle activity, the same as the panel row and the label');
+  assert.equal(root().querySelector<HTMLElement>('.inspector-wait')!.hidden, true);
 });
+
+// Issue #216 follow-up (Sally, IDE usability review): the duplicate-text bug was never
+// specific to 'your-turn' with no waitMinutes — AC6 only ever tested that one case. Every
+// attention state built the same sentence twice (header bare, wait line the same sentence
+// plus a time suffix), so the two lines always shared an identical leading phrase. One test
+// per state below, covering both the "no waitMinutes" and the "has waitMinutes" shape for
+// each: the wait line must stay hidden and empty in every one, since the header alone now
+// carries the complete sentence.
+for (const [label, attention, waitMinutes, expectedActivity] of [
+  ['your-turn, no wait', 'your-turn', undefined, 'Your turn'],
+  ['your-turn, with wait', 'your-turn', 5, 'Your turn · 5 min'],
+  ['waiting, no wait', 'waiting', undefined, 'Waiting for you'],
+  ['waiting, with wait', 'waiting', 40, 'Waiting for you · 40 min'],
+] as const) {
+  test(`AC6 (#216 follow-up): "${label}" renders its sentence exactly once, never in both the header and the wait line`, (t) => {
+    const { card, selection, root } = makeCard(t);
+    const agent: AgentInfo = { id: 'state-1', name: 'state-1', activity: 'idle', extras: { attention, waitMinutes } };
+    card.render([agent]);
+    selection.select('state-1');
+    assert.equal(root().querySelectorAll('.inspector-activity, .inspector-wait').length, 2, 'both elements still exist');
+    assert.equal(root().querySelector('.inspector-activity')!.textContent, expectedActivity);
+    const wait = root().querySelector<HTMLElement>('.inspector-wait')!;
+    assert.equal(wait.hidden, true, 'the wait line never repeats the header, with or without an elapsed time');
+    assert.equal(wait.textContent, '', 'and carries no text while hidden');
+    const occurrences = [...root().querySelectorAll('.inspector-activity, .inspector-wait')]
+      .filter((el) => !(el as HTMLElement).hidden).map((el) => el.textContent).join('|');
+    const phrase = attention === 'your-turn' ? 'Your turn' : 'Waiting for you';
+    assert.equal((occurrences.match(new RegExp(phrase, 'g')) ?? []).length, 1, `"${phrase}" appears exactly once among the visible elements`);
+  });
+}
 
 // --- Issue #170 review: labels have pointer-events none, so a hover title there never shows.
 // The card's status line is the always-reachable fallback. ---
@@ -234,7 +313,7 @@ test('a poll updates the open card in place', (t) => {
   assert.equal(root(), before);
   assert.equal(before.hidden, false);
   assert.equal(text('.inspector-name'), 'fix login v2');
-  assert.equal(text('.inspector-wait'), 'Waiting for you · 40 min');
+  assert.equal(text('.inspector-activity'), 'Waiting for you · 40 min', 'the header picks up the new waitMinutes on the next poll');
   assert.equal(text('.inspector-band'), 'aging');
 });
 

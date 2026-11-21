@@ -184,12 +184,22 @@ export class FloorResolver {
  * shares its parent's `internal.cwd` (`server/agentDetector.ts`'s `detectSubagents`), so it
  * always resolves to the same floor as its parent with no special case here. A missing
  * `internal.cwd` (an unusual source) lands on the general floor, never breaks the pipeline.
+ *
+ * Also sets `display.repos` (issue #216): the agent card's Repos column needs the same
+ * remote-derived token synchronously, at the same instant as Persona and Skills, rather than
+ * behind the peek plugin's async per-agent fetch. Reuses the floor this same pass already
+ * resolved — no second filesystem walk — as a one-entry list, empty on the shared general
+ * floor (there is no real repo to show).
  */
 export function floorEnricher(resolver: FloorResolver = new FloorResolver()): Enricher {
   return {
     id: 'floor',
     enrich(observations) {
-      for (const agent of observations) agent.display.floor = resolver.resolve(agent.internal.cwd);
+      for (const agent of observations) {
+        const floor = resolver.resolve(agent.internal.cwd);
+        agent.display.floor = floor;
+        agent.display.repos = floor === GENERAL_FLOOR ? [] : [floor];
+      }
     },
   };
 }

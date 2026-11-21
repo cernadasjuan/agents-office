@@ -316,7 +316,7 @@ test('every key projectAgents (server/seam.ts) can emit on a live agent is carri
       attention: 'your-turn', orchestrating: true, waitMinutes: 3, groupKey: 'g', groupLabel: 'Group',
       badges: ['sally'], skills: ['write-a-skill'], tools: ['Bash'], lastEquipSource: 'tool',
       issues: [{ number: 1, title: 'a' }], roomKey: 'r',
-      actions: ['focus'], role: 'librarian', stuck: true, floor: 'agents-office',
+      actions: ['focus'], role: 'librarian', stuck: true, floor: 'agents-office', repos: ['agents-office'],
     },
   }], publicId, enabledActions);
 
