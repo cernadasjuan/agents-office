@@ -20,7 +20,7 @@ import { FreshnessFooter } from './ui/freshness.js';
 import { Legend } from './ui/Legend.js';
 import { handleTriageKey } from './ui/TriageKeys.js';
 import { FloorSwitch } from './ui/FloorSwitch.js';
-import { ALL_FLOORS, defaultFloor, floorStillKnown, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
+import { ALL_FLOORS, defaultFloor, floorsWithStoredRooms, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
 import { focusedFloor, setFocusedFloor } from './floors/floorState.js';
 
 // Setup scene
@@ -269,26 +269,16 @@ window.setInterval(() => void pollWorld(), 10_000);
 // still sees the raw, unfiltered answer, so the floor-switch menu lists every floor with a
 // tracked session, not only the focused one.
 const poller = new AgentPoller(agentManager, undefined, focusFloor);
-// Issue #191 review (blocking): a floor chosen before it was renamed (the remote-naming
-// revision, for example) can match zero currently observed agents. Checked once, against the
-// first poll with any agents in it at all (review follow-up: an empty poll is not evidence
-// either way — `floorStillKnown` already treats it as "still known" — so consuming the
-// one-shot check on an empty poll would permanently disable this bounce for the rest of the
-// page's life, the exact blocker this exists to catch, the moment a quiet startup is followed
-// by real activity): if that first populated poll says the focused floor is no longer known,
-// it bounces back to All floors through the same reload path a manual floor switch uses,
-// rather than silently leaving the whole building — agents, rooms and kanban boards alike —
-// filtered down to nothing with no indication why.
-let checkedFloorIsKnown = false;
+// Issue #191 review (revised): a floor chosen before it was renamed (the remote-naming
+// revision, for example), or one that simply has no live agent right now, both render as a
+// quiet building — its own stored rooms, its own mission war rooms and kanban boards, just
+// with nobody currently in it. Neither forces a reload: a client-side snapshot of "who is
+// active right now" cannot reliably tell a quiet-but-valid floor apart from one that is gone
+// for good, so this never guesses. `floorSwitch.render` lists every floor with its own stored
+// room list too (`floorsWithStoredRooms`), not only the floors agents are tracked on right
+// now, so Gabriel can always leave a quiet floor through the menu himself.
 poller.start(3000, buildUI, (health) => freshness.show(health), (agents) => {
-  floorSwitch?.render(agents);
-  if (!checkedFloorIsKnown && focusFloor !== undefined && agents.length > 0) {
-    checkedFloorIsKnown = true;
-    if (!floorStillKnown(focusFloor, agents)) {
-      rememberFloor(ALL_FLOORS, window.localStorage);
-      reloadForFloorSwitch(window.location, ALL_FLOORS);
-    }
-  }
+  floorSwitch?.render(agents, floorsWithStoredRooms(window.localStorage));
 });
 
 // --- Render loop ---

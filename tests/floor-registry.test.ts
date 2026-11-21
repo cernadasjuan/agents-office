@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  ALL_FLOORS, defaultFloor, floorFromHash, floorRepo, floorRoomsStorageKey, floorStillKnown, GENERAL_FLOOR,
+  ALL_FLOORS, defaultFloor, floorFromHash, floorRepo, floorRoomsStorageKey, floorsWithStoredRooms, GENERAL_FLOOR,
   isFloorName, knownFloors, LEGACY_ROOMS_KEY, matchesFloor, reloadForFloorSwitch, rememberFloor,
 } from '../src/floors/FloorRegistry.js';
 
@@ -72,25 +72,29 @@ test('knownFloors always includes general even with zero agents', () => {
   assert.deepEqual(knownFloors([]), [GENERAL_FLOOR]);
 });
 
-// --- floorStillKnown (issue #191 review, blocking: a floor renamed since it was last chosen —
-// the remote-naming revision renamed every repo with a remote — must fall back to All floors,
-// never silently filter the whole building down to nothing) ---
+// --- floorsWithStoredRooms (issue #191 review, replacing the forced-reload bounce: a floor
+// the user already grew rooms on, renamed or simply idle, stays a menu choice instead of
+// vanishing or forcing a reload the moment it has no live agent) ---
 
-test('floorStillKnown is true for a floor at least one currently observed agent resolves to', () => {
-  assert.equal(floorStillKnown('agents-office', [{ floor: 'agents-office' }, { floor: 'widget-service' }]), true);
+/** A minimal `Storage`-shaped fake: only `length`/`key(index)`, the two methods
+ * `floorsWithStoredRooms` actually needs, backed by a plain key list. */
+function fakeLengthKeyStorage(keys: string[]): Pick<Storage, 'length' | 'key'> {
+  return { length: keys.length, key: (index) => keys[index] ?? null };
+}
+
+test('floorsWithStoredRooms reads every floor whose own room-list key is present, order preserved', () => {
+  const storage = fakeLengthKeyStorage([
+    `${LEGACY_ROOMS_KEY}:agents-office`,
+    'some-unrelated-key',
+    `${LEGACY_ROOMS_KEY}:gabriel-amyot/agents-office`,
+  ]);
+  assert.deepEqual(floorsWithStoredRooms(storage), ['agents-office', 'gabriel-amyot/agents-office']);
 });
 
-test('floorStillKnown is true for the general floor even with zero agents (knownFloors always includes it)', () => {
-  assert.equal(floorStillKnown(GENERAL_FLOOR, []), true);
-});
-
-test('floorStillKnown is false for a stored floor no agent currently resolves to (the exact renamed-floor case)', () => {
-  assert.equal(floorStillKnown('projects/agents-office', [{ floor: 'gabriel-amyot/agents-office' }]), false);
-});
-
-test('floorStillKnown is true for any floor with zero agents observed anywhere (review: an empty poll is not evidence a floor is gone; a quiet morning must not bounce a perfectly good, simply idle floor back to All floors)', () => {
-  assert.equal(floorStillKnown('agents-office', []), true);
-  assert.equal(floorStillKnown('projects/agents-office', []), true);
+test('floorsWithStoredRooms drops a key whose floor segment does not fit the whitelist, and is empty without storage', () => {
+  const storage = fakeLengthKeyStorage([`${LEGACY_ROOMS_KEY}:../private`, LEGACY_ROOMS_KEY]);
+  assert.deepEqual(floorsWithStoredRooms(storage), []);
+  assert.deepEqual(floorsWithStoredRooms(undefined), []);
 });
 
 // --- defaultFloor ---

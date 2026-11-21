@@ -88,27 +88,29 @@ export function knownFloors(agents: ReadonlyArray<{ floor?: string }>): string[]
 }
 
 /**
- * Whether a previously chosen floor is still among the floors any currently observed agent
- * resolves to (issue #191 review, blocking). A floor a user already focused can stop existing
- * under that exact name — the remote-naming revision renamed every repo with a remote, for
- * example `projects/agents-office` to `gabriel-amyot/agents-office` — while the stored or
- * hashed name stays the old one. Without this check, `AgentPoller`'s own exact-equality floor
- * filter (`a.floor === this.focusFloor`) would keep zero agents, and a focused floor filters
- * `BuildingLayout`'s rooms and `plugins/github/client.ts`'s boards the same way: the whole
- * building goes empty with no error, not a graceful "nothing matched." `GENERAL_FLOOR` is
- * always known (`knownFloors` always includes it), so this is only ever false for a specific
- * renamed or otherwise vanished floor — never for the shared general floor.
- *
- * With zero agents observed anywhere (review: the common "nobody is coding right now" case —
- * the first poll of the day, a quiet night, a page opened just to look around), this always
- * answers true instead of judging the floor by an empty list. An empty poll carries no evidence
- * a floor is gone; treating it as "unknown" would bounce a perfectly good, simply idle floor
- * back to All floors on every quiet morning, discarding the remembered-floor feature for the
- * ordinary case while only the rename case (something else is observed, never this floor)
- * actually needs the bounce.
+ * Every floor with its own stored room list (issue #191 review, replacing the forced-reload
+ * bounce): read straight from the real storage keys present (`floorRoomsStorageKey`'s own
+ * prefix), never a separate registry nobody would keep in sync. A floor a user already grew
+ * rooms on — even one with zero live agents right now, a renamed repo's old name included —
+ * stays reachable from the floor-switch menu this way, rather than disappearing or forcing a
+ * reload the moment nobody happens to be coding there this instant: a client-side snapshot of
+ * "who is active right now" cannot reliably tell a quiet-but-valid floor apart from one that
+ * is gone for good, so this never tries to guess; it only ever answers from data that is
+ * actually still there. A plain `Storage`-shaped object (`window.localStorage` already
+ * supports this), not the narrower `FloorStorage` interface above, which only reads or writes
+ * a key it already knows the name of — enumerating unknown keys needs `length`/`key(index)`
+ * too.
  */
-export function floorStillKnown(floor: string, agents: ReadonlyArray<{ floor?: string }>): boolean {
-  return agents.length === 0 || knownFloors(agents).includes(floor);
+export function floorsWithStoredRooms(storage: Pick<Storage, 'length' | 'key'> | undefined): string[] {
+  if (!storage) return [];
+  const prefix = `${LEGACY_ROOMS_KEY}:`;
+  const floors: string[] = [];
+  for (let index = 0; index < storage.length; index++) {
+    const key = storage.key(index);
+    const floor = key?.startsWith(prefix) ? key.slice(prefix.length) : undefined;
+    if (floor && isFloorName(floor)) floors.push(floor);
+  }
+  return floors;
 }
 
 /**

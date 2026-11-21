@@ -75,3 +75,24 @@ test('re-choosing the already-focused floor does not call onSelect (a same-floor
 
   assert.equal(calls, 0);
 });
+
+// --- Issue #191 review: a floor with its own stored room list, but zero live agents right
+// now, stays a menu choice (replacing the forced reload off a quiet floor) ---
+
+test('a floor with its own stored room list lists even with zero live agents anywhere, the focused one included', () => {
+  const { root } = mount();
+  const switcher = new FloorSwitch(root, 'agents-office', { onSelect: () => undefined });
+  switcher.render([], ['agents-office', 'widget-service']);
+
+  const options = Array.from(root.querySelectorAll('option')).map((o) => o.value);
+  assert.deepEqual(options, [ALL_FLOORS, 'agents-office', 'widget-service', 'general']);
+});
+
+test('a stored floor the user is not currently on is still listed, so they can navigate to it', () => {
+  const { root } = mount();
+  const switcher = new FloorSwitch(root, ALL_FLOORS, { onSelect: () => undefined });
+  switcher.render([], ['widget-service']);
+
+  const options = Array.from(root.querySelectorAll('option')).map((o) => o.value);
+  assert.ok(options.includes('widget-service'));
+});
