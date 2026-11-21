@@ -3,6 +3,10 @@ import { getToonMaterial } from '../utils/Materials.js';
 import { Colors } from '../utils/Colors.js';
 
 const RADIAL_SEGMENTS = 6;
+const NECK_HEIGHT = 1.6;
+const HEAD_OFFSET = 0.15;
+/** Issue #174: first person's eye height matches a standing agent's own eye height (the neck joint plus the head center), not an arbitrary guess. */
+export const FIGURE_EYE_HEIGHT = NECK_HEIGHT + HEAD_OFFSET;
 
 // Every figure shares one geometry per part shape, so the figure batch draws all
 // figures' parts of one shape and color in one call (src/characters/FigureBatch.ts).
@@ -175,11 +179,11 @@ export function buildSkeleton(accentColor: THREE.Color, secondColor?: THREE.Colo
 
   // Neck + Head
   const neck = new THREE.Group();
-  neck.position.y = 1.6;
+  neck.position.y = NECK_HEIGHT;
   body.add(neck);
 
   const head = createHead();
-  head.position.y = 0.15;
+  head.position.y = HEAD_OFFSET;
   neck.add(head);
 
   return {

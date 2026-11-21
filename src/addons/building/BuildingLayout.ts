@@ -14,6 +14,7 @@ import type { WorldRoom } from '../../extensions.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
 import { markStatic } from '../../scene/StaticMerge.js';
 import type { PickTarget } from '../../scene/Selection.js';
+import { FIGURE_EYE_HEIGHT } from '../../characters/StickFigureParts.js';
 import { createMissionsBoard, placeMissionsBoard, type MissionBoardEntry } from './missionsBoard.js';
 
 /**
@@ -65,8 +66,8 @@ const DEFAULT_DWELL_MS = 4000;
 const QUEUE_REFRESH_MS = 500;
 const MISSIONS_BOARD_REFRESH_MS = 1000;
 const ROOM_KINDS: readonly string[] = ['office', 'desks', 'library', 'lab', 'lounge'];
-/** A plausible standing eye height (issue #89, `#room=` first person), not a floor minimum like `MIN_EYE_HEIGHT`. */
-const ROOM_VIEW_EYE_HEIGHT = 1.6;
+/** A standing agent's own eye height (issue #89, `#room=` first person; issue #174 aligned this with `FreeCamera`'s own ground-walk eye height). */
+const ROOM_VIEW_EYE_HEIGHT = FIGURE_EYE_HEIGHT;
 
 /**
  * Lowercased, non-alphanumeric runs collapsed to one `-`, leading/trailing `-` trimmed

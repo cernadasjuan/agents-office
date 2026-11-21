@@ -415,9 +415,9 @@ AGENTS_OFFICE_PLUGINS=jira pnpm dev
 ## Controls
 
 - **Click** to engage camera
-- **W/A/S/D** or **Arrow keys** to move
-- **Space/Q** to go up/down
-- **Shift** to move faster
+- **W/A/S/D** or **Arrow keys** to walk, on the ground, with gravity (issue #174: no flying). Double-tap **W** to run
+- **Shift** to crouch: a lower eye height and a slower walk
+- **Space** to jump; gravity brings the camera back down to its eye height, standing or crouched
 - **Mouse** to look around
 - **Esc** to release camera
 - **L** to switch the layout, when more than one is installed (also `?layout=<id>` in the URL)
@@ -434,7 +434,7 @@ AGENTS_OFFICE_PLUGINS=jira pnpm dev
 
 - `?dwell=<seconds>` in the URL (0 to 30, default 0) makes an agent in the original `activity` layout wait that long before it walks to a new station. A change back before the time cancels the walk. The figure shows the new activity at once.
 - The office remembers the last view (first person, overview or isometric) in the browser and opens in it after a reload. `#view=overview`, `#view=first-person` or `#view=iso` in the URL wins over the saved view. The side panel header shows the layout and the view.
-- First person has no bounding box: you can walk through every doorway into a room, and fly above the building (Space). Only the floor stops the camera. The ceiling hides when the camera is above it (6 m), in the overview and in the isometric view. There is no wall collision.
+- First person has no horizontal bounding box: you can walk through every doorway into a room. It no longer flies (issue #174): the camera walks the ground at a standing agent's own eye height, with gravity, and Space only jumps. The ceiling hides when the camera is above it (6 m), in the overview and in the isometric view. There is no wall collision yet (no collision layer exists in this fork to stop against).
 - **Shift+L** switches the layout after a confirmation (the page reloads). The layout choice is saved too.
 - `#view=overview` in the URL starts in the overview, `#view=iso` in the isometric view. `#select=<agent id>` (`#focus=`, its older name, still works) selects that agent when it appears (agent IDs change when the server restarts). `#zoom=<distance>` starts the view at that camera distance instead of its own default framing; the number is the same overview-equivalent distance the side panel's zoom reads, for both the overview and the isometric view (issue #89)
 - `#room=office`, `#room=library` or `#room=<mission id>` frames that room instead, in whichever view you start in: the overview and the isometric view fly to the room's bounds, first person stands inside it facing its main wall. Useful for a screenshot of a room's boards without hunting for it by hand. Read-only, and ignored when the name matches no room (for example the fork's building layout is not active, or that room has not opened yet). `#room=office` always means your own office, never a later overflow waiting room (issue #89)
