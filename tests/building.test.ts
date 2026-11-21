@@ -677,6 +677,60 @@ test('an ordinary subagent that researches stays at its parent desk', () => {
   assert.match(layout.seatFor(agent('helper', 'researching', { parentId: 'parent' }), null)!.key, /_pod\d$/);
 });
 
+// --- Issue #164 point 3: a pod subagent sits, it does not stand with no explanation ---
+
+test('a pod subagent sits on its own stool, whatever its activity: standing was the thing that read as "something is wrong"', () => {
+  const { layout, agent } = setup();
+  layout.seatFor(agent('parent', 'implementing'), null);
+  const idle = layout.seatFor(agent('helper', 'idle', { parentId: 'parent' }), null)!;
+  assert.match(idle.key, /_pod\d$/);
+  assert.equal(idle.posture, 'seated', 'an idle pod subagent sits, same as a sofa idle seat');
+
+  const busy = layout.seatFor(agent('helper2', 'implementing', { parentId: 'parent' }), null)!;
+  assert.match(busy.key, /_pod\d$/);
+  assert.equal(busy.posture, 'seated', 'a working pod subagent sits too: no pod posture depends on activity');
+});
+
+test('every pod slot around one parent gets its own stool mesh, built once, never duplicated for a second subagent', () => {
+  const { layout, agent, scene } = setup();
+  const desk = layout.seatFor(agent('parent', 'implementing'), null)!;
+  const first = layout.seatFor(agent('helper', 'idle', { parentId: 'parent' }), null)!;
+
+  const countStools = () => {
+    let stools = 0;
+    scene.traverse((object) => { if ((object.userData.staticBatch as { zone?: string } | undefined)?.zone === 'pods') stools++; });
+    return stools;
+  };
+  // podKeys() builds the parent's whole pod pool (6 slots) up front, so one subagent
+  // already brings all 6 stools into the scene, not just the one it claims.
+  const afterFirst = countStools();
+  assert.equal(afterFirst, 6, 'the parent\'s whole pod pool, 6 stools, is built on the first subagent');
+
+  // A seat that close to the desk is the pod's own stool, not the desk's own chair (createDesk
+  // already places one at its own fixed offset); the pod stool sits within its own small radius.
+  assert.ok(first.position.distanceTo(desk.position) < 2, 'the pod sits close to the parent desk');
+
+  // A second subagent at the same parent reuses the same pool: no new stool gets built.
+  layout.seatFor(agent('helper2', 'idle', { parentId: 'parent' }), null);
+  assert.equal(countStools(), afterFirst, 'a second pod subagent reuses the existing pool, no stool rebuilt');
+});
+
+test('many pod stools across many parents still merge into a bounded draw-call cost (one zone, shared colors)', async () => {
+  const { layout, agent, scene } = setup();
+  for (let p = 0; p < 10; p++) {
+    layout.seatFor(agent(`parent${p}`, 'implementing'), null);
+    for (let h = 0; h < 6; h++) layout.seatFor(agent(`helper${p}_${h}`, 'idle', { parentId: `parent${p}` }), null);
+  }
+  const { StaticBatch } = await import('../src/scene/StaticMerge.js');
+  scene.updateMatrixWorld();
+  const batch = new StaticBatch(scene);
+  batch.update();
+  const podMeshes = batch.mergedMeshes.filter((mesh) => mesh.parent?.name === 'static-batch-pods');
+  // The stool reuses 2 cached colors (seat, dark); the 'pods' zone merges every stool
+  // into one merged mesh per material, however many pods exist (60 here).
+  assert.ok(podMeshes.length > 0 && podMeshes.length <= 2, `expected 1-2 merged meshes for the whole pods zone, got ${podMeshes.length}`);
+});
+
 test('a non-librarian subagent whose parent has no seat yet never reaches the Library, even on this exact timing (issue #128 review)', () => {
   // A real race: a subagent is polled in the same cycle as its freshly spawned, not-yet-seated
   // parent. The persona check and the pod check both fall through; the generic research

@@ -12,6 +12,7 @@ import { createMeetingTable } from './MeetingTable.js';
 import { createPortrait } from './Portrait.js';
 import { createPrinter } from './Printer.js';
 import { createSofa } from './Sofa.js';
+import { createStool } from './Stool.js';
 import { createCredenza, createLowTable } from './Tables.js';
 import { createTestStation } from './TestStation.js';
 import { createTombstone } from './Tombstone.js';
@@ -46,6 +47,7 @@ export const PIECES = {
   testStation: () => piece('testStation', 'station', createTestStation),
   debugStation: () => piece('debugStation', 'station', createDebugStation),
   sofa: (color = 0x6a5acd) => piece('sofa', 'station', () => createSofa(color)),
+  stool: () => piece('stool', 'station', createStool),
   coffeeMachine: () => piece('coffeeMachine', 'station', createCoffeeMachine),
   meetingTable: () => piece('meetingTable', 'station', createMeetingTable),
   printer: () => piece('printer', 'furniture', createPrinter),
