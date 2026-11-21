@@ -5,6 +5,10 @@ export interface AgentExtras {
   parentId?: string;
   provider?: 'codex';
   attention?: 'waiting' | 'your-turn';
+  /** Only with `attention: 'your-turn'` (issue #168): finished its own turn, but a subagent of
+   * its own is still running. It stands with hands on hips, not the raised hand, and shows no
+   * beacon — it is not asking for you. */
+  orchestrating?: boolean;
   waitMinutes?: number;
   group?: { id: string; label: string };
   badges?: string[];
@@ -56,7 +60,11 @@ export const ACTIVITY_LABELS: Record<Activity, string> = {
   reviewing: 'Reviewing',
   writing_docs: 'Writing docs',
   deploying: 'Deploying',
-  meeting: 'Waiting for you',
+  // Not "Waiting for you" (issue #169): that wording is the attention system's own, for a
+  // different reason (a true block on Gabriel). The `meeting` activity is a pose about what the
+  // agent is doing right now (for example mid-`AskUserQuestion`) and can show even when nothing
+  // calls for Gabriel; `attentionLine` still overrides this text when attention is actually set.
+  meeting: 'In a meeting',
 };
 
 /** A subagent at rest gave its final answer: it has finished, it is not on a break. */

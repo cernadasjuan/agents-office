@@ -42,6 +42,44 @@ test('subagents never ask for attention', async () => {
   assert.equal(list[0].display.attention, undefined);
 });
 
+// --- Orchestrating (issue #168): tell an agent that finished its own turn and now waits on its
+// own busy subagents from one that is genuinely idle with nothing running under it ---
+
+test('an idle session with an active subagent is orchestrating, not a plain your-turn', async () => {
+  const parent = session('idle', 3);
+  const child = session('busy', 0, parent.id);
+  const list = [parent, child];
+  await attentionEnricher(() => NOW).enrich(list);
+  assert.equal(list[0].display.attention, 'your-turn');
+  assert.equal(list[0].display.orchestrating, true);
+});
+
+test('an idle session with no subagents at all is not orchestrating (the plain your-turn case)', async () => {
+  const list = [session('idle', 3)];
+  await attentionEnricher(() => NOW).enrich(list);
+  assert.equal(list[0].display.attention, 'your-turn');
+  assert.equal(list[0].display.orchestrating, undefined);
+});
+
+test('a waiting (blocked) session is never orchestrating, even with a subagent under it', async () => {
+  const parent = session('waiting', 3);
+  const child = session('busy', 0, parent.id);
+  const list = [parent, child];
+  await attentionEnricher(() => NOW).enrich(list);
+  assert.equal(list[0].display.attention, 'waiting');
+  assert.equal(list[0].display.orchestrating, undefined);
+});
+
+test('a subagent itself never gets the orchestrating flag either (subagents never ask)', async () => {
+  const parent = session('idle', 3);
+  const child = session('busy', 0, parent.id);
+  const grandchild = session('busy', 1, child.id);
+  const list = [parent, child, grandchild];
+  await attentionEnricher(() => NOW).enrich(list);
+  assert.equal(list[1].display.attention, undefined);
+  assert.equal(list[1].display.orchestrating, undefined);
+});
+
 test('the tab title counts blocked agents first, then your turn', () => {
   assert.equal(tabTitle(0, 0), 'Agents Office');
   assert.equal(tabTitle(2, 0), '(2) Agents Office');

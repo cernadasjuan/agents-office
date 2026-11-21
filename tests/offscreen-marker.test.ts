@@ -23,7 +23,7 @@ function orthographicCamera(): THREE.OrthographicCamera {
 }
 
 function projection(ndcX: number, ndcY: number, behind = false, pastFar = false): Projection {
-  return { ndc: new THREE.Vector3(ndcX, ndcY, 0), behind, pastFar };
+  return { ndc: new THREE.Vector3(ndcX, ndcY, 0), behind, pastFar, tooClose: false };
 }
 
 test('a point dead ahead, inside the frame, draws no marker', () => {
@@ -74,6 +74,18 @@ test('a point ahead of the camera, past the far plane, is not "behind" and does 
   const clip = projectToClip(new THREE.Vector3(80, 2, -1500), perspectiveCamera());
   assert.equal(clip.behind, false, 'a point past the far plane, but ahead, is not behind the camera');
   assert.equal(clip.pastFar, true);
+});
+
+test('a point ahead of the camera, but closer than the near plane, is flagged too close (issue #168 follow-up)', () => {
+  // The camera stands at z=10, near=0.1: z=9.95 is 0.05 units away, inside the near plane.
+  const clip = projectToClip(new THREE.Vector3(0, 2, 9.95), perspectiveCamera());
+  assert.equal(clip.behind, false, 'still ahead of the camera, just too close to draw there');
+  assert.equal(clip.tooClose, true);
+});
+
+test('a point well past the near plane is never flagged too close', () => {
+  const clip = projectToClip(new THREE.Vector3(0, 2, 0), perspectiveCamera());
+  assert.equal(clip.tooClose, false);
 });
 
 test('a point past the far plane, dead centered, still gets a marker (the renderer clips it; the arrow must not)', () => {

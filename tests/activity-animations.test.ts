@@ -21,10 +21,10 @@ after(() => {
 const FRAME = 1 / 60;
 const SETTLE_SECONDS = 3;
 
-function hold(joints: ReturnType<typeof buildSkeleton>, activity: Activity, from: number, seconds: number, raiseHand = false): number {
+function hold(joints: ReturnType<typeof buildSkeleton>, activity: Activity, from: number, seconds: number, raiseHand = false, orchestrating = false): number {
   let t = from;
   const until = from + seconds;
-  for (; t < until; t += FRAME) animateActivity(joints, activity, t, FRAME, undefined, raiseHand);
+  for (; t < until; t += FRAME) animateActivity(joints, activity, t, FRAME, undefined, raiseHand, orchestrating);
   return t;
 }
 
@@ -93,6 +93,36 @@ test('deploying still jumps (the primary celebration motion, not sway)', () => {
     t += FRAME;
   }
   assert.ok(heights.size > 10, `the jump (hips.position.y) should keep changing, got ${heights.size} distinct samples`);
+});
+
+// --- Orchestrating (issue #168): a calm "hands on hips" pose, never the raised hand ---
+
+test('orchestrating stands with both hands on its hips, not the raised-hand pose', () => {
+  const joints = buildSkeleton(new THREE.Color(0x4a90d9));
+  const t = hold(joints, 'idle', 0, SETTLE_SECONDS, false, true);
+  // Both arms move away from rest (0): a calm, bilateral pose, not the one-armed raised hand.
+  assert.ok(Math.abs(joints.leftUpperArm.rotation.z) > 0.1, 'left arm should fold in toward the hips');
+  assert.ok(Math.abs(joints.rightUpperArm.rotation.z) > 0.1, 'right arm should fold in toward the hips');
+  // The raised-hand pose drives rightUpperArm.rotation.x to -2.9; hands-on-hips never gets that close.
+  assert.ok(joints.rightUpperArm.rotation.x > -2, 'orchestrating must not reach the raised-hand angle');
+  void t;
+});
+
+test('orchestrating holds still once settled, the same as the other calm poses (#163 style)', () => {
+  const joints = buildSkeleton(new THREE.Color(0x4a90d9));
+  const t = hold(joints, 'idle', 0, SETTLE_SECONDS, false, true);
+  const leftZ = joints.leftUpperArm.rotation.z;
+  const rightZ = joints.rightUpperArm.rotation.z;
+  hold(joints, 'idle', t, 1, false, true);
+  assert.equal(joints.leftUpperArm.rotation.z, leftZ, 'left arm still moves a second later');
+  assert.equal(joints.rightUpperArm.rotation.z, rightZ, 'right arm still moves a second later');
+});
+
+test('a true call for you always wins over orchestrating when both are somehow set', () => {
+  const joints = buildSkeleton(new THREE.Color(0x4a90d9));
+  hold(joints, 'idle', 0, SETTLE_SECONDS, true, true);
+  // The raised-hand pose owns the right arm fully: it reaches its usual angle regardless of orchestrating.
+  assert.ok(joints.rightUpperArm.rotation.x < -2.5, 'raiseHand should still win the right arm');
 });
 
 test('walking still walks: legs and arms keep swinging (unaffected by #163)', () => {

@@ -1,6 +1,6 @@
 import { ACTIVITIES, ACTIVITY_LABELS, AgentInfo, activityLabel } from '../agents/AgentData.js';
 import type { Activity } from '../agents/ActivityAnimations.js';
-import { attentionBand, byWait, formatWait, oldestFreshWait, queueBucket } from './attention.js';
+import { attentionBand, attentionLine, byWait, formatWait, oldestFreshWait, queueBucket } from './attention.js';
 
 export type TriageGroupId = 'needs-you' | 'your-turn' | 'working' | 'idle' | 'cold';
 
@@ -223,7 +223,12 @@ export class AgentPanel {
     const waits = agent.extras?.attention !== undefined && minutes !== undefined;
     row.wait.textContent = waits ? formatWait(minutes) : '';
     row.wait.hidden = !waits;
-    row.activity.textContent = activityLabel(agent);
+    // Issue #168: the row reads the same words as the card and the floating label for the same
+    // agent at the same time — attention overrides the raw activity text here too, not just
+    // there. `activityLabel` already folds in the stuck fallback; attentionLine's own attention
+    // branches still win over it, the same priority order the label uses. No minutes here: the
+    // separate `row.wait` chip above already carries them.
+    row.activity.textContent = attentionLine(activityLabel(agent), agent.extras?.attention, undefined);
     this.updateTags(row, agent);
     if (row.menu && row.menu !== document.activeElement) row.menu.value = agent.activity;
   }
