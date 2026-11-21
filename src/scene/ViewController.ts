@@ -14,6 +14,8 @@ const PAN_SPEED_PER_DISTANCE = 0.9;
 const FAST_MULTIPLIER = 2.5;
 /** Issue #161: the office settles into the desk view after this long with no camera input. */
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 120;
+/** Issue #252: `checkPendingRoom` gives up quietly past this many `sceneChanged()` checks (one per world poll, `main.ts`'s own `pollWorld`, plus one per agent poll — both call it) — a typo'd or never-opened mission name must not keep paying this check for the rest of the session. */
+const PENDING_ROOM_MAX_ATTEMPTS = 50;
 /** A ground plane for the isometric double-click room pick (issue #175): where the ray meets `y=0`. */
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 /** Review (defect 2): held, these send no further discrete event, so the idle clock needs its own per-frame check, not just the keydown that started the hold. */
@@ -126,6 +128,9 @@ export class ViewController {
   private idleTimeoutSeconds: number;
   /** Issue #199: the shared camera's own FOV from just before desk mode widened it, restored on the way out. Null outside desk mode, and while a `deskView` never sets `fov` at all (graceful degradation, no lens change). */
   private deskRestoreFov: number | null = null;
+  /** Issue #252: a `#room=` target that did not resolve at construction (a mission room, not yet created by the first world poll) — re-checked by `checkPendingRoom` on every `sceneChanged()`, until it resolves or `pendingRoomAttempts` reaches `PENDING_ROOM_MAX_ATTEMPTS`. Null once resolved, given up on, or never requested. */
+  private pendingRoomName: string | null = null;
+  private pendingRoomAttempts = 0;
 
   constructor(private options: ViewControllerOptions) {
     this.selection = options.selection ?? officeSelection();
@@ -150,9 +155,52 @@ export class ViewController {
     // `setMode` no-ops for `desk` without a pose to show (graceful degradation): report the
     // mode actually landed on (first person), which never ran its own `modeChanged` above.
     if (this.currentMode === 'first-person') options.modeChanged?.(this.currentMode);
-    const room = start.room !== null ? (this.options.roomView?.(start.room) ?? null) : null;
-    if (room) this.applyStartRoom(room);
-    else if (start.zoom !== null) this.applyStartZoom(start.zoom);
+    if (start.room !== null) {
+      const room = this.options.roomView?.(start.room) ?? null;
+      if (room) {
+        this.applyStartRoom(room, true);
+      } else {
+        // Issue #252: a mission room never exists this early — `BuildingLayout` builds
+        // `office`/`library` synchronously right here at construction, but a mission only
+        // appears once the first `/api/world` poll creates it, well after this constructor
+        // returns. Keep the name and keep checking (`sceneChanged`, fired after every world
+        // poll) instead of treating "not found yet" the same as "not a real room". `#zoom=`
+        // still applies meanwhile, same as a genuinely unknown name would get today.
+        this.pendingRoomName = start.room;
+        if (start.zoom !== null) this.applyStartZoom(start.zoom);
+      }
+    } else if (start.zoom !== null) {
+      this.applyStartZoom(start.zoom);
+    }
+  }
+
+  /**
+   * Issue #252: re-checks a `#room=` target that did not resolve at construction, once per
+   * `sceneChanged()` (so, once per world poll — `main.ts`'s own `pollWorld`). Applies a cut,
+   * never a flight, once it finally appears: a flight is a transition *from* the view's own
+   * default framing (the PR #200 review comment on `applyStartRoom` below), and this one never
+   * got a chance to show that framing even for a moment, so there is nothing to fly from.
+   * Gives up quietly past `PENDING_ROOM_MAX_ATTEMPTS` checks — a typo'd or never-opened mission
+   * name must not keep paying this check for the rest of the session.
+   */
+  private checkPendingRoom(): void {
+    const name = this.pendingRoomName;
+    if (name === null) return;
+    const room = this.options.roomView?.(name) ?? null;
+    if (room) {
+      this.pendingRoomName = null;
+      this.applyStartRoom(room, false);
+      // `sceneChanged()` (which led here) already set `isometricBoundsDirty`, for its own,
+      // unrelated reason (any floor content change re-derives the pan/zoom limits). Clear it
+      // again: the framing just above IS the freshly computed goal for this room, the same
+      // thing `setMode('isometric', ...)` already protects its own fresh framing from — left
+      // dirty, the very next `update()` would retrack against the overall scene bounds and
+      // immediately clamp this target back, the one tick it is applied.
+      this.isometricBoundsDirty = false;
+      return;
+    }
+    this.pendingRoomAttempts++;
+    if (this.pendingRoomAttempts >= PENDING_ROOM_MAX_ATTEMPTS) this.pendingRoomName = null;
   }
 
   /** `#zoom=<distance>` (issue #89): starts the view at that camera distance instead of its own default framing. A no-op in first person, which has no zoom. */
@@ -177,8 +225,15 @@ export class ViewController {
    * using the same pure framing math a selection flight target would (never narrowing the
    * view's own pan/zoom limits, unlike `frame`); first person stands inside the room, facing
    * its main wall. Read-only: it never changes the scene, only the camera.
+   *
+   * @param flight True for the cold-start case (the constructor resolved the room right away):
+   * a transition from the view's own default framing, same as `applyStartZoom`. False for a
+   * `#room=` target resolved later, after waiting on a mission room to appear
+   * (`checkPendingRoom`, issue #252): a cut, the same `DIRECT_FOLLOW_RATES` + cancelled flight
+   * idiom a drag or a wheel zoom already uses for "respond right now, no easing" — there is no
+   * default framing to transition from this time, since none was ever shown.
    */
-  private applyStartRoom(room: RoomView): void {
+  private applyStartRoom(room: RoomView, flight: boolean): void {
     if (this.currentMode === 'isometric') {
       this.isometric.target.copy(room.bounds.getCenter(new THREE.Vector3()));
       this.isometric.halfHeight = THREE.MathUtils.clamp(
@@ -186,10 +241,15 @@ export class ViewController {
         this.isometric.minHalfHeight,
         this.isometric.maxHalfHeight,
       );
-      // PR #200 review round: a start parameter is a flight from the view's own default
-      // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
-      // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
-      this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
+      if (flight) {
+        // PR #200 review round: a start parameter is a flight from the view's own default
+        // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
+        // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
+        this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
+      } else {
+        this.flight = null;
+        this.isometricFollowRates = DIRECT_FOLLOW_RATES;
+      }
       this.applyIsometric();
     } else {
       this.applyPose(room.standing);
@@ -296,6 +356,7 @@ export class ViewController {
    */
   sceneChanged(): void {
     this.isometricBoundsDirty = true;
+    if (this.pendingRoomName !== null) this.checkPendingRoom();
   }
 
   /**
