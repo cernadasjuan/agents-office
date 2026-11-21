@@ -6,6 +6,7 @@ export const VIEW_STORAGE_KEY = 'agents-office.view';
 export const VIEW_NAMES: Record<ViewMode, string> = {
   'first-person': 'First person',
   isometric: 'Isometric',
+  desk: 'Desk',
 };
 
 const asViewMode = viewModeFromName;

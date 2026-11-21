@@ -95,7 +95,11 @@ function furnishOffice({ doorAlong, usersOffice = true }: RoomShape): RoomPlan {
   // The lounge corner goes to the front corner away from the door; `side` mirrors it
   const side = doorAlong < 0 ? -1 : 1;
   const pieces: Placement[] = [
-      { piece: PIECES.desk(), a: deskA, d: deskD, turn: FACE_AWAY },
+      // Issue #161 review (round 2): the user's own desk loses the stock monitor, too close to
+      // the desk-view camera and too tall, to leave the queue behind it clear. A later
+      // overflow waiting room (`usersOffice` false) is nobody's desk-view target, so it keeps
+      // the normal desk.
+      { piece: usersOffice ? PIECES.deskNoMonitor() : PIECES.desk(), a: deskA, d: deskD, turn: FACE_AWAY },
       { piece: PIECES.rug(4.2, 2.8, Colors.books[7].getHex()), a: deskA, d: deskD + 0.4 },
       // Behind the desk, left and right of the gap an outer room's door may need
       { piece: PIECES.credenza(), a: -3.2, d: 11.7 },

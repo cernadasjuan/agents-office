@@ -131,17 +131,17 @@ export function isClick(down: ScreenPoint | null, up: ScreenPoint): boolean {
   return Math.hypot(up.x - down.x, up.y - down.y) <= CLICK_TOLERANCE_PX;
 }
 
-export type ViewMode = 'first-person' | 'isometric';
+export type ViewMode = 'first-person' | 'isometric' | 'desk';
 
-/** A view name from a URL or the browser storage: `first-person`, `iso` or `isometric`; else null. */
+/** A view name from a URL or the browser storage: `first-person`, `iso`/`isometric` or `desk`; else null. */
 export function viewModeFromName(value: string | null | undefined): ViewMode | null {
-  if (value === 'first-person' || value === 'isometric') return value;
+  if (value === 'first-person' || value === 'isometric' || value === 'desk') return value;
   return value === 'iso' ? 'isometric' : null;
 }
 
-/** The isometric view looks down on the building: cutaway walls, no ceiling, zoom-based labels. */
+/** The isometric view looks down on the building: cutaway walls, no ceiling, zoom-based labels. Desk mode is an eye-level view, like first person. */
 export function isViewFromAbove(mode: ViewMode): boolean {
-  return mode !== 'first-person';
+  return mode === 'isometric';
 }
 
 export interface ViewHash {
