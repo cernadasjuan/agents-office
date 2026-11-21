@@ -6,39 +6,46 @@ import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
 import type { PickTarget } from '../../scene/Selection.js';
 import type { WorldRoom } from '../../extensions.js';
-import { ROOM_SIZE, type Rect, type RoomSlot } from './RoomPlanner.js';
+import { ROOM_SIZE, type Door, type Rect, type RoomSlot, type Side } from './RoomPlanner.js';
 import { buildCeiling, buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
 import { sceneOf, setTombstoneName, tombstoneNameBatchFor, tombstoneNameplate } from './tombstoneNames.js';
 import { furnishWarRoom, WAR_ROOM_WIDTH, type WarRoomCounts } from './warRoomFurnishing.js';
 
 /**
- * The mission wing: war rooms north of the hall, behind its back wall, two per
- * row. Doors open between the whiteboards. Further rows open into the row before.
+ * The mission wing: war rooms north of the hall, behind its back wall, two columns either
+ * side of the mission corridor, stacked further north one row at a time.
+ *
+ * Issue #123 review: before this, only row 0 opened directly onto the hall; every row after
+ * it chained onto the room in front of it through `extraDoors` (`BuildingLayout.syncWorldRooms`),
+ * so a deep room was reachable only by crossing another room's closed door. Fixed by running
+ * the mission corridor (`missionCorridorRect`) up the old shared boundary between the two
+ * columns (x = -9) and giving every row's room a door straight onto it, on the column's own
+ * outward-facing side wall — never on the wall it shares with the row before or after it. The
+ * corridor itself opens into the hall once, at its own south end (`MISSION_CORRIDOR_DOOR`), so
+ * the hall still reads as the one place every wing ultimately connects back to.
  *
  * Issue #193: a war room's door-wall width is `WAR_ROOM_WIDTH` (18), wider than a generic
  * room's `ROOM_SIZE` (12, which stays its depth), so the desk grid fits 6-8 desks instead of
- * 4. Review of #196 PR 196: the first version grew both columns outward from their old
- * shared boundary, which pushed column 1's east edge past x = 15 — straight into the
- * east-side rented ring (`RoomPlanner.ts`'s `slotFor`, ring 0 index 2 and every ring beyond
- * it, all at that same x >= 15, z in [-18, -6] band, for any room count) — and moved its
- * door into the hall's own second whiteboard (`Office.ts`, `wb2` at x = 5).
- *
- * Fixed by growing away from the hall instead: column 1's east edge stays pinned at x = 9,
- * the same value the original, un-widened design used (margin 6 from the rented ring's own
- * x = 15 start, for any ring count — the east and west rented rings never move closer to the
- * hall than their ring-0 positions, so a fixed margin here is permanent, not size-dependent).
- * Column 0 grows entirely westward from the shared boundary at x = -9. Its own far edge
- * (x = -27) lands exactly on the west-side rented ring's own x = -27, but that ring sits at
- * z in [-11, 13] (always; its own rings shift only in x), never overlapping a war room's
- * z <= -13 — safe at any room count by construction, not because of a chosen margin. Column
- * 0's door moves out from -10 to -13.5 to clear its own column's much-wider new middle: still
- * inside the hall's own wall (-15..15, margin 1.5) and clear of its whiteboard (`wb1`, x = -5).
- * Column 1's door goes back to x = 0 (its original position, centered in the new column too),
- * clear of both whiteboards with room to spare.
+ * 4. Column 1's east edge stays pinned well clear of the east-side rented ring (`RoomPlanner.ts`'s
+ * `slotFor`, ring 0 index 2, x >= 15, z in [-18, -6]) at any room count — the corridor only ever
+ * grows north (more negative z), never widens, so this margin never erodes. Column 0's west
+ * edge is unconstrained by the west-side rented ring: that ring sits at z in [-11, 13], never
+ * overlapping a war room's z <= -13, by construction (`tests/mission-wing-overlap.test.ts`).
  */
-const WING_COLUMNS = [
-  { minX: -9 - WAR_ROOM_WIDTH, maxX: -9, door: -13.5 },
-  { minX: -9, maxX: -9 + WAR_ROOM_WIDTH, door: 0 },
+export const MISSION_CORRIDOR_WIDTH = 5;
+const CORRIDOR_CENTER_X = -9;
+const CORRIDOR_MIN_X = CORRIDOR_CENTER_X - MISSION_CORRIDOR_WIDTH / 2;
+const CORRIDOR_MAX_X = CORRIDOR_CENTER_X + MISSION_CORRIDOR_WIDTH / 2;
+
+/** The mission corridor's own door into the hall (issue #123): fixed, since the corridor's south
+ * frontage never moves as the wing grows north — only its far (north) end ever extends. */
+export const MISSION_CORRIDOR_DOOR: Door = { side: 'south', at: CORRIDOR_CENTER_X };
+/** The hall's own matching door for `MISSION_CORRIDOR_DOOR` (the wall it shares with the corridor). */
+export const MISSION_CORRIDOR_HALL_DOOR: Door = { side: 'north', at: CORRIDOR_CENTER_X };
+
+const WING_COLUMNS: Array<{ minX: number; maxX: number; side: Side }> = [
+  { minX: CORRIDOR_MIN_X - WAR_ROOM_WIDTH, maxX: CORRIDOR_MIN_X, side: 'east' },
+  { minX: CORRIDOR_MAX_X, maxX: CORRIDOR_MAX_X + WAR_ROOM_WIDTH, side: 'west' },
 ];
 
 export function missionSlot(index: number): RoomSlot {
@@ -46,8 +53,32 @@ export function missionSlot(index: number): RoomSlot {
   const row = Math.floor(index / WING_COLUMNS.length);
   const maxZ = -13 - row * ROOM_SIZE;
   const rect = { minX: column.minX, maxX: column.maxX, minZ: maxZ - ROOM_SIZE, maxZ };
-  const at = row === 0 ? column.door : (column.minX + column.maxX) / 2;
-  return { rect, door: { side: 'south', at }, outward: 'north', ring: row };
+  // Issue #123: every row's door opens onto its own frontage on the mission corridor, never
+  // onto the row before or after it.
+  const at = (rect.minZ + rect.maxZ) / 2;
+  return { rect, door: { side: column.side, at }, outward: 'north', ring: row };
+}
+
+/**
+ * The mission corridor's own rect (issue #123): the one shared frontage every war room's door
+ * opens directly onto. Its south end is fixed, flush against the hall's own back wall; its
+ * north end grows one `ROOM_SIZE` further out each time a new row is rented, so there is no
+ * room-count cap on the wing it serves.
+ */
+export function missionCorridorRect(roomCount: number): Rect {
+  const rows = Math.max(1, Math.ceil(roomCount / WING_COLUMNS.length));
+  return { minX: CORRIDOR_MIN_X, maxX: CORRIDOR_MAX_X, minZ: -13 - rows * ROOM_SIZE, maxZ: -13 };
+}
+
+/** The mission corridor's own floor (issue #123), the same open-mission tint every war room's
+ * floor starts in, so the corridor reads as part of the same wing, not a separate room. */
+export function missionCorridorFloor(rect: Rect): THREE.Mesh {
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(rect.maxX - rect.minX, rect.maxZ - rect.minZ), getToonMaterial(FLOOR_OPEN));
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set((rect.minX + rect.maxX) / 2, 0.005, (rect.minZ + rect.maxZ) / 2);
+  floor.receiveShadow = true;
+  floor.userData.floor = true;
+  return floor;
 }
 
 export const MAX_TOMBSTONES = 12;

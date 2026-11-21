@@ -183,12 +183,8 @@ test('AC1: a new war room has its must-have furniture from the start, built from
 });
 
 test('desk-like furniture grows with the peak live count and never shrinks back', () => {
-  // Index 0 sits in the first ring's first wing column. Its door sits 4.5 m off the room's
-  // own center (`missionSlot`'s `WING_COLUMNS`, issue #193 review: column 0 grows much wider
-  // than column 1 to keep the whole wing clear of the rented ring and the hall's whiteboard,
-  // which pushes its door further from center than column 1's). That drops the `a = 2.4` and
-  // both `a = 4.6` slots (all in the door's path), shrinking this room's physical fit from
-  // MAX_DESK_SLOTS (8) to 5.
+  // Issue #123: every war room's door opens onto the mission corridor at its own row's
+  // center, so every index (not just a later ring) gets the grid's full, door-centered fit.
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   const countOf = (name: string) => {
     let n = 0;
@@ -206,15 +202,15 @@ test('desk-like furniture grows with the peak live count and never shrinks back'
   assert.equal(countOf('desk'), 2);
   assert.equal(countOf('debugStation'), 1);
 
-  // A later, bigger peak grows it further, up to this room's own physical fit (5 slots)
+  // A later, bigger peak grows it further, up to this room's own physical fit
   missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
-  assert.equal(countOf('desk'), 3);
+  assert.equal(countOf('desk'), 6);
   assert.equal(countOf('debugStation'), 2);
 });
 
 test('the desk grid never exceeds the room\'s physical fit', () => {
-  // Index 2 is in the second ring, where the door sits at the column's own center
-  // (`missionSlot`), so this room's fit is the grid's full, door-centered MAX_DESK_SLOTS.
+  // Every row's door sits at the column's own center (`missionSlot`, issue #123), so every
+  // room's fit is the grid's full, door-centered MAX_DESK_SLOTS.
   const missionRoom = buildMissionRoom(room('a', 'open'), 2);
   missionRoom.updateCounts({ deskLike: 20, debugging: 5 });
   let total = 0;
