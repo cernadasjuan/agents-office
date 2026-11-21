@@ -179,6 +179,24 @@ test('a library shelf and its pick targets add zero draw calls: CSS2D labels car
   ];
   extension.worldChanged(world([library('pm-floor', sections)]));
   assert.ok(extension.pickTargets().length > 0, 'the budget claim means nothing without real pick targets mounted');
+  // Review: `countDrawCalls` reads each mesh's own `matrixWorld`, which only `updateMatrixWorld`
+  // refreshes — without it every newly added hit-test mesh is still at the identity matrix (the
+  // scene's own origin), nowhere near the camera's frustum, so this assertion would pass even if
+  // `callsOf` and `material.visible` were both wrong: the meshes would be "zero calls" simply
+  // because they look culled at the wrong place, not because they are genuinely invisible.
+  scene.updateMatrixWorld(true);
   const after = countDrawCalls(scene, camera);
   assert.equal(after.total, before.total);
+  // Positive control: the exact same geometry and positions, but with a visible material,
+  // must show up in the count. Without this, a regression that flips `HIT_MATERIAL.visible`
+  // back to `true` would still pass the assertion above for the wrong reason (frustum culling
+  // at the origin, not `material.visible`), rather than failing as it should.
+  const visibleProbe = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.22, 0.2), new THREE.MeshBasicMaterial({ visible: true }));
+  const firstHit = extension.pickTargets()[0]!.object as THREE.Mesh;
+  visibleProbe.position.copy(firstHit.position);
+  scene.add(visibleProbe);
+  scene.updateMatrixWorld(true);
+  const withVisibleProbe = countDrawCalls(scene, camera);
+  assert.ok(withVisibleProbe.total > after.total, 'a visible mesh at a real shelf position must move the count, or this test cannot catch a flipped material.visible');
+  visibleProbe.removeFromParent();
 });

@@ -446,14 +446,23 @@ function repoTag(value: unknown): string | undefined {
   return typeof value === 'string' && value.includes('/') ? ownerRepo(value) : repoShortName(value);
 }
 
-/** A repo-relative path, forward-slashed, no `.`/`..` segment, no leading slash: the same shape
- * `resolveEntryTarget` already only ever hands back (issue #221 AC3 defense in depth — this
- * whitelist runs again at the boundary regardless of what the plugin layer sent). */
-const REPO_PATH = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
+/** Review: a real document name is not ASCII-only (an accent, a space) — the original
+ * `[A-Za-z0-9_.-]` whitelist rejected those and silently dropped `githubUrl` for an otherwise
+ * valid file (issue #221 AC3 explicitly asks for "nested paths and spaces"). This instead
+ * forbids only what actually matters for a repo-relative path: no control character, no
+ * backslash, no leading slash, no empty/`.`/`..` segment — the same shape `resolveEntryTarget`
+ * already only ever hands back (defense in depth: this whitelist runs again at the boundary
+ * regardless of what the plugin layer sent). Everything else a real filename can hold (spaces,
+ * accents, parentheses) survives, and `githubBlobUrl` below percent-encodes each segment before
+ * it reaches a URL. */
+const FORBIDDEN_PATH_CHARS = /[\x00-\x1f\\]/;
 
 function repoPath(value: unknown): string | undefined {
-  if (typeof value !== 'string' || value.length > 300 || !REPO_PATH.test(value)) return undefined;
-  return value.split('/').some((segment) => segment === '.' || segment === '..') ? undefined : value;
+  if (typeof value !== 'string' || value.length === 0 || value.length > 300) return undefined;
+  if (value.startsWith('/') || FORBIDDEN_PATH_CHARS.test(value)) return undefined;
+  const segments = value.split('/');
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) return undefined;
+  return value;
 }
 
 /**
@@ -461,10 +470,13 @@ function repoPath(value: unknown): string | undefined {
  * /blob/main/<path>`, built here from an already-whitelisted owner/repo and repo-relative path,
  * never a URL a plugin hands over whole — the same reasoning `redactPaths` already applies to
  * free text: nothing resembling a local filesystem path crosses this boundary, only a URL and
- * display strings built from parts this function itself validated.
+ * display strings built from parts this function itself validated. Each path segment is
+ * percent-encoded on its own (review: `repoPath` now allows a space or an accent through, which
+ * is not valid raw inside a URL) so the slash that separates segments survives untouched.
  */
 function githubBlobUrl(owner: string, repo: string, path: string): string | undefined {
-  const url = `https://github.com/${owner}/${repo}/blob/main/${path}`;
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const url = `https://github.com/${owner}/${repo}/blob/main/${encodedPath}`;
   return httpsUrl(url);
 }
 
