@@ -17,11 +17,29 @@ import { slotFor } from './RoomPlanner.js';
 
 /** Issue #161: sitting at the desk reads lower than a standing first-person pose, so the desk and its monitors stay in frame. */
 export const DESK_EYE_HEIGHT = FIGURE_EYE_HEIGHT * 0.78;
-/** How far behind the desk (away from the door) the desk-view camera sits — inside the chair, not on top of the desk. */
-export const DESK_SEAT_OFFSET = 1.0;
+/**
+ * How far behind the desk (away from the door) the desk-view camera sits — inside the chair,
+ * not on top of the desk. Issue #199: the nearest queue row (`d - 1.6`) sits close enough that
+ * its outer pair (`a = ±4.6`) needs a wide horizontal angle to stay in frame; pulled back this
+ * far (short of the credenza/display shelf behind the chair, `furnishing.ts`'s `usersOffice`
+ * pieces at `d` ~11.7) plus the wider `DESK_CAMERA_FOV` below is what actually closes the gap —
+ * neither alone, at a room-safe offset, is enough (see that constant's own comment).
+ */
+export const DESK_SEAT_OFFSET = 2.0;
 /** Where the desk-view camera looks: toward the queue in front of the desk, at a standing agent's eye level (`queueSpots`'s own `look` height). */
 export const DESK_LOOK_OFFSET = 3.0;
 export const DESK_LOOK_EYE_HEIGHT = 1.2;
+/**
+ * The desk-view camera's own vertical field of view (issue #199): wider than the first-person
+ * default (60°, `SceneSetup.ts`), so the frustum clears the nearest queue row's outer pair at
+ * every supported aspect ratio (1280x800 and 1600x1000, both 1.6 — the tighter of the three —
+ * and 1920x1080). Pure geometry (`desk-monitors.test.ts`'s own frustum test) puts the minimum
+ * at ~78° given `DESK_SEAT_OFFSET` above; this keeps a few degrees of margin. `ViewController`
+ * applies it only while in desk mode and restores the shared camera's prior FOV on the way out
+ * — first-person and isometric keep the normal lens (rule 2: a bug fix, scoped to the one view
+ * it fixes).
+ */
+export const DESK_CAMERA_FOV = 82;
 
 /** Each monitor's own width and height (issue #161 review round 2: a little larger, and a little lower, than the first round). */
 export const MONITOR_WIDTH = 0.55;
@@ -40,12 +58,16 @@ export function officeFrame(): RoomFrame {
   return new RoomFrame(slot.rect, slot.door);
 }
 
-/** Where the fixed desk-view camera sits and looks (issue #161, key `H`). Pure: assumes the office is slot 0, the one assumption this whole module makes. */
-export function deskCameraPose(): { position: THREE.Vector3; lookAt: THREE.Vector3 } {
+/**
+ * Where the fixed desk-view camera sits and looks (issue #161, key `H`), and the vertical FOV
+ * it needs (issue #199, `DESK_CAMERA_FOV`). Pure: assumes the office is slot 0, the one
+ * assumption this whole module makes.
+ */
+export function deskCameraPose(): { position: THREE.Vector3; lookAt: THREE.Vector3; fov: number } {
   const frame = officeFrame();
   const position = frame.point(OFFICE_DESK.a, OFFICE_DESK.d + DESK_SEAT_OFFSET, DESK_EYE_HEIGHT);
   const lookAt = frame.point(OFFICE_DESK.a, OFFICE_DESK.d - DESK_LOOK_OFFSET, DESK_LOOK_EYE_HEIGHT);
-  return { position, lookAt };
+  return { position, lookAt, fov: DESK_CAMERA_FOV };
 }
 
 /**
