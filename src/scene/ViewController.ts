@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
-import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
+import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, setWallColliders, updateFreeCamera } from './FreeCamera.js';
 import { IsometricController, IsometricTween, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
 import { PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
-import type { RoomView } from '../layout/LayoutStrategy.js';
+import type { RoomView, WallRect } from '../layout/LayoutStrategy.js';
 import { SelectionMarker } from './SelectionMarker.js';
 import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, type PickTarget, type ScreenPoint, type SelectionState, type ViewMode } from './Selection.js';
 
@@ -54,6 +54,8 @@ export interface ViewControllerOptions {
   roomAt?: (x: number, z: number) => RoomView | null;
   /** Issue #161: seconds of no camera input before the office settles into the desk view. Default 120; tests pass a short one. */
   idleTimeoutSeconds?: number;
+  /** Issue #194: every wall in the active layout, as a flat 2D collision list, so first-person ground-walk stops at a wall instead of walking through it. Without it, walls stay unobstructed — the old behavior. */
+  wallColliders?: () => WallRect[];
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -279,6 +281,11 @@ export class ViewController {
       const pose = this.options.deskView?.();
       if (pose) this.applyPose(pose);
     } else {
+      // Issue #194: the live wall list, every frame — a room grows (a new rented room, a new
+      // war room) over the life of the session, so a list captured once at construction would
+      // miss any wall added after it. Cheap: a flat array the layout already keeps, not a
+      // scene walk.
+      setWallColliders(this.options.wallColliders?.() ?? []);
       updateFreeCamera(camera, delta);
     }
 

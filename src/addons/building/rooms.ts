@@ -8,6 +8,8 @@ import { OFFICE } from '../../utils/Constants.js';
 import { DOOR_WIDTH, ROOM_SIZE, doorPoint, type Door, type Rect, type RoomSlot, type Side, wallPieces } from './RoomPlanner.js';
 import { roomLabel } from './roomLabels.js';
 import { roomFurnishing, type RoomPlan } from './furnishing.js';
+import type { WallRect } from '../../layout/LayoutStrategy.js';
+export type { WallRect };
 
 export * from './roomLabels.js';
 
@@ -160,6 +162,22 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
   }
   if (hidden.children.length > 0) group.add(hidden);
   return group;
+}
+
+/**
+ * The collision footprints of a room's walls, the same `wallPieces` geometry `buildWalls`
+ * draws (doors already left out as gaps), without building any Three.js meshes. `FreeCamera`'s
+ * ground-walk collides against the flat list this returns, never the real wall meshes.
+ */
+export function wallRects(rect: Rect, doors: Door[]): WallRect[] {
+  const half = WALL_THICKNESS / 2;
+  return wallPieces(rect, doors).map((piece) => {
+    const horizontal = piece.side === 'north' || piece.side === 'south';
+    const fixed = { north: rect.minZ, south: rect.maxZ, west: rect.minX, east: rect.maxX }[piece.side];
+    return horizontal
+      ? { minX: piece.from, maxX: piece.to, minZ: fixed - half, maxZ: fixed + half }
+      : { minX: fixed - half, maxX: fixed + half, minZ: piece.from, maxZ: piece.to };
+  });
 }
 
 /** The zone every room's ceiling shares, so they merge into one mesh (review, #184 round 2). */
