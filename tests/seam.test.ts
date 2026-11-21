@@ -62,6 +62,33 @@ test('skills keeps only plain string tokens, dropping a non-string value even if
   assert.ok(agent.skills!.every((skill) => typeof skill === 'string'));
 });
 
+test('tools keeps only allow-listed tool names, dropping anything else (issue #167 round 2)', () => {
+  const [agent] = projectAgents([observation({
+    display: { tools: ['Bash', 'Read', 'NotAllowed', null, 42, 'rm -rf /'] as never },
+  })], publicId);
+
+  assert.deepEqual(agent.tools, ['Bash', 'Read']);
+});
+
+test('skills past the 8-entry cap keeps the most recent 8, not the first 8 (issue #167 round 2 review: defense in depth against an enricher that forgets to pre-cap)', () => {
+  const [agent] = projectAgents([observation({
+    display: { skills: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] },
+  })], publicId);
+
+  assert.deepEqual(agent.skills, ['b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']);
+});
+
+test('lastEquipSource projects only "skill" or "tool", dropping any other value (issue #167 round 2)', () => {
+  const [skill] = projectAgents([observation({ display: { lastEquipSource: 'skill' } })], publicId);
+  assert.equal(skill.lastEquipSource, 'skill');
+
+  const [tool] = projectAgents([observation({ display: { lastEquipSource: 'tool' } })], publicId);
+  assert.equal(tool.lastEquipSource, 'tool');
+
+  const [bad] = projectAgents([observation({ display: { lastEquipSource: 'whatever' as never } })], publicId);
+  assert.equal('lastEquipSource' in bad, false);
+});
+
 test('an issue card keeps only a cleaned short repository token', () => {
   const [agent] = projectAgents([observation({ display: { issues: [
     { number: 1, title: 'a', repo: 'agents-office' },
