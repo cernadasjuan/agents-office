@@ -13,8 +13,11 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   set: () => true,
 })) as never;
 const { AgentManager } = await import('../src/agents/AgentManager.js');
-const { buildSkeleton } = await import('../src/characters/StickFigureParts.js');
+const { buildSkeleton, HIP_HEIGHT } = await import('../src/characters/StickFigureParts.js');
 const { animateActivity } = await import('../src/agents/ActivityAnimations.js');
+// Issue #165's Hero body shortened the legs, moving the standing hip height off the
+// pre-Hero 0.9; the seated drop (0.4) is unchanged (see ActivityAnimations.ts).
+const SEATED_HIP_HEIGHT = HIP_HEIGHT - 0.4;
 const registry = await import('../src/layout/registry.js');
 after(() => {
   dom.window.close();
@@ -79,10 +82,10 @@ function settle(posture: 'seated' | 'standing' | undefined, activity: Activity):
 }
 
 test('a seat can make an agent sit or stand whatever its activity', () => {
-  assert.ok(Math.abs(settle(undefined, 'idle') - 0.9) < 0.01, 'idle stands by default');
-  assert.ok(Math.abs(settle('seated', 'idle') - 0.5) < 0.01, 'idle sits on a sofa');
-  assert.ok(Math.abs(settle(undefined, 'implementing') - 0.5) < 0.01, 'implementing sits by default');
-  assert.ok(Math.abs(settle('standing', 'implementing') - 0.9) < 0.01, 'implementing stands on an open spot');
+  assert.ok(Math.abs(settle(undefined, 'idle') - HIP_HEIGHT) < 0.01, 'idle stands by default');
+  assert.ok(Math.abs(settle('seated', 'idle') - SEATED_HIP_HEIGHT) < 0.01, 'idle sits on a sofa');
+  assert.ok(Math.abs(settle(undefined, 'implementing') - SEATED_HIP_HEIGHT) < 0.01, 'implementing sits by default');
+  assert.ok(Math.abs(settle('standing', 'implementing') - HIP_HEIGHT) < 0.01, 'implementing stands on an open spot');
 });
 
 test('an overflow spot makes the agent stand', () => {

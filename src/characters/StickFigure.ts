@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { buildSkeleton, handTintFor, Joints } from './StickFigureParts.js';
+import { buildSkeleton, handTintFor, setMouthState, FaceState, Joints } from './StickFigureParts.js';
+import { hairStyleFor, bodyScaleFor } from './HeroVariety.js';
 import { createLabel, updateLabel } from './Label.js';
 import { Activity, animateActivity, animateWalking, getRestPose } from '../agents/ActivityAnimations.js';
 import { ACTIVITY_LABELS, activityLabelFor } from '../agents/AgentData.js';
@@ -37,18 +38,39 @@ export class StickFigure {
   private subagent = false;
   private stuck = false;
   private beacon: THREE.Mesh | null = null;
+  private faceState: FaceState = 'neutral';
 
   constructor(name: string, accentColor: THREE.Color, secondColor?: THREE.Color) {
     this.name = name;
     this.accentColor = accentColor.clone();
     this.secondColor = secondColor?.clone();
-    this.joints = buildSkeleton(accentColor, secondColor);
+    this.joints = buildSkeleton(accentColor, secondColor, hairStyleFor(name));
+    // Body width (issue #165 round 2, "hair + body-shape variety"): a root scale, never
+    // a new geometry — StickFigureParts.ts's limb cache keys a shared shape by its exact
+    // length, so unique per-agent lengths would mint a bucket per agent. Only x/z scale,
+    // so FIGURE_EYE_HEIGHT (a y value) stays true for every figure regardless of width.
+    const width = bodyScaleFor(name);
+    this.joints.root.scale.set(width, 1, width);
     this.label = createLabel(name, ACTIVITY_LABELS.idle);
     this.label.element.style.setProperty('--agent-color', `#${this.accentColor.getHexString()}`);
     this.joints.root.add(this.label);
 
     // Apply rest pose
     this.applyPose(getRestPose(this.joints));
+  }
+
+  /** `neutral` at idle, `focused` for every other activity, `waiting` overrides both the moment the figure calls for Gabriel. */
+  private computeFaceState(): FaceState {
+    if (this.callsForYou) return 'waiting';
+    return this.targetActivity === 'idle' ? 'neutral' : 'focused';
+  }
+
+  /** A geometry swap, same pattern as a persona hat swap: a no-op unless the state actually changed. */
+  private refreshFace(): void {
+    const next = this.computeFaceState();
+    if (next === this.faceState) return;
+    this.faceState = next;
+    setMouthState(this.joints.mouth, next);
   }
 
   get group(): THREE.Group {
@@ -65,6 +87,7 @@ export class StickFigure {
     this.targetActivity = activity;
     this.transitionProgress = 0;
     this.refreshLabel();
+    this.refreshFace();
   }
 
   /**
@@ -127,6 +150,7 @@ export class StickFigure {
     this.orchestrating = orchestrating;
     this.callsForYou = callsForYou({ attention: attention as AgentExtras['attention'], waitMinutes, orchestrating });
     this.refreshLabel();
+    this.refreshFace();
     if (this.callsForYou && !this.beacon) {
       this.beacon = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), getToonMaterial(new THREE.Color(0xffb020)));
       this.beacon.position.set(0, 2.55, 0);
