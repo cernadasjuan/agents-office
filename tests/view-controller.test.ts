@@ -28,7 +28,7 @@ const fixedLayout: LayoutStrategy = {
 };
 
 interface SetupExtras {
-  deskView?: () => { position: THREE.Vector3; lookAt: THREE.Vector3 } | null;
+  deskView?: () => { position: THREE.Vector3; lookAt: THREE.Vector3; fov?: number } | null;
   roomAt?: (x: number, z: number) => { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 } } | null;
   idleTimeoutSeconds?: number;
 }
@@ -69,6 +69,11 @@ function setup(
 /** A fixed desk pose away from the test's default first-person spot, so a flight there is visible. */
 function fixtureDeskView(): { position: THREE.Vector3; lookAt: THREE.Vector3 } {
   return { position: new THREE.Vector3(20, 1.3, -2), lookAt: new THREE.Vector3(20, 1.2, -6) };
+}
+
+/** Issue #199: the same fixture, plus the widened lens `ViewController` applies only in desk mode. */
+function fixtureDeskViewWithFov(fov = 82): { position: THREE.Vector3; lookAt: THREE.Vector3; fov: number } {
+  return { ...fixtureDeskView(), fov };
 }
 
 test('first person stays the default and the camera does not move by itself', () => {
@@ -253,6 +258,52 @@ test('idling without a deskView option is a no-op forever (graceful degradation)
   const { view } = setup('', undefined, undefined, { idleTimeoutSeconds: 1 });
   for (let i = 0; i < 5 * 60; i++) view.update(i / 60, 1 / 60);
   assert.equal(view.mode, 'first-person');
+});
+
+// --- Desk camera FOV (issue #199) ---
+
+test('a deskView with fov widens the shared camera only in desk mode, and restores it on exit', () => {
+  const desk = fixtureDeskViewWithFov();
+  const { view, camera, press } = setup('', undefined, undefined, { deskView: () => desk });
+  const defaultFov = camera.fov;
+  press('KeyH');
+  assert.equal(camera.fov, desk.fov, 'desk mode widens the lens as soon as it is entered');
+  press('KeyH');
+  assert.equal(camera.fov, defaultFov, 'leaving desk mode restores the exact prior lens');
+});
+
+test('a deskView with fov restores the lens on the way out to the isometric view too', () => {
+  const desk = fixtureDeskViewWithFov();
+  const { view, camera, press } = setup('', undefined, undefined, { deskView: () => desk });
+  const defaultFov = camera.fov;
+  press('KeyH');
+  assert.equal(camera.fov, desk.fov);
+  press('KeyI');
+  assert.equal(view.mode, 'isometric');
+  assert.equal(camera.fov, defaultFov, 'isometric framing uses the restored lens, not the widened one');
+});
+
+test('entering and leaving desk mode twice never loses or corrupts the restored lens', () => {
+  const desk = fixtureDeskViewWithFov();
+  const { camera, press } = setup('', undefined, undefined, { deskView: () => desk });
+  const defaultFov = camera.fov;
+  press('KeyH');
+  press('KeyH');
+  assert.equal(camera.fov, defaultFov, 'first round trip restores the lens');
+  press('KeyH');
+  assert.equal(camera.fov, desk.fov, 'second entry widens it again from the same restored baseline');
+  press('KeyH');
+  assert.equal(camera.fov, defaultFov, 'second round trip restores it again, not some stale value');
+});
+
+test('a deskView without fov (an older layout, or a test fixture) never touches the lens — old behavior', () => {
+  const desk = fixtureDeskView();
+  const { camera, press } = setup('', undefined, undefined, { deskView: () => desk });
+  const defaultFov = camera.fov;
+  press('KeyH');
+  assert.equal(camera.fov, defaultFov, 'no fov on the pose means no lens change at all');
+  press('KeyH');
+  assert.equal(camera.fov, defaultFov);
 });
 
 // --- Double-click a room in isometric (issue #175) ---

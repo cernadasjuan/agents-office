@@ -14,7 +14,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { ViewController } = await import('../src/scene/ViewController.js');
 const { SelectionState, parseViewHash } = await import('../src/scene/Selection.js');
-const { IsometricController, isometricDirection, ISO_ELEVATION, floorPointUnderCursor, zoomTowardCursor } = await import('../src/scene/IsometricCamera.js');
+const { IsometricController, isometricDirection, ISO_ELEVATION, floorPointUnderCursor, zoomTowardCursor, followIsometric, isometricAtRest, applyIsometricState, distanceForHalfHeight } = await import('../src/scene/IsometricCamera.js');
 const { chooseViewMode, viewStatusText } = await import('../src/scene/ViewMemory.js');
 const { labelDetail, signVisible, roomLabelVisible, ISOMETRIC_FULL_LABEL_ZOOM } = await import('../src/ui/LabelDetail.js');
 const { renderQuality } = await import('../src/scene/RenderScheduler.js');
@@ -162,6 +162,78 @@ test('a vertical drag keeps the floor point under the pointer despite the tilt',
   assert.ok(Math.abs(moved.y * 450 + 90) < 1, `start point now ${moved.y * 450} px from the center`);
 });
 
+// --- The goal/follower redesign (issue #113) ---
+
+/** A small, seeded PRNG (mulberry32): deterministic across runs, no flaky property test. */
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+test('property: whatever the goal does — a wheel tick, a cursor zoom, a drag, a selection, a bounds grow or shrink, a resize — one follower step never moves the camera more than its own step limit', () => {
+  const rng = mulberry32(1113);
+  const aspect = 16 / 9;
+  let bounds = new THREE.Box3(new THREE.Vector3(-30, 0, -20), new THREE.Vector3(30, 3, 20));
+  const goal = new IsometricController();
+  goal.frame(bounds, aspect);
+  let live = goal.state();
+
+  for (let i = 0; i < 2000; i++) {
+    const action = Math.floor(rng() * 7);
+    if (action === 0) goal.zoom((rng() - 0.5) * 2000); // the wheel
+    else if (action === 1) zoomTowardCursor(goal, rng() * 2 - 1, rng() * 2 - 1, (rng() - 0.5) * 2000, aspect); // cursor zoom
+    else if (action === 2) goal.drag((rng() - 0.5) * 400, (rng() - 0.5) * 400, 900); // a drag
+    else if (action === 3) goal.focusOn(new THREE.Vector3((rng() - 0.5) * 120, 0, (rng() - 0.5) * 80)); // a selection
+    else if (action === 4) { // bounds grow or shrink (a room added or removed)
+      const half = 10 + rng() * 40;
+      bounds = new THREE.Box3(new THREE.Vector3(-half, 0, -half * 0.7), new THREE.Vector3(half, 3, half * 0.7));
+      goal.retrack(bounds, aspect);
+    } else if (action === 5) { // a resize
+      goal.retrack(bounds, 0.5 + rng() * 2);
+    } // action 6: no input this tick, only the follower runs
+
+    const delta = 1 / 144 + rng() * (1 / 20); // a ragged frame rate, 7 to 55 ms
+    const reference = Math.max(live.halfHeight, goal.state().halfHeight, 5);
+    const maxPan = 7 * reference * delta + 1e-9;
+    const maxZoom = 4.5 * reference * delta + 1e-9;
+    const before = live;
+    live = followIsometric(live, goal.state(), delta);
+    const panMoved = before.target.distanceTo(live.target);
+    const zoomMoved = Math.abs(live.halfHeight - before.halfHeight);
+    assert.ok(panMoved <= maxPan, `step ${i}: pan moved ${panMoved}, limit ${maxPan}`);
+    assert.ok(zoomMoved <= maxZoom, `step ${i}: zoom moved ${zoomMoved}, limit ${maxZoom}`);
+    assert.ok(Number.isFinite(live.target.x) && Number.isFinite(live.halfHeight), `step ${i}: live state stays finite`);
+  }
+});
+
+test('the follower lands exactly on the goal (no asymptotic creep) once within its step for the frame', () => {
+  const goal: { target: THREE.Vector3; halfHeight: number } = { target: new THREE.Vector3(10, 0, -4), halfHeight: 8 };
+  let live = { target: new THREE.Vector3(10.001, 0, -4), halfHeight: 8.0001 };
+  live = followIsometric(live, goal, 1 / 60);
+  assert.ok(isometricAtRest(live, goal), 'a tiny remaining gap closes in one step, not forever');
+  assert.deepEqual(live.target.toArray(), goal.target.toArray());
+  assert.equal(live.halfHeight, goal.halfHeight);
+});
+
+test('applyIsometricState: the far plane covers whichever of the live and the goal distance is farther', () => {
+  const live = { target: new THREE.Vector3(0, 0, 0), halfHeight: 10 };
+  const camera = new THREE.OrthographicCamera();
+  const liveDistance = distanceForHalfHeight(10, 60);
+  const closerGoalDistance = distanceForHalfHeight(6, 60);
+  applyIsometricState(live, 40, camera, 16 / 9, 60, closerGoalDistance);
+  assert.ok(camera.far >= liveDistance + 40 - 1e-6, 'a goal that is now closer never drops the far plane below the live camera');
+
+  const fartherGoalDistance = distanceForHalfHeight(30, 60);
+  applyIsometricState(live, 40, camera, 16 / 9, 60, fartherGoalDistance);
+  assert.ok(camera.far >= fartherGoalDistance + 40 - 1e-6, 'a goal that is now farther grows the far plane ahead of the live camera');
+});
+
 // --- View controller ---
 
 const fixedLayout: LayoutStrategy = {
@@ -179,8 +251,8 @@ function setup(hash = '', options: { figureShiftPx?: () => number; view?: 'first
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
   camera.position.set(-12, EYE_HEIGHT, 11); // issue #174: first person settles here every frame it is grounded
   const canvas = document.createElement('canvas');
-  Object.defineProperty(canvas, 'clientWidth', { value: 1600 });
-  Object.defineProperty(canvas, 'clientHeight', { value: 900 });
+  Object.defineProperty(canvas, 'clientWidth', { value: 1600, configurable: true });
+  Object.defineProperty(canvas, 'clientHeight', { value: 900, configurable: true });
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1600, bottom: 900, width: 1600, height: 900, x: 0, y: 0, toJSON: () => ({}) });
   document.body.appendChild(canvas);
   const manager = new AgentManager(scene, fixedLayout);
@@ -307,6 +379,190 @@ for (const shift of [0, 300]) {
     assert.ok(view.zoomDistance < framed, 'the camera zooms in on the figure');
   });
 }
+
+/** How long `view.update()` takes to land exactly on the goal (the live and goal pose both read equal), at a fixed `fps`, or -1 past `maxSeconds` (a stuck follower, not a slow one). */
+function settleSeconds(view: { update(elapsed: number, delta: number): void }, isAtRest: () => boolean, fps: number, maxSeconds = 5): number {
+  const delta = 1 / fps;
+  let elapsed = 0;
+  for (let i = 0; i < maxSeconds * fps; i++) {
+    elapsed += delta;
+    view.update(elapsed, delta);
+    if (isAtRest()) return elapsed;
+  }
+  return -1;
+}
+
+for (const fps of [30, 60]) {
+  test(`PR #200 review round: a selection flight from a typical distance settles in 0.45-0.8 s at ${fps} fps (a flight, not a jump)`, () => {
+    const { view, manager, selection, settle } = setup('#view=iso');
+    manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+    settle();
+    selection.select('a');
+    const seconds = settleSeconds(
+      view,
+      () => {
+        const isometric = (view as unknown as { isometric: { target: THREE.Vector3; halfHeight: number } }).isometric;
+        const live = (view as unknown as { liveIsometric: { target: THREE.Vector3; halfHeight: number } }).liveIsometric;
+        return live.target.equals(isometric.target) && live.halfHeight === isometric.halfHeight;
+      },
+      fps,
+    );
+    assert.ok(seconds >= 0.45 && seconds <= 0.8, `settled in ${seconds} s at ${fps} fps, want 0.45-0.8 s (PR #140 wanted visible easing; the direct rates alone settled this in about 0.12 s, which read like a jump)`);
+  });
+}
+
+test('PR #200 review round: a wheel tick keeps its direct-manipulation responsiveness, even right after a selection flight is still easing in', () => {
+  const { view, canvas, manager, selection, settle } = setup('#view=iso');
+  manager.addAgent({ id: 'a', name: 'A', activity: 'idle' });
+  settle();
+  selection.select('a'); // starts a slow flight
+  view.update(2, 1 / 60); // one frame into the flight, well short of settling
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+  const before = camera.top - camera.bottom;
+
+  canvas.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -400, cancelable: true }));
+  view.update(2 + 1 / 60, 1 / 60);
+  const afterOneFrame = camera.top - camera.bottom;
+  // A direct-rate step at the live camera's own zoom closes a sizeable fraction of a typical
+  // wheel notch in a single frame; a still-flight-paced step here would barely move at all.
+  assert.ok(before - afterOneFrame > (before * 0.01), `one wheel tick still zooms in noticeably in a single frame (${before} to ${afterOneFrame})`);
+});
+
+// --- PR #140 parked failure repros, fixed by the goal/follower redesign (issue #113) ---
+
+/** A floor the building's own size, so adding or removing an annex grows or shrinks the bounds instead of replacing them outright (the only floor object would otherwise be the annex itself). */
+function addBaseFloor(scene: THREE.Scene): void {
+  const base = new THREE.Mesh(new THREE.PlaneGeometry(30, 26));
+  base.rotation.x = -Math.PI / 2;
+  base.userData.floor = true;
+  scene.add(base);
+}
+
+function addAnnex(scene: THREE.Scene, x: number): THREE.Mesh {
+  const annex = new THREE.Mesh(new THREE.PlaneGeometry(10, 10));
+  annex.rotation.x = -Math.PI / 2;
+  annex.position.set(x, 0, 0);
+  annex.userData.floor = true;
+  scene.add(annex);
+  return annex;
+}
+
+test('PR #140 repro 1: letting a wheel-retargeted correction finish never snaps the camera on the next frame', () => {
+  const { view, canvas, settle } = setup('#view=iso');
+  settle();
+  canvas.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -400, cancelable: true }));
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+  for (let i = 0; i < 120; i++) view.update(1 + i / 60, 1 / 60); // run well past any settling time
+  const settledPosition = camera.position.clone();
+  view.update(3, 1 / 60); // one further frame, no input at all
+  assert.ok(camera.position.distanceTo(settledPosition) < 1e-6, 'no stale state left to snap back from');
+});
+
+test('PR #140 repro 2: a second bounds shrink mid-correction retargets smoothly, it never jumps to the stale first endpoint', () => {
+  const { view, scene, settle } = setup('#view=iso');
+  addBaseFloor(scene);
+  const near = addAnnex(scene, 40);
+  const far = addAnnex(scene, 100);
+  view.sceneChanged();
+  settle();
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+
+  scene.remove(far); // first shrink: starts a correction toward the near-annex bounds
+  view.sceneChanged();
+  view.update(1, 1 / 60);
+  const before = camera.position.clone();
+  view.update(1 + 1 / 60, 1 / 60);
+  const firstStep = camera.position.distanceTo(before);
+
+  scene.remove(near); // second shrink, mid-correction: the goal moves again before the first arrives
+  view.sceneChanged();
+  view.update(1 + 2 / 60, 1 / 60);
+  const secondStep = camera.position.distanceTo(before) - firstStep;
+  // A stale tween retargeted in place (the parked bug) jumped by a large multiple of an
+  // ordinary step here; the follower recomputes fresh from the live position every frame, so
+  // the second shrink's own first step is bounded exactly like the first shrink's was.
+  assert.ok(secondStep < firstStep * 3 + 0.5, `the second shrink's own first step (${secondStep}) stays in the same order as the first (${firstStep})`);
+});
+
+test('PR #140 repro 3: a drag during a bounds correction eases, it never cancels the correction and jumps', () => {
+  const { view, scene, canvas, settle } = setup('#view=iso');
+  addBaseFloor(scene);
+  const annex = addAnnex(scene, 100);
+  view.sceneChanged();
+  settle();
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+
+  scene.remove(annex); // starts a correction back toward the base floor
+  view.sceneChanged();
+  view.update(1, 1 / 60);
+  const before = camera.position.clone();
+
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 800, clientY: 450, button: 0 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 750, clientY: 450 }));
+  view.update(1 + 1 / 60, 1 / 60);
+  const step = camera.position.distanceTo(before);
+  const reference = Math.max((view as unknown as { liveIsometric: { halfHeight: number } }).liveIsometric.halfHeight, 5);
+  assert.ok(step <= 7 * reference * (1 / 60) + 1e-6, `a drag mid-correction still obeys the step limit (moved ${step})`);
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointerup', { clientX: 750, clientY: 450 }));
+});
+
+test('PR #140 repro 4: a bounds shrink while zoomed near the old limit never drops the far plane below the live camera', () => {
+  const { view, scene } = setup('#view=iso');
+  addBaseFloor(scene);
+  const farAnnex = addAnnex(scene, 400);
+  view.sceneChanged();
+  settleIso(view);
+  const iso = (view as unknown as { isometric: { maxHalfHeight: number; halfHeight: number } }).isometric;
+  iso.halfHeight = iso.maxHalfHeight; // zoomed all the way out, at the old limit
+  view.update(1, 1 / 60);
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+  const liveDistance = (view as unknown as { liveIsometric: { halfHeight: number } }).liveIsometric.halfHeight;
+
+  scene.remove(farAnnex); // the bounds shrink back: the goal's own distance drops at once
+  view.sceneChanged();
+  view.update(1 + 1 / 60, 1 / 60);
+  assert.ok(camera.far >= liveDistance, `the far plane still covers where the camera actually sits (far=${camera.far}, live halfHeight=${liveDistance})`);
+});
+
+function settleIso(view: { update(elapsed: number, delta: number): void }): void {
+  for (let i = 0; i < 60; i++) view.update(i / 60, 1 / 60);
+}
+
+test('issue #113: a resize recomputes the isometric zoom-out limit without moving the live camera (a cut, not a correction)', () => {
+  const { view, canvas } = setup('#view=iso');
+  settleIso(view);
+  const iso = (view as unknown as { isometric: { maxHalfHeight: number } }).isometric;
+  const before = iso.maxHalfHeight;
+
+  Object.defineProperty(canvas, 'clientWidth', { value: 500, configurable: true });
+  dom.window.dispatchEvent(new dom.window.Event('resize'));
+  view.update(1, 1 / 60);
+  assert.notEqual(iso.maxHalfHeight, before, 'a narrower window recomputes the zoom-out limit');
+});
+
+test('issue #113: a room added grows the pan/zoom bounds without moving the camera that is already on screen', () => {
+  const { view, scene } = setup('#view=iso');
+  addBaseFloor(scene);
+  settleIso(view);
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+  const before = camera.position.clone();
+
+  addAnnex(scene, 100); // a room added far away: the bounds grow, the current view still fits
+  view.sceneChanged();
+  view.update(1, 1 / 60);
+  assert.ok(camera.position.distanceTo(before) < 1e-6, 'growing the bounds alone never moves a camera that is still within them');
+});
+
+test('a settled isometric view stops moving the camera: the follower is at rest once the goal and the live pose match', () => {
+  const { view } = setup('#view=iso');
+  settleIso(view);
+  const camera = view.activeCamera as THREE.OrthographicCamera;
+  camera.updateMatrixWorld();
+  const matrixBefore = camera.matrixWorld.clone();
+  view.update(2, 1 / 60); // no input, nothing pending
+  camera.updateMatrixWorld();
+  assert.ok(camera.matrixWorld.equals(matrixBefore), 'no camera movement once the live pose already equals the goal (render-on-demand stays idle)');
+});
 
 // --- View memory and labels ---
 
