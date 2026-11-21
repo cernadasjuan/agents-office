@@ -12,6 +12,14 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { buildMissionRoom, MAX_TOMBSTONES } = await import('../src/addons/building/missionRooms.js');
 const { MAX_DESK_SLOTS } = await import('../src/addons/building/warRoomFurnishing.js');
+const { tombstoneNameBatchFor } = await import('../src/addons/building/tombstoneNames.js');
+
+/** The engraved nameplate under a tombstone's own object (there is exactly one, direct child). */
+function nameplateOf(object: THREE.Object3D): THREE.Object3D {
+  const found = object.children.find((child) => child.name === 'tombstone-nameplate');
+  if (!found) throw new Error('no nameplate found');
+  return found;
+}
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -70,53 +78,70 @@ test('AC3: a tombstone carries which session it was and when it ended', () => {
   assert.equal(targets[0].id, 'tomb-1');
 });
 
-// --- Issue #159: engrave the session name, remove the hover-only sign ---
+// --- Issue #159: engrave the session name as a texture decal, remove the floating sign ---
+//
+// Review round 1: a `CSS2DObject` is always a floating DOM window, never flush with a 3D
+// face, regardless of what it is parented to or when it shows. The engraving is now a texture
+// decal (`tombstoneNameplate`/`TombstoneNameBatch`, `tombstoneNames.ts`): no DOM element at all.
 
-test('AC: a tombstone engraves its session name, always on, never hover-only', () => {
+test('AC: a tombstone engraves its session name as a texture decal, not a CSS2D sign', () => {
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
-  let nameplate: THREE.Object3D | undefined;
-  missionRoom.group.traverse((o) => { if ((o as { element?: HTMLElement }).element?.textContent === 'tidy-otter') nameplate = o; });
-  assert.ok(nameplate, 'the engraved name is findable as a detail sign');
-  assert.equal((nameplate!.userData.detailSign as { hoverOnly?: boolean }).hoverOnly, false);
+  const object = missionRoom.tombstonePickTargets()[0].object;
+  const nameplate = nameplateOf(object);
+  assert.equal(nameplate.userData.nameText, 'tidy-otter');
+  // No CSS2D-style DOM element anywhere on the tombstone: the engraving carries no `element`.
+  assert.equal((nameplate as unknown as { element?: unknown }).element, undefined);
 });
 
-test('AC: no floating hover sign remains on a tombstone', () => {
+test('AC: no floating sign of any kind remains on a tombstone', () => {
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', endedAt: '2026-11-18', name: 'tidy-otter' }]));
-  let hoverOnlySign: THREE.Object3D | undefined;
-  missionRoom.group.traverse((o) => { if (o.userData.detailSign?.hoverOnly === true && /Ended/.test((o as { element?: HTMLElement }).element?.textContent ?? '')) hoverOnlySign = o; });
-  assert.equal(hoverOnlySign, undefined);
+  let sign: THREE.Object3D | undefined;
+  missionRoom.group.traverse((o) => { if (o !== missionRoom.group && (o as { element?: HTMLElement }).element?.textContent?.includes('Ended')) sign = o; });
+  assert.equal(sign, undefined);
 });
 
 test('AC: a tombstone with no known session name shows a plain placeholder, not a blank', () => {
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1' }]));
   const object = missionRoom.tombstonePickTargets()[0].object;
-  const nameplate = object.children.find((child) => (child as { element?: HTMLElement }).element !== undefined);
-  assert.equal((nameplate as unknown as { element: HTMLElement } | undefined)?.element.textContent, 'Ended session');
+  assert.equal(nameplateOf(object).userData.nameText, 'Ended session');
 });
 
-test('AC: a session that changes name updates the same nameplate element, not a new object', () => {
+test('AC: a session that changes name updates the same nameplate handle, not a new object', () => {
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
   const before = missionRoom.tombstonePickTargets()[0].object;
+  const beforeNameplate = nameplateOf(before);
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'keen-lynx' }]));
   const after = missionRoom.tombstonePickTargets()[0].object;
   assert.equal(after, before);
-  const nameplate = after.children.find((child) => (child as { element?: HTMLElement }).element !== undefined);
-  assert.equal((nameplate as unknown as { element: HTMLElement } | undefined)?.element.textContent, 'keen-lynx');
+  assert.equal(nameplateOf(after), beforeNameplate);
+  assert.equal(nameplateOf(after).userData.nameText, 'keen-lynx');
 });
 
 // The engraved nameplate is a child of the tombstone's own object (issue #159 review): it
 // travels with the stone for free, and a room full of tombstones still merges the same way
-// as before (`StaticMerge` only ever merges `THREE.Mesh`, never a CSS2DObject).
+// as before (`StaticMerge` only ever merges `THREE.Mesh`, never an `InstancedMesh`).
 test('AC: the nameplate is a child of the tombstone object, not a scene-level sibling', () => {
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
   const object = missionRoom.tombstonePickTargets()[0].object;
-  const nameplate = object.children.find((child) => (child as { element?: HTMLElement }).element?.textContent === 'tidy-otter');
-  assert.ok(nameplate, 'the nameplate is a direct child of the tombstone object');
+  assert.ok(object.children.includes(nameplateOf(object)));
+});
+
+test('AC: removing a tombstone stops the shared batch from drawing its nameplate (no leak)', () => {
+  const scene = new THREE.Scene();
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  scene.add(missionRoom.group);
+  missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
+  const batch = tombstoneNameBatchFor(scene);
+  const nameplate = nameplateOf(missionRoom.tombstonePickTargets()[0].object);
+  batch.track(nameplate); // the batch registers lazily (BuildingLayout's `collect`); do it directly here
+  assert.ok(batch.labels.includes(nameplate));
+  missionRoom.update(room('a', 'open', [])); // the session returns or scrolls past the cap
+  assert.equal(batch.labels.includes(nameplate), false);
 });
 
 test('AC4: beyond the cap, the existing "N not shown" sign logic carries over', () => {

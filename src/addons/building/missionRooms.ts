@@ -8,6 +8,7 @@ import type { PickTarget } from '../../scene/Selection.js';
 import type { WorldRoom } from '../../extensions.js';
 import { ROOM_SIZE, type Rect, type RoomSlot } from './RoomPlanner.js';
 import { buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
+import { sceneOf, setTombstoneName, tombstoneNameBatchFor, tombstoneNameplate } from './tombstoneNames.js';
 import { furnishWarRoom, type WarRoomCounts } from './warRoomFurnishing.js';
 
 /**
@@ -161,9 +162,10 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   group.add(tombstonesGroup);
   // One tombstone per ended session, along the side wall opposite the kanban, keyed by its own id
   // (not by position): a session that returns removes its own tombstone, not whichever is oldest.
-  // `nameplate` is a child of `object` (issue #159): it moves with the stone for free and never
-  // becomes its own merge candidate (StaticMerge only merges `THREE.Mesh`, never a CSS2DObject).
-  const tombstones = new Map<string, { object: THREE.Object3D; nameplate: CSS2DObject; name?: string }>();
+  // `nameplate` is a child of `object` (issue #159, review round 1: a texture decal, not a
+  // floating `CSS2DObject`): it moves with the stone for free, and the scene's one shared
+  // `TombstoneNameBatch` draws every tombstone's name in a single call regardless of count.
+  const tombstones = new Map<string, { object: THREE.Object3D; nameplate: THREE.Object3D; name?: string }>();
   const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.4, 0.1), getToonMaterial(0x5a4a3a));
   door.position.copy(frame.point(slot.door.at - (slot.rect.minX + slot.rect.maxX) / 2, 0.02, 1.2));
   door.visible = false;
@@ -245,9 +247,13 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
       const sleepers = next.sleepers ?? [];
       const shown = sleepers.slice(0, MAX_TOMBSTONES);
       const keep = new Set(shown.map((entry) => entry.id));
-      for (const [id, { object }] of [...tombstones]) {
+      for (const [id, { object, nameplate }] of [...tombstones]) {
         if (keep.has(id)) continue;
-        tombstonesGroup.remove(object); // the nameplate is object's own child, removed with it
+        // Issue #159 review round 1: stop drawing its nameplate first. The shared batch holds a
+        // reference to this handle on its own, so a removed tombstone leaves nothing behind.
+        const scene = sceneOf(object);
+        if (scene) tombstoneNameBatchFor(scene).untrack(nameplate);
+        tombstonesGroup.remove(object);
         tombstones.delete(id);
       }
       shown.forEach((entry, i) => {
@@ -257,18 +263,21 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
         if (!item) {
           const object = PIECES.tombstone().create();
           object.rotation.y = frame.faceDoor + Math.PI / 2;
-          // Issue #159: the engraved name replaces the old hover-only sign, near the bottom of
-          // the stone's grey body (`body` in Tombstone.ts spans local y 0.05-0.45), always on at
-          // the same distance the room's other detail signs use (`hoverOnly: false`), never on
-          // hover or click alone.
-          const nameplate = sign(name, new THREE.Vector3(0, 0.12, 0.045), slot.rect, false);
+          // Issue #159, review round 1: the engraved name is a texture decal flush with the
+          // stone's grey face (`tombstoneNameplate`), not a floating `CSS2DObject`. It replaces
+          // the old hover-only sign. A handle created before the room is attached to a scene
+          // picks up its batch lazily (`BuildingLayout`'s `collect` call); one created afterward
+          // (a later `update()` on an already-attached room) tracks itself right away.
+          const nameplate = tombstoneNameplate(name);
           object.add(nameplate);
           tombstonesGroup.add(object);
+          const scene = sceneOf(object);
+          if (scene) tombstoneNameBatchFor(scene).track(nameplate);
           item = { object, nameplate, name: entry.name };
           tombstones.set(entry.id, item);
         } else if (item.name !== entry.name) {
           item.name = entry.name;
-          item.nameplate.element.textContent = name;
+          setTombstoneName(item.nameplate, name);
         }
         item.object.position.copy(position);
       });

@@ -13,7 +13,8 @@ import { SESSION_PERSONAS, type SessionStoryInput } from '../../server/seam.js';
  * reads as no story (S6); the card then says so plainly rather than guessing.
  */
 
-const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** A session slug's own shape: the same pattern the engraved name (issue #159) must also pass. */
+export const SESSION_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_RECORD_BYTES = 200_000;
 const STORY_CACHE_MS = 30_000;
 const MAX_DONE_ITEMS = 12;
@@ -45,9 +46,14 @@ export function extractDoneList(body: string): string[] {
   return items.slice(0, MAX_DONE_ITEMS);
 }
 
+/** Escapes a string for use inside a `RegExp` (the roster has names like "Dr. Quinn"). */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** Every known BMAD persona name (`SESSION_PERSONAS`, the closed set) mentioned anywhere in the body. */
 export function extractPersonas(body: string): string[] {
-  return SESSION_PERSONAS.filter((name) => new RegExp(`\\b${name}\\b`).test(body));
+  return SESSION_PERSONAS.filter((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`).test(body));
 }
 
 const FRONTMATTER = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
@@ -85,15 +91,34 @@ export function parseIntentTree(raw: string): SessionStoryInput | null {
   };
 }
 
-/** The archived record's path for a slug, or undefined: not a slug, not found, or too large. */
+/** True when `real` is `root` itself or genuinely inside it (never a `..`-escaped sibling). */
+function withinRoot(real: string, root: string): boolean {
+  const relative = path.relative(root, real);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+/**
+ * The archived record's real path for a slug, or undefined: not a slug, not found, too large,
+ * or outside the archive root once symlinks resolve. `fs.realpathSync` follows every symlink in
+ * the path (a symlinked session directory, or the file itself); review round 1 (Codex): without
+ * this, a symlink planted inside an archive directory could point the read anywhere on disk.
+ */
 export function findStoryFile(roots: string[], slug: string): string | undefined {
-  if (!SLUG.test(slug)) return undefined;
+  if (!SESSION_SLUG.test(slug)) return undefined;
   for (const root of roots) {
+    let archiveRoot: string;
+    try {
+      archiveRoot = fs.realpathSync(path.join(root, 'sessions', 'archive'));
+    } catch {
+      continue;
+    }
     for (const sub of ARCHIVE_SUBDIRS) {
       const file = path.join(root, 'sessions', 'archive', sub, slug, 'intent-tree.md');
       try {
-        const stat = fs.lstatSync(file);
-        if (stat.isFile() && stat.size <= MAX_RECORD_BYTES) return file;
+        const real = fs.realpathSync(file);
+        if (!withinRoot(real, archiveRoot)) continue;
+        const stat = fs.statSync(real);
+        if (stat.isFile() && stat.size <= MAX_RECORD_BYTES) return real;
       } catch {
         continue;
       }

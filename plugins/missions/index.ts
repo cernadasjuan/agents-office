@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
 import type { Enricher, Observation, OfficePlugin, RoomInput, WorldProvider } from '../../server/seam.js';
-import { readSessionStory } from './sessionStoryReader.js';
+import { readSessionStory, SESSION_SLUG } from './sessionStoryReader.js';
 
 /**
  * Mission war rooms. Reads mission records (`<root>/missions/<slug>/mission.yaml`)
@@ -228,13 +228,20 @@ export function missionsPlugin(roots: string[], now: () => number = Date.now): O
 
   type SleeperInput = NonNullable<RoomInput['sleepers']>[number];
 
-  // Issue #159/#160: a sleeper with a known session slug carries that slug as its engraved
-  // `name` and, when an archived record exists for it, the story its card reads.
-  const sleeperInput = (sleeper: MissionSummary['sleepers'][number]): SleeperInput => ({
-    id: sleeper.id,
-    ...(sleeper.endedAt ? { endedAt: sleeper.endedAt } : {}),
-    ...(sleeper.session ? { name: sleeper.session, story: readSessionStory(roots, sleeper.session) ?? undefined } : {}),
-  });
+  // Issue #159/#160: a sleeper whose session slug actually has a slug's own shape carries it as
+  // its engraved `name` and, when an archived record exists for it, the story its card reads.
+  // Review round 1: a mission record's own `session:` field is free text until checked here —
+  // without this, something other than a clean slug could reach the stone's own engraving, with
+  // only a length cap. A sleeper that fails the check gets neither; the card falls back to its
+  // own "Ended session" default, same as a sleeper with no `session:` field at all.
+  const sleeperInput = (sleeper: MissionSummary['sleepers'][number]): SleeperInput => {
+    const slug = sleeper.session && SESSION_SLUG.test(sleeper.session) ? sleeper.session : undefined;
+    return {
+      id: sleeper.id,
+      ...(sleeper.endedAt ? { endedAt: sleeper.endedAt } : {}),
+      ...(slug ? { name: slug, story: readSessionStory(roots, slug) ?? undefined } : {}),
+    };
+  };
 
   const world: WorldProvider = {
     id: 'mission-rooms',

@@ -1,4 +1,5 @@
 import { maskedLine } from './secrets.js';
+import { PERSONAS } from '../plugins/bmad/roster.js';
 
 /**
  * Extension seam. Sources find agents, enrichers add display data, world
@@ -81,8 +82,12 @@ export interface SessionStoryInput {
   issues?: string[];
 }
 
-/** The closed set of persona names a story may name (the BMAD roster's first names). */
-export const SESSION_PERSONAS = ['Mary', 'Winston', 'Amelia', 'John', 'Quinn', 'Barry', 'Bob', 'Paige', 'Sally', 'Dexter', 'Prospero'] as const;
+/**
+ * The closed set of persona names a story may name: every name in `plugins/bmad/roster.ts`,
+ * the same roster the BMAD enricher itself uses (review round 1: this used to be its own
+ * hand-typed, shorter list — a second source of truth that could drift from the real one).
+ */
+export const SESSION_PERSONAS: readonly string[] = PERSONAS.map((persona) => persona.name);
 
 export interface RoomInput {
   key: string;
@@ -254,15 +259,42 @@ function repoShortName(value: unknown): string | undefined {
 }
 
 /** A full `owner/repo#N` reference (the session plugin's own convention, `gh_issues_referenced`). */
-const SESSION_ISSUE_REF = /^([A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100})#(\d{1,7})$/;
+const SESSION_ISSUE_REF = /^([A-Za-z0-9_.-]{1,64})\/([A-Za-z0-9_.-]{1,100})#(\d{1,7})$/;
+const DOT_SEGMENT = new Set(['.', '..']);
 
-/** One session-story issue reference, with the link built from the validated repo and number. */
+/**
+ * One session-story issue reference, with the link built from the validated repo and number.
+ * Review round 1 (Codex): a `.` or `..` owner or repo segment is rejected (the character class
+ * alone would let it through, same as every other `owner/repo` pattern in this file), and issue
+ * 0 is rejected too (GitHub issue numbers start at 1).
+ */
 function sessionIssue(ref: unknown): { repo: string; number: number; url: string } | undefined {
   if (typeof ref !== 'string') return undefined;
   const match = SESSION_ISSUE_REF.exec(ref);
   if (!match) return undefined;
-  return { repo: match[1], number: Number(match[2]), url: `https://github.com/${match[1]}/issues/${match[2]}` };
+  const [, owner, repo, numberText] = match;
+  if (DOT_SEGMENT.has(owner) || DOT_SEGMENT.has(repo)) return undefined;
+  const number = Number(numberText);
+  if (number < 1) return undefined;
+  return { repo: `${owner}/${repo}`, number, url: `https://github.com/${owner}/${repo}/issues/${number}` };
 }
+
+/**
+ * Path-like text redacted before it reaches a free-text story field (issue #160's own AC:
+ * "No path ... appears anywhere on the card", review round 1 — `displayText` alone only strips
+ * control characters and truncates). Catches a `file://` URL, a `~/...` home path, a POSIX
+ * absolute path of two or more segments, and a Windows drive path.
+ */
+const PATH_LIKE = /file:\/\/\S+|~\/\S+|\/(?:[\w.-]+\/)+[\w.-]+|[A-Za-z]:[\\/]\S*/g;
+
+function redactPaths(value: unknown): string {
+  return typeof value === 'string' ? value.replace(PATH_LIKE, '[path]') : '';
+}
+
+/** A session slug's own shape. Duplicated from `plugins/missions/sessionStoryReader.ts`'s
+ * `SESSION_SLUG` (not imported: that module already imports from this one, and a plugin
+ * importing back from the server it is read by would be circular). Keep the two in sync. */
+const SESSION_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 const STORY_MAX_PERSONAS = 6;
 const STORY_MAX_DONE_ITEMS = 8;
@@ -277,16 +309,18 @@ const STORY_MAX_ISSUES = 8;
  */
 function projectStory(input: SessionStoryInput | undefined) {
   if (!input || typeof input !== 'object') return undefined;
-  const intent = displayText(input.intent, 160);
+  // Redacted before the length cap, not after: truncating first could cut a path in half and
+  // leave an unredacted fragment of it behind (review round 1).
+  const intent = displayText(redactPaths(input.intent), 160);
   const personas = Array.isArray(input.personas)
-    ? [...new Set(input.personas.filter((name): name is string => (SESSION_PERSONAS as readonly string[]).includes(name)))].slice(0, STORY_MAX_PERSONAS)
+    ? [...new Set(input.personas.filter((name): name is string => SESSION_PERSONAS.includes(name)))].slice(0, STORY_MAX_PERSONAS)
     : [];
   const rawCounts = input.counts;
   const counts = rawCounts && typeof rawCounts === 'object'
     ? { done: wholeNumber(rawCounts.done, 999) ?? 0, open: wholeNumber(rawCounts.open, 999) ?? 0, abandoned: wholeNumber(rawCounts.abandoned, 999) ?? 0 }
     : undefined;
   const doneList = Array.isArray(input.doneList)
-    ? input.doneList.map((item) => displayText(item, 100)).filter(Boolean).slice(0, STORY_MAX_DONE_ITEMS)
+    ? input.doneList.map((item) => displayText(redactPaths(item), 100)).filter(Boolean).slice(0, STORY_MAX_DONE_ITEMS)
     : [];
   // A handoff is a file name, never a path (issue #160's privacy rule): the last path
   // segment only, whichever separator a reader's own OS happened to use.
@@ -447,7 +481,11 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         const rawId = displayText(entry?.id, 64);
         if (!rawId) return [];
         const endedAt = isoDate(entry?.endedAt);
-        const name = displayText(entry?.name, 64);
+        // Same shape as `plugins/missions/sessionStoryReader.ts`'s `SESSION_SLUG` (review round
+        // 1, defense in depth): the plugin already checks this before it ever sets `name`, but
+        // the server never trusts a plugin's own output without checking it again here too,
+        // the same way personas and issue references are rechecked below.
+        const name = SESSION_SLUG.test(String(entry?.name ?? '')) ? displayText(entry?.name, 64) : undefined;
         const story = projectStory(entry?.story);
         return [{ id: publicId(`sleeper:${room.key}:${rawId}`), ...(endedAt ? { endedAt } : {}), ...(name ? { name } : {}), ...(story ? { story } : {}) }];
       });

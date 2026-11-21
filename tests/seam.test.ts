@@ -163,6 +163,39 @@ test('a sleeper with no story at all carries no story key (the card tells the di
   assert.ok(!('story' in world.rooms[0].sleepers![0]));
 });
 
+test('review round 1: a name that is not a clean slug never reaches the client', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [
+      { id: 'J-1', name: '../escape' },
+      { id: 'J-2', name: 'Not_A_Slug' },
+      { id: 'J-3', name: 'a-clean-slug' },
+    ] }] }], ['missions'], publicId);
+  const byId = new Map(world.rooms[0].sleepers!.map((sleeper) => [sleeper.id, sleeper]));
+  assert.equal(byId.get('h(sleeper:m-1:J-1)')?.name, undefined);
+  assert.equal(byId.get('h(sleeper:m-1:J-2)')?.name, undefined);
+  assert.equal(byId.get('h(sleeper:m-1:J-3)')?.name, 'a-clean-slug');
+});
+
+test('review round 1: a path mentioned in free-text story fields is redacted, not just truncated', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter', story: {
+      intent: 'Fix the git situation in ~/.claude-shared-config safely',
+      doneList: ['Read /Users/gamyot/Developer/project/file.ts', 'Opened file:///etc/hosts', 'A plain line'],
+    } }] }] }], ['missions'], publicId);
+  const story = world.rooms[0].sleepers![0].story;
+  assert.equal(story?.intent, 'Fix the git situation in [path] safely');
+  assert.deepEqual(story?.doneList, ['Read [path]', 'Opened [path]', 'A plain line']);
+});
+
+test('review round 1: an owner or repo of "." or ".." is rejected, and issue 0 is rejected', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter', story: {
+      intent: 'x',
+      issues: ['../repo#5', 'owner/..#5', 'owner/repo#0', 'owner/repo#5'],
+    } }] }] }], ['missions'], publicId);
+  assert.deepEqual(world.rooms[0].sleepers![0].story?.issues, [{ repo: 'owner/repo', number: 5, url: 'https://github.com/owner/repo/issues/5' }]);
+});
+
 test('a mission issue keeps a clean owner/repo, and drops one that does not match the shape (#146)', () => {
   const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
     walls: { issues: [

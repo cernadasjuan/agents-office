@@ -78,6 +78,13 @@ test('AC: extractPersonas only ever returns names from the closed BMAD roster', 
   assert.deepEqual(extractPersonas('no persona mentioned here'), []);
 });
 
+test('review round 1: a roster name with regex metacharacters (period) does not crash or over-match', () => {
+  // "Dr. Quinn" is in plugins/bmad/roster.ts (the shared roster, review round 1's fix): an
+  // unescaped "." in the pattern would match any character, so "DrX Quinn" would also match.
+  assert.deepEqual(extractPersonas('Dr. Quinn investigated the bug'), ['Quinn', 'Dr. Quinn']);
+  assert.deepEqual(extractPersonas('DrX Quinn is not the real name'), ['Quinn']);
+});
+
 test('AC: findStoryFile checks the direct archive folder, then done/, then abandoned/', () => {
   writeRecord('plain-slug', RECORD);
   assert.ok(findStoryFile([root], 'plain-slug')?.endsWith(path.join('plain-slug', 'intent-tree.md')));
@@ -103,6 +110,33 @@ test('an oversized record is skipped (S6: validate and cap the size of what a re
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'intent-tree.md'), 'x'.repeat(200_001));
   assert.equal(findStoryFile([root], 'huge-slug'), undefined);
+});
+
+// --- Review round 1 (Codex): a symlinked session directory must not escape the archive root ---
+
+test('AC: a session directory symlinked outside the archive root is rejected, not followed', () => {
+  resetSessionStoryCache();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-outside-'));
+  fs.writeFileSync(path.join(outside, 'intent-tree.md'), RECORD);
+  const archiveDir = path.join(root, 'sessions', 'archive');
+  fs.mkdirSync(archiveDir, { recursive: true });
+  const linkPath = path.join(archiveDir, 'escape-slug');
+  fs.rmSync(linkPath, { force: true });
+  fs.symlinkSync(outside, linkPath, 'dir');
+  assert.equal(findStoryFile([root], 'escape-slug'), undefined);
+  assert.equal(readSessionStory([root], 'escape-slug'), null);
+});
+
+test('a symlinked session directory that stays inside the archive root still resolves', () => {
+  resetSessionStoryCache();
+  writeRecord('real-slug', RECORD);
+  const archiveDir = path.join(root, 'sessions', 'archive');
+  const linkPath = path.join(archiveDir, 'linked-slug');
+  fs.rmSync(linkPath, { force: true });
+  fs.symlinkSync(path.join(archiveDir, 'real-slug'), linkPath, 'dir');
+  const found = findStoryFile([root], 'linked-slug');
+  assert.ok(found, 'a symlink that stays inside the archive root still resolves');
+  assert.equal(readSessionStory([root], 'linked-slug')?.intent, 'Fix the git situation safely');
 });
 
 test('readSessionStory caches a read: a file removed within the cache window still answers the old story', () => {
