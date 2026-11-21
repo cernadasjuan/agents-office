@@ -168,10 +168,12 @@ window.addEventListener('keydown', (event) => {
     next: () => {
       const queue = triageQueue(agentManager.getAgents().map((managed) => managed.info));
       const next = nextInQueue(queue, selectedAgentId());
-      if (next) selectAgent(next.id);
+      // Issue #252 review round 2: N is explicit agent navigation, same as a click — user intent.
+      if (next) { view.dismissPendingRoom(); selectAgent(next.id); }
     },
     focus: () => {
       const current = selectedAgentId();
+      view.dismissPendingRoom(); // issue #252 review round 2: F is explicit navigation too
       if (current) {
         // Already selected: a reselect would be a no-op, so recenter directly.
         view.refocus(current);

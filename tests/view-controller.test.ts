@@ -556,6 +556,61 @@ test('issue #252 review round 2: a first-person selection flight in progress is 
   assert.ok(camera.position.distanceTo(room.standing.position) < 1e-6, 'the room landing survives the next frame; the in-flight selection tween was cancelled, not resumed');
 });
 
+// --- Issue #252 review round 2: user intent wins — real input drops a still-pending #room= ---
+
+test('issue #252 review round 2: a drag drops a pending room — the user has moved on, so it must never yank the camera there once it finally resolves', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view, camera, canvas } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60); // still pending
+
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 400, clientY: 10 }));
+  assert.equal((view as unknown as { pendingRoomName: string | null }).pendingRoomName, null, 'the drag drops the pending target right away');
+
+  // The mission resolves anyway, moments later — it must not move the camera: the user is driving now.
+  exists = true;
+  view.sceneChanged();
+  view.update(0, 1 / 60);
+  assert.ok(camera.position.distanceTo(room.standing.position) > 0.01, 'the camera never landed on the room; the drag already claimed it');
+});
+
+test('issue #252 review round 2: a wheel zoom drops a pending room', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view, canvas } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60);
+  canvas.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -400, cancelable: true }));
+  assert.equal((view as unknown as { pendingRoomName: string | null }).pendingRoomName, null, 'the wheel drops the pending target right away');
+});
+
+test('issue #252 review round 2: double-clicking a different room drops a pending room', () => {
+  const room = fixtureRoomView();
+  const otherRoom = { bounds: new THREE.Box3(new THREE.Vector3(-5, 0, -5), new THREE.Vector3(5, 2.6, 5)), standing: { position: new THREE.Vector3(0, EYE_HEIGHT, 0), lookAt: new THREE.Vector3(0, EYE_HEIGHT, 5) } };
+  let exists = false;
+  const { view, canvas } = setup('#view=iso&room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null), { roomAt: () => otherRoom });
+  view.update(0, 1 / 60);
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1600, height: 900, right: 1600, bottom: 900, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  canvas.dispatchEvent(new dom.window.MouseEvent('dblclick', { clientX: 800, clientY: 450 }));
+  assert.equal(view.mode, 'first-person', 'the double-click itself still works, entering the room picked');
+  assert.equal((view as unknown as { pendingRoomName: string | null }).pendingRoomName, null, 'picking a different room drops the still-pending one');
+});
+
+test('issue #252 review round 2: dismissPendingRoom() (what N/F, an explicit agent pick, and a view switch all call) drops the pending target', () => {
+  const room = fixtureRoomView();
+  let exists = false;
+  const { view, camera } = setup('#room=mission-x', undefined, (name) => (exists && name === 'mission-x' ? room : null));
+  view.update(0, 1 / 60);
+
+  view.dismissPendingRoom(); // main.ts calls this from the N/F triage keys; a click/drag/wheel/dblclick/view-switch call it directly
+  assert.equal((view as unknown as { pendingRoomName: string | null }).pendingRoomName, null);
+
+  exists = true;
+  view.sceneChanged();
+  view.update(0, 1 / 60);
+  assert.ok(camera.position.distanceTo(room.standing.position) > 0.01, 'the camera never landed on the room once intent elsewhere was signalled');
+});
+
 test('a click picks a tombstone, not just an agent figure (issue #127)', () => {
   const document = dom.window.document;
   const scene = new THREE.Scene();

@@ -189,18 +189,40 @@ export class ViewController {
     const room = this.options.roomView?.(name) ?? null;
     if (room) {
       this.pendingRoomName = null;
+      // Review round 2: refresh the overall pan/zoom clamp bounds before framing the room, not
+      // by skipping that refresh — the room's own floor is already in the scene by now (the
+      // world poll that created it ran before this `sceneChanged()`), so this correctly widens
+      // `this.isometric`'s clamp box to include it right away, instead of leaving `this.bounds`
+      // stale (excluding the new room) until whatever scene change happens to fire next.
+      this.isometric.retrack(overviewBounds(this.options.scene), this.aspect());
       this.applyStartRoom(room, false);
       // `sceneChanged()` (which led here) already set `isometricBoundsDirty`, for its own,
       // unrelated reason (any floor content change re-derives the pan/zoom limits). Clear it
       // again: the framing just above IS the freshly computed goal for this room, the same
       // thing `setMode('isometric', ...)` already protects its own fresh framing from — left
       // dirty, the very next `update()` would retrack against the overall scene bounds and
-      // immediately clamp this target back, the one tick it is applied.
+      // immediately clamp this target back, the one tick it is applied. The explicit `retrack`
+      // just above already did that refresh once, on purpose, before `applyStartRoom` overwrote
+      // the goal; leaving this flag dirty would only repeat it redundantly next frame.
       this.isometricBoundsDirty = false;
       return;
     }
     this.pendingRoomAttempts++;
     if (this.pendingRoomAttempts >= PENDING_ROOM_MAX_ATTEMPTS) this.pendingRoomName = null;
+  }
+
+  /**
+   * Issue #252 review round 2: user intent wins. A pending `#room=` target is dropped the
+   * moment there is any real sign the user is driving the camera (or picking an agent)
+   * themselves — a drag, a wheel zoom, a keyboard pan, a room double-click, first-person free
+   * look, a view switch, or an explicit agent pick (click, or `main.ts`'s own N/F triage keys,
+   * which is why this is public). A mission that finishes building later must never yank the
+   * camera away from wherever the user has since moved on to. `sceneChanged()`/a world poll
+   * alone never calls this — only real input does, so a user who never touches the camera
+   * still gets the landing this issue was filed for.
+   */
+  dismissPendingRoom(): void {
+    this.pendingRoomName = null;
   }
 
   /** `#zoom=<distance>` (issue #89): starts the view at that camera distance instead of its own default framing. A no-op in first person, which has no zoom. */
@@ -290,11 +312,13 @@ export class ViewController {
 
   /** Key I: into the isometric view, and back to first person. */
   toggleIsometric(): void {
+    this.dismissPendingRoom(); // issue #252 review round 2: an explicit view switch is user intent
     this.setMode(this.currentMode === 'isometric' ? 'first-person' : 'isometric', true);
   }
 
   /** Key H (issue #161): into the fixed desk view, and back to first person. A no-op without a desk to show (graceful degradation). */
   toggleDesk(): void {
+    this.dismissPendingRoom(); // issue #252 review round 2: an explicit view switch is user intent
     this.setMode(this.currentMode === 'desk' ? 'first-person' : 'desk', true);
   }
 
@@ -500,7 +524,14 @@ export class ViewController {
       if (event.code === 'KeyI') this.toggleIsometric();
       else if (event.code === 'KeyH') this.toggleDesk();
       else if (event.code === 'Escape') this.selection.clear();
-      else this.panKeys.add(event.code);
+      else {
+        // Issue #252 review round 2: a keyboard pan (WASD/arrows) is user intent, isometric
+        // or first person alike — `panWithKeys` reads this same set for the isometric pan,
+        // and `FreeCamera`'s own listener tracks first-person movement separately, but either
+        // way a movement key going down means the user is about to drive the camera.
+        if (MOVEMENT_KEYS.includes(event.code)) this.dismissPendingRoom();
+        this.panKeys.add(event.code);
+      }
     });
     keys.addEventListener('keyup', (event: KeyboardEvent) => this.panKeys.delete(event.code));
 
@@ -516,13 +547,15 @@ export class ViewController {
       this.dragged = false;
     });
     document.addEventListener('pointermove', (event) => {
-      if (document.pointerLockElement === canvas) this.markActive(); // first-person look
+      // Issue #252 review round 2: first-person free look under pointer lock is user intent too.
+      if (document.pointerLockElement === canvas) { this.markActive(); this.dismissPendingRoom(); }
       if (!this.dragPoint || !isViewFromAbove(this.currentMode)) return;
       this.markActive();
       const point = { x: event.clientX, y: event.clientY };
       if (isClick(this.pressPoint, point)) return;
       this.dragged = true;
       this.flight = null;
+      this.dismissPendingRoom(); // issue #252 review round 2: a drag is user intent
       // PR #200 review round: a drag is direct manipulation, not a flight — responsive even
       // mid-correction, even right after a flight-type change (a selection, a start parameter).
       this.isometricFollowRates = DIRECT_FOLLOW_RATES;
@@ -544,7 +577,8 @@ export class ViewController {
       if (document.pointerLockElement) {
         if (this.currentMode !== 'first-person') return;
         const agentId = this.pickAtCenter();
-        if (agentId) this.selection.select(agentId);
+        // Issue #252 review round 2: picking an agent by click is user intent.
+        if (agentId) { this.dismissPendingRoom(); this.selection.select(agentId); }
         return;
       }
       // A gesture that panned and returned near the press point is still a drag, not a click
@@ -554,7 +588,7 @@ export class ViewController {
       // selection, exactly like first person already does — it never engages pointer lock
       // (the filter above already guards that) and never switches view.
       const agentId = this.pickAt(event.clientX, event.clientY);
-      if (agentId) this.selection.select(agentId);
+      if (agentId) { this.dismissPendingRoom(); this.selection.select(agentId); }
       else this.selection.clear();
     });
     canvas.addEventListener('dblclick', (event) => {
@@ -565,6 +599,7 @@ export class ViewController {
       const room = this.roomUnderPoint(event.clientX, event.clientY);
       if (!room) return;
       this.markActive();
+      this.dismissPendingRoom(); // issue #252 review round 2: picking a different room is user intent
       this.setMode('first-person', false, room.standing);
     });
     canvas.addEventListener('wheel', (event) => {
@@ -572,6 +607,7 @@ export class ViewController {
       this.markActive();
       event.preventDefault();
       this.flight = null;
+      this.dismissPendingRoom(); // issue #252 review round 2: the wheel is user intent
       // PR #200 review round: the wheel is direct manipulation, not a flight.
       this.isometricFollowRates = DIRECT_FOLLOW_RATES;
       // Zoom toward the cursor (issue #87, AC1), not toward the room center: the point
