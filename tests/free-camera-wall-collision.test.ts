@@ -59,6 +59,17 @@ test('walking into a wall stops at a margin, never passing through it', () => {
   setWallColliders([]);
 });
 
+test('a single large-delta frame (a dropped frame, running) does not tunnel through a thin wall', () => {
+  // A thin wall straight ahead, well within reach at run speed over a 2-second single step.
+  setWallColliders([{ minX: -2, maxX: 2, minZ: -4, maxZ: -3.85 }]);
+  const { camera } = setup();
+  press('KeyW');
+  updateFreeCamera(camera, 2); // one huge delta, not a sequence of small ticks
+  release('KeyW');
+  assert.ok(camera.position.z > -4, `camera tunneled through the wall in one frame (z = ${camera.position.z})`);
+  setWallColliders([]);
+});
+
 test('a door (a gap in the wall rect list) stays passable', () => {
   // Two wall segments with a 2-wide gap at x = -1..1, directly ahead.
   setWallColliders([

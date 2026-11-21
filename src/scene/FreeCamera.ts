@@ -65,20 +65,34 @@ function blockedAt(x: number, z: number): boolean {
 }
 
 /**
+ * Moves one axis toward `target`, in steps no larger than `WALL_MARGIN`. A wall's blocked
+ * zone (`blockedAt`'s margin on both faces) is never thinner than `2 * WALL_MARGIN`, so a step
+ * this size can never land past a zone it started outside of — unlike a single jump straight
+ * to `target`, which a large `delta` (a slow frame, a backgrounded tab resumed) can push clear
+ * across a thin wall in one move (tunneling). The loop still stops in one or two steps for an
+ * ordinary small per-frame move; it only costs extra work on the rare large-delta frame.
+ */
+function stepAxis(get: () => number, set: (value: number) => void, blocked: (value: number) => boolean, target: number): void {
+  let current = get();
+  while (current !== target) {
+    const remaining = target - current;
+    const step = Math.abs(remaining) <= WALL_MARGIN ? remaining : Math.sign(remaining) * WALL_MARGIN;
+    const next = current + step;
+    if (blocked(next)) return;
+    current = next;
+    set(current);
+  }
+}
+
+/**
  * Cheap 2D collision, no physics engine and no per-frame scene raycast: each axis moves on
  * its own, so a wall that blocks one axis (say straight ahead) never blocks the other (say a
  * sideways strafe held at the same time) — walking into a wall at an angle slides along it
  * instead of sticking.
  */
 function moveWithCollision(position: THREE.Vector3, dx: number, dz: number): void {
-  if (dx !== 0) {
-    const nextX = position.x + dx;
-    if (!blockedAt(nextX, position.z)) position.x = nextX;
-  }
-  if (dz !== 0) {
-    const nextZ = position.z + dz;
-    if (!blockedAt(position.x, nextZ)) position.z = nextZ;
-  }
+  if (dx !== 0) stepAxis(() => position.x, (x) => { position.x = x; }, (x) => blockedAt(x, position.z), position.x + dx);
+  if (dz !== 0) stepAxis(() => position.z, (z) => { position.z = z; }, (z) => blockedAt(position.x, z), position.z + dz);
 }
 
 /** Issue #85 fix: the triage filter is the app's first text field, so a key that reaches it must not also move the camera. */
