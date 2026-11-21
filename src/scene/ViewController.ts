@@ -74,6 +74,18 @@ export interface ViewControllerOptions {
    * degradation, the same as before `roomAt` existed at all).
    */
   onEnterLibrary?: () => void;
+  /**
+   * Issue #245 round 3 review: `#room=library` (the library's own back door, `officeReturnUrl`)
+   * lands first person standing INSIDE the library room's own bounds, facing its main wall —
+   * the same generic `#room=` framing every other room kind gets. The per-frame `roomAt` check
+   * below used to read that as "just walked in" on the very first frame it ran, bouncing
+   * straight back into the library a few hundred milliseconds after arriving. True exactly
+   * when the camera starts already standing inside the library room (so the first frame is a
+   * known position, not a walk-in to detect); false otherwise, including every ordinary office
+   * boot. Without it, the first frame is never treated as already-inside — the original
+   * behavior, before this edge-triggered check existed.
+   */
+  startedInLibraryRoom?: boolean;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -134,8 +146,14 @@ export class ViewController {
   private idleTimeoutSeconds: number;
   /** Issue #199: the shared camera's own FOV from just before desk mode widened it, restored on the way out. Null outside desk mode, and while a `deskView` never sets `fov` at all (graceful degradation, no lens change). */
   private deskRestoreFov: number | null = null;
+  /** Issue #245 round 3 review: edge-triggered state for `onEnterLibrary` — true while the
+   * last frame's own `roomAt` check already reported the library, so the per-frame check below
+   * only fires on the transition into it, never on an arrival that already starts there
+   * (`startedInLibraryRoom`, the library's own back door). */
+  private wasInLibraryRoom: boolean;
 
   constructor(private options: ViewControllerOptions) {
+    this.wasInLibraryRoom = options.startedInLibraryRoom ?? false;
     this.selection = options.selection ?? officeSelection();
     this.isometricCamera = options.isometricCamera ?? new THREE.OrthographicCamera();
     this.marker = new SelectionMarker(options.scene);
@@ -367,7 +385,17 @@ export class ViewController {
       // existed in this scene for exactly one interaction path. Checked every frame, the same
       // way the wall colliders just above are: walking through the doorway (not only
       // double-clicking it from above) now swaps to the library's own scene too.
-      if (this.options.roomAt?.(camera.position.x, camera.position.z)?.kind === 'library') this.options.onEnterLibrary?.();
+      //
+      // Issue #245 round 3 review: edge-triggered on purpose (fires only on the false-to-true
+      // transition, never while `inLibraryRoom` just stays true) — a level-triggered check fired
+      // again on the very first frame after returning from the library, since `#room=library`
+      // already lands the camera inside the room's own bounds. `wasInLibraryRoom` starts matching
+      // reality (`startedInLibraryRoom`), so an arrival that already starts inside is never read
+      // as a fresh walk-in; a genuine walk from outside into it (including the ordinary
+      // first-person-boot case, which starts `false`) still fires exactly once.
+      const inLibraryRoom = this.options.roomAt?.(camera.position.x, camera.position.z)?.kind === 'library';
+      if (inLibraryRoom && !this.wasInLibraryRoom) this.options.onEnterLibrary?.();
+      this.wasInLibraryRoom = inLibraryRoom;
     }
 
     // Idle default (issue #161): any camera input resets this in `listen()`; without one for

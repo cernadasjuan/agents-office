@@ -33,6 +33,7 @@ interface SetupExtras {
   idleTimeoutSeconds?: number;
   crosshair?: HTMLElement | null;
   onEnterLibrary?: () => void;
+  startedInLibraryRoom?: boolean;
 }
 
 function setup(
@@ -355,6 +356,30 @@ test('issue #245 review: walking into the library room in first person calls onE
   assert.equal(view.mode, 'first-person', 'the default view, where walking (not double-clicking) is how you actually enter a room');
   view.update(1, 1 / 60);
   assert.equal(entered, 1);
+});
+
+test('issue #245 round 3 review: returning from the library (startedInLibraryRoom) does not immediately bounce back into it, even though the first frame already stands inside the room', () => {
+  const room = { bounds: new THREE.Box3(), standing: { position: new THREE.Vector3(1, 1, 1), lookAt: new THREE.Vector3() }, kind: 'library' };
+  let entered = 0;
+  const { view } = setup('', undefined, undefined, { roomAt: () => room, onEnterLibrary: () => { entered++; }, startedInLibraryRoom: true });
+  view.update(1, 1 / 60);
+  view.update(2, 1 / 60);
+  assert.equal(entered, 0, 'the camera already started inside the room on arrival; this is not a fresh walk-in');
+});
+
+test('issue #245 round 3 review: after returning from the library, actually walking back out and in again still re-enters it', () => {
+  let insideLibrary = true;
+  const office = { bounds: new THREE.Box3(), standing: { position: new THREE.Vector3(1, 1, 1), lookAt: new THREE.Vector3() }, kind: 'office' };
+  const library = { bounds: new THREE.Box3(), standing: { position: new THREE.Vector3(1, 1, 1), lookAt: new THREE.Vector3() }, kind: 'library' };
+  let entered = 0;
+  const { view } = setup('', undefined, undefined, { roomAt: () => (insideLibrary ? library : office), onEnterLibrary: () => { entered++; }, startedInLibraryRoom: true });
+  view.update(1, 1 / 60);
+  assert.equal(entered, 0, 'still the arrival frame, no bounce');
+  insideLibrary = false;
+  view.update(2, 1 / 60); // walked out into the hall
+  insideLibrary = true;
+  view.update(3, 1 / 60); // deliberately walked back in
+  assert.equal(entered, 1, 'a genuine walk back in still fires exactly once');
 });
 
 test('walking around first person never calls onEnterLibrary while roomAt reports anything other than the library (no false trigger every frame)', () => {
