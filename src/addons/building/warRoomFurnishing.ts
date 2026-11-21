@@ -162,10 +162,12 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
     const turn = faceCenterTurn(a) + jitter(rand, 0, JITTER_ROT);
     const isDebug = i < debugSlotCount;
     pieces.push({ piece: isDebug ? PIECES.debugStation() : PIECES.desk(), a: ja, d: jd, turn });
-    // Round 7 (#214): the seat sits on the wall side of the desk (away from the center), so an
-    // agent facing the desk also faces the center — "looking from the wall to the center," not
-    // out toward the door the way the old door-facing grid did.
-    const seatA = ja + (a < 0 ? -0.9 : 0.9);
+    // Round 7 (#214) review fix: `faceCenterTurn` rotates the piece's built-in chair (local
+    // z = +0.7 in Desk.ts) toward the center side of the desk, not the wall side — an agent
+    // placed on the wall side the way the first pass had it stands about 1.6 m from the chair
+    // it is supposed to be sitting in. Seat the station on the same side the chair actually
+    // lands on, so the agent sits in the chair.
+    const seatA = ja + (a < 0 ? 0.9 : -0.9);
     stations.push({ type: isDebug ? 'debugging' : 'implementing', a: seatA, d: jd, look: [ja, jd, 1.2], posture: 'seated' });
   }
 

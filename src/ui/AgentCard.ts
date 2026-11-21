@@ -294,6 +294,11 @@ export class AgentCard {
     const action = actions.find((candidate) => candidate.id === actionId);
     if (!agent || !action || !action.available(agent)) return;
     const button = [...this.actionRow.querySelectorAll('button')].find((candidate) => candidate.dataset.action === actionId);
+    // Round 7 (#214) review fix: a disabled button means a request for this action is already
+    // in flight. Without this guard, a second KeyF while the first request is pending (or a
+    // held key's OS auto-repeat) re-enters here before `finally` re-enables the button, sending
+    // a duplicate request and eating into the 10-per-minute write limit (CLAUDE.md S7).
+    if (button?.disabled) return;
     if (button) button.disabled = true;
     try {
       this.showStatus(await action.run(agent));

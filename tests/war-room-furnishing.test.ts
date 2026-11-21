@@ -168,6 +168,26 @@ test('#214: every desk and debug station turns to face the room center, not the 
   }
 });
 
+// --- Round 7 (#214) review fix: the seated station must land in the piece's own built-in chair ---
+
+test('#214 review: a desk or debug station seats its agent in the chair the piece actually renders, not across the room from it', async () => {
+  const { RoomFrame } = await import('../src/addons/building/rooms.js');
+  const { missionSlot } = await import('../src/addons/building/missionRooms.js');
+  const slot = missionSlot(0);
+  const frame = new RoomFrame(slot.rect, slot.door);
+  const plan = furnishWarRoom('mission-seat-alignment', { deskLike: MAX_DESK_SLOTS, debugging: 2 });
+  const deskPieces = plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation');
+  for (const [i, p] of deskPieces.entries()) {
+    const station = plan.stations[i];
+    const deskCenter = frame.point(p.a, p.d);
+    const chairLocal = new THREE.Vector3(0, 0, 0.7).applyAxisAngle(new THREE.Vector3(0, 1, 0), frame.faceDoor + (p.turn ?? 0));
+    const chairWorld = deskCenter.clone().add(chairLocal);
+    const stationWorld = frame.point(station.a, station.d);
+    const gap = chairWorld.distanceTo(stationWorld);
+    assert.ok(gap < 0.5, `station ${i} sits ${gap.toFixed(2)} m from its chair, should be seated in it`);
+  }
+});
+
 // --- Could-haves unlock by tier ---
 
 test('could-haves unlock only at medium and large tiers', () => {
