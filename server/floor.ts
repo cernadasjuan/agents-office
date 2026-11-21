@@ -97,23 +97,6 @@ function remoteOwnerRepo(repoDir: string): string | undefined {
 }
 
 /**
- * A repository's own floor name: its remote `origin`'s own owner/repo when one resolves,
- * else its directory name, qualified by its immediate parent directory's name when that
- * parent exists and fits the whitelist too (review: the org separation fix). `GENERAL_FLOOR`
- * when the repo's own directory name itself does not fit the whitelist (never half a floor
- * name, and never a crash).
- */
-function qualifiedFloorName(repoDir: string): string {
-  const fromRemote = remoteOwnerRepo(repoDir);
-  if (fromRemote) return fromRemote;
-  const repoName = path.basename(repoDir);
-  if (!validSegment(repoName)) return GENERAL_FLOOR;
-  const parentDir = path.dirname(repoDir);
-  const parentName = parentDir === repoDir ? '' : path.basename(parentDir);
-  return parentName && validSegment(parentName) ? `${parentName}/${repoName}` : repoName;
-}
-
-/**
  * Resolves a working directory to the floor name of the git repository that holds it (a
  * worktree maps to its main repository), walking up at most `MAX_WALK_DEPTH` directories. A
  * relative `cwd` (review: never meaningful to resolve against the office server's own
@@ -125,6 +108,10 @@ function qualifiedFloorName(repoDir: string): string {
  */
 export class FloorResolver {
   private cache = new Map<string, string>();
+  /** The remote lookup's own cache, keyed by repo root rather than by a session's own `cwd`
+   * (issue #191 revision): several sessions, and several directories inside one of them, share
+   * one repo root, and must not each pay their own `.git/config` read for the same answer. */
+  private remoteCache = new Map<string, string | undefined>();
 
   resolve(cwd: string | undefined): string {
     if (!cwd) return GENERAL_FLOOR;
@@ -143,9 +130,9 @@ export class FloorResolver {
       const git = path.join(current, '.git');
       try {
         const stat = fs.lstatSync(git);
-        if (!stat.isFile()) return qualifiedFloorName(current);
+        if (!stat.isFile()) return this.qualifiedFloorName(current);
         const mainDir = worktreeMainDir(git, current);
-        return mainDir ? qualifiedFloorName(mainDir) : GENERAL_FLOOR;
+        return mainDir ? this.qualifiedFloorName(mainDir) : GENERAL_FLOOR;
       } catch {
         const parent = path.dirname(current);
         if (parent === current) return GENERAL_FLOOR;
@@ -153,6 +140,32 @@ export class FloorResolver {
       }
     }
     return GENERAL_FLOOR;
+  }
+
+  /** `remoteOwnerRepo(repoDir)`, cached per repo root, capped and cleared the same way `cache` is. */
+  private cachedRemoteOwnerRepo(repoDir: string): string | undefined {
+    if (this.remoteCache.has(repoDir)) return this.remoteCache.get(repoDir);
+    const result = remoteOwnerRepo(repoDir);
+    if (this.remoteCache.size >= MAX_CACHED_DIRS) this.remoteCache.clear();
+    this.remoteCache.set(repoDir, result);
+    return result;
+  }
+
+  /**
+   * A repository's own floor name: its remote `origin`'s own owner/repo when one resolves,
+   * else its directory name, qualified by its immediate parent directory's name when that
+   * parent exists and fits the whitelist too (review: the org separation fix). `GENERAL_FLOOR`
+   * when the repo's own directory name itself does not fit the whitelist (never half a floor
+   * name, and never a crash).
+   */
+  private qualifiedFloorName(repoDir: string): string {
+    const fromRemote = this.cachedRemoteOwnerRepo(repoDir);
+    if (fromRemote) return fromRemote;
+    const repoName = path.basename(repoDir);
+    if (!validSegment(repoName)) return GENERAL_FLOOR;
+    const parentDir = path.dirname(repoDir);
+    const parentName = parentDir === repoDir ? '' : path.basename(parentDir);
+    return parentName && validSegment(parentName) ? `${parentName}/${repoName}` : repoName;
   }
 }
 

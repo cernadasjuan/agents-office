@@ -92,6 +92,30 @@ test('a resolved name caches by directory, so a second resolve for the same sess
   }
 });
 
+test('the remote lookup caches per repo root, so two different working directories under the same repo read .git/config only once', () => {
+  const repo = makeRepoWithRemote('remote-cache-check', 'https://github.com/gabriel-amyot/agents-office.git', 'projects');
+  const nested = path.join(repo, 'src', 'deep');
+  fs.mkdirSync(nested, { recursive: true });
+  const resolver = new FloorResolver();
+  const readFileSync = fs.readFileSync;
+  let configReads = 0;
+  (fs as unknown as { readFileSync: typeof fs.readFileSync }).readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => {
+    if (String(args[0]).endsWith(path.join('.git', 'config'))) configReads++;
+    return readFileSync(...args);
+  }) as typeof fs.readFileSync;
+  try {
+    assert.equal(resolver.resolve(repo), 'gabriel-amyot/agents-office');
+    const readsAfterFirst = configReads;
+    assert.ok(readsAfterFirst > 0, 'the first resolve actually read the config');
+    // A different cwd (nested, under the same repo root) misses the outer per-directory cache
+    // but must still reuse the remote lookup's own per-repo-root cache, not re-read the file.
+    assert.equal(resolver.resolve(nested), 'gabriel-amyot/agents-office');
+    assert.equal(configReads, readsAfterFirst, 'the remote lookup for the same repo root was not repeated');
+  } finally {
+    fs.readFileSync = readFileSync;
+  }
+});
+
 // --- Review fixes ---
 
 // --- Issue #191 revision: the git remote's own owner/name wins over the parent-dir qualifier ---
