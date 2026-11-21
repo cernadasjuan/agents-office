@@ -68,6 +68,15 @@ Logs: `~/Library/Logs/agents-office/launcher.log`. This bends [P6](docs/design-p
 (no daemon): the launcher lives in `scripts/`, outside the published npm package (see
 `package.json`'s `files`), and the server it starts still binds `127.0.0.1` only (S1).
 
+The app icon (issue #205) is `scripts/launcher/icon.svg`, a procedurally drawn office/building
+motif (no downloaded brand assets), packed into `scripts/launcher/AgentsOffice.icns` with
+`iconutil` and committed. `scripts/build-launcher-app.sh` only copies the committed `.icns`
+into the bundle; it never rasterizes anything itself, so installing the launcher never needs
+Chromium. To change the icon: edit `icon.svg`, then regenerate the `.icns` with
+`node scripts/launcher/generate-icon.mjs` (needs the `playwright` dev dependency and its
+Chromium download, the same one-time step `pnpm smoke` already documents) and commit both
+files. A checkout missing the `.icns` still builds the app, just without an icon.
+
 ## Local security boundary
 
 The dashboard is for local use. Both launch paths bind to `127.0.0.1`; attempts to

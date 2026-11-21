@@ -20,7 +20,7 @@ const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const MOVEMENT_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 
 export const VIEW_HINTS: Record<ViewMode, string> = {
-  'first-person': 'Click to look around — WASD to walk — double-tap W to run — Shift to crouch — Space to jump — ESC to release — Click a figure to select — I = isometric — H = desk — Shift+L = layout — N = next — F = focus — / = filter',
+  'first-person': 'Click to look around — WASD to walk — double-tap W to run — Shift to crouch — Space to jump — ESC to release — Click a figure to select, or the dot once locked — I = isometric — H = desk — Shift+L = layout — N = next — F = focus — / = filter',
   isometric: 'Isometric — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Double-click a room to enter it — Esc clears — I = back — H = desk — Shift+L = layout — N = next — F = focus — / = filter',
   desk: 'Desk — fixed camera, no WASD or mouse-look — Click a figure to select, click elsewhere to clear — H or I to leave — N = next — F = focus — / = filter',
 };
@@ -37,6 +37,11 @@ export interface ViewControllerOptions {
   /** Where key presses arrive (the window). */
   keys: Pick<Window, 'addEventListener'>;
   hint?: HTMLElement | null;
+  /**
+   * Issue #205: the center-screen dot shown only in first person while the pointer is locked.
+   * Without it (graceful degradation), nothing is drawn, the same as before the dot existed.
+   */
+  crosshair?: HTMLElement | null;
   /** The URL hash: `#view=iso`, `#focus=<agent id>`. */
   hash?: string;
   selection?: SelectionState;
@@ -139,6 +144,7 @@ export class ViewController {
     this.listen();
     this.selection.onChange((agentId) => this.selectionChanged(agentId));
     this.setHint();
+    this.updateCrosshair();
     const startView = options.view ?? start.view;
     if (startView !== 'first-person') this.setMode(startView, false);
     // `setMode` no-ops for `desk` without a pose to show (graceful degradation): report the
@@ -264,6 +270,7 @@ export class ViewController {
       this.deskRestoreFov = null;
     }
     this.setHint();
+    this.updateCrosshair();
     if (mode === 'isometric') {
       this.flight = null;
       this.frameIsometric();
@@ -382,6 +389,18 @@ export class ViewController {
     return pickAgent(this.raycaster, targets);
   }
 
+  /**
+   * Issue #205: the same pick `pickAt` does, from the canvas's own center instead of a
+   * screen point — what the crosshair dot sits over. A locked click reads this, never the
+   * cursor position (hidden by the lock, and meaningless as "look around" moves it every
+   * frame). Null with no on-screen canvas size yet (a test, a hidden tab), same as `pickAt`.
+   */
+  private pickAtCenter(): string | null {
+    const rect = this.options.canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    return this.pickAt(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }
+
   /** Any camera input resets the desk view's idle timer (issue #161). */
   private markActive(): void {
     this.idleSeconds = 0;
@@ -410,6 +429,11 @@ export class ViewController {
     });
     keys.addEventListener('keyup', (event: KeyboardEvent) => this.panKeys.delete(event.code));
 
+    // Issue #205: the lock itself (engaged or released by `FreeCamera`'s own click listener,
+    // or force-exited by `setMode` entering isometric/desk) is the other half of whether the
+    // dot shows — `setMode` above covers a mode change with the lock state unchanged.
+    document.addEventListener('pointerlockchange', () => this.updateCrosshair());
+
     canvas.addEventListener('pointerdown', (event) => {
       this.markActive();
       this.pressPoint = { x: event.clientX, y: event.clientY };
@@ -436,8 +460,18 @@ export class ViewController {
       this.dragPoint = null;
     });
     canvas.addEventListener('click', (event) => {
-      // Pointer lock turns a click into "look around" (issue #133); let it through unselected.
-      if (document.pointerLockElement) return;
+      // A locked click is "look around" (issue #133) turned into a second job (issue #205):
+      // select whatever is under the center dot, since the cursor itself is hidden and pinned
+      // to the canvas center anyway. Never leaves the lock and never presses Esc for the
+      // caller. A miss keeps the pre-#205 behavior exactly: it only looks around, no deselect
+      // (deselecting on every miss would fight the common case of looking past the agent you
+      // already have selected to aim a run, not to drop its card).
+      if (document.pointerLockElement) {
+        if (this.currentMode !== 'first-person') return;
+        const agentId = this.pickAtCenter();
+        if (agentId) this.selection.select(agentId);
+        return;
+      }
       // A gesture that panned and returned near the press point is still a drag, not a click
       // (issue #133): `isClick` alone only compares endpoints, so it would misread this as a miss.
       if (this.dragged || !isClick(this.pressPoint, { x: event.clientX, y: event.clientY })) return;
@@ -668,5 +702,18 @@ export class ViewController {
     // Isometric and desk never engage pointer lock, so the lock's own show/hide never runs for
     // them (`FreeCamera`'s `pointerlockchange` listener); show the hint outright instead.
     if (this.currentMode !== 'first-person') hint.style.display = 'block';
+  }
+
+  /**
+   * Issue #205: shown only while first person is both the active mode and the pointer is
+   * locked — hidden the rest of the time (isometric, desk, or first person with the mouse
+   * cursor free), without its own option at all (graceful degradation, no dot drawn).
+   */
+  private updateCrosshair(): void {
+    const dot = this.options.crosshair;
+    if (!dot) return;
+    const canvas = this.options.canvas;
+    const locked = canvas.ownerDocument.pointerLockElement === canvas;
+    dot.style.display = this.currentMode === 'first-person' && locked ? 'block' : 'none';
   }
 }
