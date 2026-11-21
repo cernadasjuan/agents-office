@@ -27,7 +27,7 @@ function ticket(key: string, overrides: Partial<WorldJiraTicket> = {}): WorldJir
 }
 
 function world(jiraTickets: WorldJiraTicket[]): World {
-  return { plugins: ['jira'], rooms: [], boards: [], jiraTickets };
+  return { plugins: ['jira'], rooms: [], boards: [], jiraTickets, libraries: [] };
 }
 
 function officeScene(): THREE.Scene {

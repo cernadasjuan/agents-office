@@ -49,6 +49,30 @@ export interface WorldBoard {
   repo?: string;
 }
 
+/** One entry on a library shelf (issue #191 AC1, #119). `archived` is Prospero's rule: a
+ * superseded or archived entry still shows, with a visible mark, never silently dropped. */
+export interface WorldLibraryEntry {
+  title: string;
+  archived?: boolean;
+}
+
+/** One section's own shelf, built from that section's own `INDEX.md`, never a raw folder walk. */
+export interface WorldLibrarySection {
+  name: string;
+  entries: WorldLibraryEntry[];
+  /** More entries exist than this capped list carries. */
+  truncated?: boolean;
+}
+
+/** A floor's own library: only the floors whose repo root holds a `documentation/bibliotheque/`
+ * tree get one (graceful degradation — no folder-structure guessing for any other floor). */
+export interface WorldLibrary {
+  id: string;
+  sections: WorldLibrarySection[];
+  /** The repo this library scopes to, the same tag and client matching rule as `WorldRoom.repo`. */
+  repo?: string;
+}
+
 /** One ticket of the personal Jira board (issue #145). `url` is the browse link built from the key. */
 export interface WorldJiraTicket {
   key: string;
@@ -65,9 +89,10 @@ export interface World {
   rooms: WorldRoom[];
   boards: WorldBoard[];
   jiraTickets: WorldJiraTicket[];
+  libraries: WorldLibrary[];
 }
 
-export const EMPTY_WORLD: World = { plugins: [], rooms: [], boards: [], jiraTickets: [] };
+export const EMPTY_WORLD: World = { plugins: [], rooms: [], boards: [], jiraTickets: [], libraries: [] };
 
 /**
  * A client-side extension: a fork add-on or the browser part of a server plugin.

@@ -146,10 +146,37 @@ export interface JiraTicketInput {
   url?: string;
 }
 
+/** One entry on a library shelf (issue #191/#119). `archived` is Prospero's rule: a superseded
+ * or archived entry still shows, with a visible mark, never silently dropped. */
+export interface LibraryEntryInput {
+  title: string;
+  archived?: boolean;
+}
+
+/** One section's own shelf, built from that section's own `INDEX.md` (issue #119 review:
+ * "build rooms from each section's own INDEX.md, not a raw folder walk"), never a deeper walk. */
+export interface LibrarySectionInput {
+  name: string;
+  entries: LibraryEntryInput[];
+  /** More entries exist in the section's own INDEX.md than the capped list carries. */
+  truncated?: boolean;
+}
+
+/** A floor's own library (issue #191 AC1, #119): read from `<repo>/documentation/bibliotheque/`
+ * when that structure exists there, else this floor gets none (graceful degradation, never a
+ * folder-structure guess). `repo` is the same whitelist and client matching rule as
+ * `RoomInput.repo`/`BoardInput.repo`. */
+export interface LibraryInput {
+  key: string;
+  sections: LibrarySectionInput[];
+  repo?: string;
+}
+
 export interface WorldInput {
   rooms?: RoomInput[];
   boards?: BoardInput[];
   jiraTickets?: JiraTicketInput[];
+  libraries?: LibraryInput[];
 }
 
 export interface WorldProvider {
@@ -590,5 +617,22 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
   }));
   const jiraTickets = parts.flatMap((part) => part.jiraTickets ?? []).slice(0, 50)
     .map(jiraTicket).filter((ticket): ticket is NonNullable<ReturnType<typeof jiraTicket>> => ticket !== undefined);
-  return { plugins: pluginNames.filter((name) => /^[a-z0-9-]{1,32}$/.test(name)), rooms, boards, jiraTickets };
+  const libraries = parts.flatMap((part) => part.libraries ?? []).slice(0, 4).map((library) => ({
+    id: publicId(`library:${library.key}`),
+    // Section names and entry titles come straight from a repo's own committed markdown
+    // (issue #119/#191): a title whose own visible link text happens to read as a filesystem
+    // path (a careless `[/Users/alice/notes.md](link)`, the display text rather than the link
+    // itself, which never reaches here) still must not cross this boundary raw (S4) — redacted
+    // the same way free text already is for a tombstone's own story (`redactPaths`, above),
+    // before the display cap, so truncation cannot cut a path in half and leave a fragment.
+    sections: (library.sections ?? []).slice(0, 8).map((section) => ({
+      name: displayText(redactPaths(section.name), 32),
+      entries: (section.entries ?? []).slice(0, 6)
+        .map((entry) => ({ title: displayText(redactPaths(entry.title), 80), ...(entry.archived === true ? { archived: true as const } : {}) }))
+        .filter((entry) => entry.title.length > 0),
+      ...(section.truncated === true ? { truncated: true as const } : {}),
+    })).filter((section) => section.name.length > 0 && section.entries.length > 0),
+    ...(repoTag(library.repo) ? { repo: repoTag(library.repo) } : {}),
+  })).filter((library) => library.sections.length > 0);
+  return { plugins: pluginNames.filter((name) => /^[a-z0-9-]{1,32}$/.test(name)), rooms, boards, jiraTickets, libraries };
 }

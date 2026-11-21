@@ -284,6 +284,31 @@ test('a repo tag with a "." or ".." segment is dropped, never reaching the clien
   assert.equal('repo' in world.boards[0], false);
 });
 
+// --- Issue #191/#119: a floor library's own sections, whitelisted and capped ---
+
+test('a library section and entry are cleaned and capped, and a key is hashed, never sent raw', () => {
+  const world = projectWorld([{ libraries: [{
+    key: '/Users/gab/project-management',
+    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', archived: true }], truncated: true }],
+    repo: 'org/project-management',
+  }] }], ['floor-library'], publicId);
+
+  assert.deepEqual(world.libraries, [{
+    id: 'h(library:/Users/gab/project-management)',
+    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', archived: true }], truncated: true }],
+    repo: 'org/project-management',
+  }]);
+});
+
+test('a section name or entry title that reads as a filesystem path is redacted before it crosses (S4: never a path, even one typed as a title by mistake)', () => {
+  const world = projectWorld([{ libraries: [{
+    key: 'root',
+    sections: [{ name: 'vendors', entries: [{ title: '/Users/alice/private-plan.md' }] }] }] }],
+  ['floor-library'], publicId);
+
+  assert.equal(world.libraries[0].sections[0].entries[0].title, '[path]');
+});
+
 test('plugin names cannot leave the plugins folder', () => {
   assert.deepEqual(parsePluginNames('herdr, ../etc,missions,herdr,BAD'), ['herdr', 'missions']);
   assert.equal(pluginEntry('/tmp/plugins', '../escape'), null);
