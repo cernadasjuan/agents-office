@@ -30,6 +30,15 @@ export interface AgentPanelOptions {
   demo?: boolean;
   /** The top ("Needs you") chip, when it has a fresh wait to jump to. Without one, the chip only opens the group (the old behavior). */
   onTopCount?: (agentId: string) => void;
+  /**
+   * The floor the scene is focused on (issue #192), the same normalized value (an actual
+   * floor name, never the `ALL_FLOORS` sentinel) `AgentPoller`'s own `focusFloor` takes.
+   * Unset on "All floors" or a non-floor-aware layout: no row ever gets a floor tag then,
+   * the old behavior. Set: a row whose own agent is NOT on this floor (an agent that queues
+   * for Gabriel from another floor, issue #118 AC4's filter no longer drops it) gets a small
+   * floor tag, so the triage panel never looks like it lost track of where an agent lives.
+   */
+  focusFloor?: string;
 }
 
 interface Row {
@@ -236,14 +245,28 @@ export class AgentPanel {
   private updateTags(row: Row, agent: AgentInfo): void {
     const provider = agent.extras?.provider;
     const badges = agent.extras?.badges ?? [];
-    const key = JSON.stringify([provider ?? null, badges]);
+    const floor = this.crossFloorTag(agent);
+    const key = JSON.stringify([provider ?? null, badges, floor ?? null]);
     if (key === row.tagKey) return;
     row.tagKey = key;
     const chips: HTMLElement[] = [];
+    // First, so a cross-floor queued row reads "this one is not from here" before anything else.
+    if (floor) chips.push(textChip('agent-floor', floor));
     if (provider) chips.push(textChip('agent-provider', provider));
     for (const badge of badges) chips.push(textChip('agent-badge', badge));
     row.tags.replaceChildren(...chips);
     row.tags.hidden = chips.length === 0;
+  }
+
+  /**
+   * The agent's floor, only when it differs from the focused one (issue #192): the lobby
+   * queue's own cross-floor case. `undefined` on "All floors" (`options.focusFloor` unset)
+   * or for an agent with no floor field at all, so nothing changes there.
+   */
+  private crossFloorTag(agent: AgentInfo): string | undefined {
+    const floor = agent.extras?.floor;
+    const focusFloor = this.options.focusFloor;
+    return floor !== undefined && focusFloor !== undefined && floor !== focusFloor ? floor : undefined;
   }
 
   private addRow(agent: AgentInfo): Row {

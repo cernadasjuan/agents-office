@@ -50,8 +50,9 @@ const chosenFloor = layoutId === 'building' ? (() => {
   rememberFloor(floor, window.localStorage);
   return floor;
 })() : undefined;
-// `ALL_FLOORS` means no filter: `AgentPoller`/`BuildingLayout` only know about an actual
-// floor name or "unset", never the sentinel itself, so it is normalized away right here.
+// `ALL_FLOORS` means no filter: `AgentPoller`/`BuildingLayout`/the triage panel only know
+// about an actual floor name or "unset", never the sentinel itself, so it is normalized
+// away right here, once, for every consumer below.
 const focusFloor = chosenFloor !== undefined && chosenFloor !== ALL_FLOORS ? chosenFloor : undefined;
 window.addEventListener('keydown', (event) => {
   if (!isLayoutSwitchKey(event) || document.pointerLockElement) return;
@@ -110,6 +111,9 @@ const panel = new AgentPanel(document.getElementById('agent-list')!, {
   onPick: (agentId, activity) => agentManager.setActivity(agentId, activity),
   onTopCount: (agentId) => selectOrFly(agentId),
   demo: isDemoMode(window.location.search),
+  // Issue #192: a row's own floor only shows while a specific floor is focused (never on
+  // "All floors", same normalization `focusFloor` already gives the poller and the building).
+  focusFloor,
 });
 setupPanelCollapse(document.getElementById('ui-panel')!, document.getElementById('ui-panel-toggle')!, window.localStorage);
 
