@@ -327,6 +327,59 @@ test('a library section and entry are cleaned and capped, and a key is hashed, n
   }]);
 });
 
+test('an entry\'s summary, lastChanged and a GitHub blob link cross the seam, built only from whitelisted parts (issue #221 AC2/AC3)', () => {
+  const world = projectWorld([{ libraries: [{
+    key: '/Users/gab/project-management',
+    sections: [{ name: 'vendors', entries: [{
+      title: 'Placer.ai', summary: 'Foot traffic vendor', lastChanged: '2026-11-20T10:00:00.000Z',
+      repoPath: 'documentation/bibliotheque/vendors/placer.md',
+    }] }],
+    repo: 'gabriel-amyot/klever-project-management',
+  }] }], ['floor-library'], publicId);
+
+  assert.deepEqual(world.libraries[0].sections[0].entries[0], {
+    title: 'Placer.ai',
+    summary: 'Foot traffic vendor',
+    lastChanged: '2026-11-20',
+    githubUrl: 'https://github.com/gabriel-amyot/klever-project-management/blob/main/documentation/bibliotheque/vendors/placer.md',
+  });
+});
+
+test('a bare repo name (no git remote resolved, server/floor.ts\'s own fallback) never builds a GitHub link: there is no owner to build it from', () => {
+  const world = projectWorld([{ libraries: [{
+    key: '/Users/gab/project-management',
+    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', repoPath: 'documentation/bibliotheque/vendors/placer.md' }] }],
+    repo: 'project-management', // a bare name: ownerRepo rejects this shape outright
+  }] }], ['floor-library'], publicId);
+
+  assert.equal('githubUrl' in world.libraries[0].sections[0].entries[0], false);
+});
+
+test('an entry\'s own repoPath never crosses the seam itself, only the URL built from it (issue #221 AC3: no absolute local path, ever)', () => {
+  const world = projectWorld([{ libraries: [{
+    // The library's own `key` (a real local root) is only ever hashed into `id` by
+    // `publicId` in production; the entry itself is what this test guards, not that hash.
+    key: '/Users/gab/project-management',
+    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', repoPath: 'documentation/bibliotheque/vendors/placer.md' }] }],
+    repo: 'gabriel-amyot/klever-project-management',
+  }] }], ['floor-library'], publicId);
+
+  const entry = world.libraries[0].sections[0].entries[0];
+  assert.equal(JSON.stringify(entry).includes('/Users/'), false);
+  assert.equal('repoPath' in entry, false);
+});
+
+test('a repoPath that tries to escape the repo (a leading slash, a `..` segment, an absolute path) never builds a link', () => {
+  for (const repoPath of ['/etc/passwd', '../../etc/passwd', 'documentation/../../../etc/passwd']) {
+    const world = projectWorld([{ libraries: [{
+      key: 'root',
+      sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', repoPath }] }],
+      repo: 'gabriel-amyot/klever-project-management',
+    }] }], ['floor-library'], publicId);
+    assert.equal('githubUrl' in world.libraries[0].sections[0].entries[0], false, `rejected for repoPath ${repoPath}`);
+  }
+});
+
 test('a section name or entry title that reads as a filesystem path is redacted before it crosses (S4: never a path, even one typed as a title by mistake)', () => {
   const world = projectWorld([{ libraries: [{
     key: 'root',

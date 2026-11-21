@@ -1,21 +1,32 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { registerExtension, type OfficeExtension, type World, type WorldLibrarySection } from '../../src/extensions.js';
+import { registerExtension, type OfficeExtension, type World, type WorldLibrary, type WorldLibraryEntry, type WorldLibrarySection } from '../../src/extensions.js';
 import { ALL_FLOORS, matchesFloor } from '../../src/floors/FloorRegistry.js';
 import { focusedFloor } from '../../src/floors/floorState.js';
 import { ROOM_SIZE, slotFor, type Door, type Rect, type Side } from '../../src/addons/building/RoomPlanner.js';
+import type { PickTarget } from '../../src/scene/Selection.js';
+import { libraryEntryId, libraryIndexId, librarySectionId } from '../../src/ui/LibraryCard.js';
 
 /**
- * Library shelves (issue #191 AC1, #119): a self-contained extension that attaches to whatever
- * library room the building layout already built, the same pattern `plugins/jira/client.ts`
- * uses for its office board. Degrades to nothing without the room in the scene (another
- * layout, or the building has not grown a library yet — it always does, but this never
- * assumes it), or without any library at all in `/api/world`. On a specific focused floor,
- * only that floor's own matching library shows (`matchesFloor`). On `ALL_FLOORS` (the default
- * view every cold start lands on), there is no single floor to key one off: with exactly one
- * library configured this shows it anyway rather than hiding the feature behind a floor
- * switch; with more than one, every library's sections list together (still capped the same
- * way).
+ * Library shelves (issue #191 AC1, #119; issue #221 AC1/AC2/AC4): a self-contained extension
+ * that attaches to whatever library room the building layout already built, the same pattern
+ * `plugins/jira/client.ts` uses for its office board. Degrades to nothing without the room in
+ * the scene (another layout, or the building has not grown a library yet — it always does, but
+ * this never assumes it), or without any library at all in `/api/world`. On a specific focused
+ * floor, only that floor's own matching library shows (`matchesFloor`). On `ALL_FLOORS` (the
+ * default view every cold start lands on), there is no single floor to key one off: this shows
+ * every configured library's sections together, still bounded by `MAX_SECTIONS_SHOWN`.
+ *
+ * Issue #221: each shown entry is now its own clickable object (`src/ui/LibraryCard.ts`'s
+ * entry card), not a line of inert text on a shared board; each section's own label is
+ * clickable too (the section card, listing every file the section carries — not just the few
+ * physically shown here). The server now carries up to 100 sections and 100 entries per
+ * library (`plugins/floor-library/bibliotheque.ts`'s `MAX_SECTIONS`/`MAX_ENTRIES`), far more
+ * than one shared room's own wall space can seat as individual shelves — see this module's own
+ * `MAX_SECTIONS_SHOWN`/`MAX_ENTRY_LINES` below, and the "more" signs that keep the rest
+ * reachable rather than hidden (AC1). Fitting the full catalog as physical shelves needs the
+ * library's own scene (issue #220 slice 2, Gabriel's "different dimension" idea) — not
+ * attempted here.
  */
 
 /** The library's own group name, whatever index it actually rented at (`rooms.ts`'s
@@ -59,12 +70,21 @@ function shelfPoint(rect: Rect, door: Door, a: number, d: number, y: number): [n
  * shelves sit off-center at `a = +/-2.2` and `+/-3.9`), so a sign never shares wall space with
  * a shelf. Both are the furnishing plan's own choice, not the slot's — they hold regardless of
  * which first-ring rect/door the library actually rented.
+ *
+ * `MAX_SECTIONS_SHOWN`/`MAX_ENTRY_LINES` are this shared room's own physical ceiling, separate
+ * from the server's data cap (`bibliotheque.ts`'s `MAX_SECTIONS`/`MAX_ENTRIES`, 100 each):
+ * three wall slots and four lines of vertical space each is what the room's furnishing plan
+ * actually has, not a number chosen to match the server. A library past this (today: the real
+ * Klever bibliothèque already has 14 top-level sections, each able to carry up to 100 files)
+ * cannot seat every file as its own physical shelf in one shared room — the "more" signs below
+ * keep the rest reachable (a card, one click away) rather than silently dropped.
  */
 const SIGN_DEPTH = 11.5;
 const SIGN_Y = 1.9;
 const SIGN_ALONGS = [-1.3, 0, 1.3];
 const MAX_SECTIONS_SHOWN = SIGN_ALONGS.length;
 const MAX_ENTRY_LINES = 4;
+const ENTRY_LINE_HEIGHT = 0.24;
 
 function plaqueElement(section: WorldLibrarySection): HTMLDivElement {
   const element = document.createElement('div');
@@ -76,41 +96,75 @@ function plaqueElement(section: WorldLibrarySection): HTMLDivElement {
   return element;
 }
 
-function boardElement(section: WorldLibrarySection): HTMLDivElement {
+function entryElement(entry: WorldLibraryEntry): HTMLDivElement {
+  const element = document.createElement('div');
+  element.textContent = entry.archived ? `${entry.title} (archived)` : entry.title;
+  Object.assign(element.style, {
+    background: 'rgba(247, 243, 234, 0.95)', color: '#2a2a3e', padding: '2px 8px', borderRadius: '4px',
+    font: '12px system-ui, sans-serif', whiteSpace: 'nowrap', pointerEvents: 'none', textAlign: 'left',
+    opacity: entry.archived ? '0.65' : '1',
+  });
+  return element;
+}
+
+/** The "more" sign (issue #221 AC1): never a dead end. It carries whichever of two things is
+ * true — more entries in this section than the shelf shows, more sections in the library than
+ * the room shows — and is itself a pick target (`mount`'s own `moreId`), so neither is ever
+ * only "visible as text with no way to actually reach it". */
+function moreElement(lines: string[]): HTMLDivElement {
   const element = document.createElement('div');
   Object.assign(element.style, {
-    background: 'rgba(247, 243, 234, 0.95)', color: '#2a2a3e', padding: '4px 8px', borderRadius: '4px',
-    font: '12px system-ui, sans-serif', whiteSpace: 'nowrap', pointerEvents: 'none', textAlign: 'left',
+    background: 'rgba(247, 243, 234, 0.95)', color: '#2a2a3e', padding: '2px 8px', borderRadius: '4px',
+    font: '12px system-ui, sans-serif', whiteSpace: 'nowrap', pointerEvents: 'none', textAlign: 'left', opacity: '0.75',
   });
-  for (const entry of section.entries.slice(0, MAX_ENTRY_LINES)) {
-    const line = document.createElement('div');
-    line.textContent = entry.archived ? `${entry.title} (archived)` : entry.title;
-    if (entry.archived) line.style.opacity = '0.65';
-    element.appendChild(line);
-  }
-  // `section.truncated` is the server's own cap (more rows exist in the section's INDEX.md
-  // than `MAX_ENTRIES` carries); a section within that cap can still carry more entries than
-  // this board's own `MAX_ENTRY_LINES` shows (review: a 5- or 6-entry section silently lost
-  // its last rows here with no notice at all, archived entries among them).
-  if (section.truncated || section.entries.length > MAX_ENTRY_LINES) {
-    const more = document.createElement('div');
-    more.textContent = '…more on this shelf';
-    more.style.opacity = '0.65';
-    element.appendChild(more);
+  for (const line of lines) {
+    const row = document.createElement('div');
+    row.textContent = line;
+    element.appendChild(row);
   }
   return element;
 }
 
-interface MountedShelf {
-  plaque: CSS2DObject;
-  board: CSS2DObject;
+/** One section, tagged with the library it actually came from and its own index inside that
+ * library's own `sections` array — `src/ui/LibraryCard.ts`'s `libraryEntryId`/
+ * `librarySectionId` need both to look the right thing back up out of `/api/world`'s own data,
+ * the same way a flattened `libraries.flatMap((l) => l.sections)` used to lose that boundary. */
+interface MatchedSection {
+  libraryId: string;
+  sectionIndex: number;
+  section: WorldLibrarySection;
 }
+
+function relevantLibraries(libraries: WorldLibrary[], floor: string): WorldLibrary[] {
+  if (floor === ALL_FLOORS) return libraries;
+  const match = libraries.find((candidate) => matchesFloor(floor, candidate.repo));
+  return match ? [match] : [];
+}
+
+function matchedSections(libraries: WorldLibrary[], floor: string): MatchedSection[] {
+  return relevantLibraries(libraries, floor).flatMap((library) =>
+    library.sections.map((section, sectionIndex) => ({ libraryId: library.id, sectionIndex, section })));
+}
+
+/** Pure geometry for a shelf item's own invisible pick target (issue #221 AC2): no existing
+ * mesh sits at an individual entry's own position the way a tombstone's or an issue board's
+ * own mesh already does for `BuildingLayout`'s own pick targets — a shelf entry is CSS2D text,
+ * nothing else — so this is a small box with `material.visible = false`. `RenderBudget.ts`'s
+ * own `callsOf` skips a mesh whose material is not visible (0 draw calls, camera pass and every
+ * shadow map alike); only `object.visible` (left at its default `true`) gates whether
+ * `THREE.Raycaster` ever tests it at all, and this never touches that. A test
+ * (`floor-library-client.test.ts`) asserts the render budget does not move.
+ */
+const ENTRY_HIT_GEOMETRY = new THREE.BoxGeometry(1.0, 0.22, 0.2);
+const SECTION_HIT_GEOMETRY = new THREE.BoxGeometry(1.2, 0.32, 0.2);
+const HIT_MATERIAL = new THREE.MeshBasicMaterial({ visible: false });
 
 export class FloorLibraryOfficeExtension implements OfficeExtension {
   readonly id = 'floor-library-shelves';
   readonly plugin = 'floor-library';
   private scene: THREE.Scene | null = null;
-  private shelves: MountedShelf[] = [];
+  private mounted: THREE.Object3D[] = [];
+  private picks: PickTarget[] = [];
   private signature = '';
   private slot: { rect: Rect; door: Door } | null = null;
 
@@ -118,51 +172,91 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     this.scene = scene;
   }
 
+  pickTargets(): PickTarget[] {
+    return this.picks;
+  }
+
   worldChanged(world: World): void {
     if (!this.scene) return;
     const floor = focusedFloor();
-    const libraries = world.libraries ?? [];
-    // `ALL_FLOORS` has no single floor to key "the focused floor's library" off. With exactly
-    // one library configured (today: the Klever project-management root, the only one that
-    // exists) that is no longer an ambiguity, so it shows there too — the office opens on
-    // `ALL_FLOORS` every cold start (`defaultFloor`, `src/floors/FloorRegistry.ts`), and
-    // showing nothing there made the feature invisible unless Gabriel switched floors first.
-    // With more than one library, this lists every one's sections rather than guess which
-    // floor matters most; `MAX_SECTIONS_SHOWN` still bounds what actually mounts.
-    const matched = floor === ALL_FLOORS
-      ? (libraries.length === 1 ? libraries[0].sections : libraries.flatMap((candidate) => candidate.sections))
-      : libraries.find((candidate) => matchesFloor(floor, candidate.repo))?.sections;
+    const matched = matchedSections(world.libraries ?? [], floor);
     const roomIndex = findLibraryRoomIndex(this.scene);
     this.slot = roomIndex === undefined ? null : slotFor(roomIndex);
-    const sections = this.slot && matched ? matched.slice(0, MAX_SECTIONS_SHOWN) : [];
-    const signature = `${roomIndex}:${JSON.stringify(sections)}`;
+    const sections = this.slot ? matched.slice(0, MAX_SECTIONS_SHOWN) : [];
+    const hiddenSections = this.slot ? Math.max(0, matched.length - sections.length) : 0;
+    const signature = `${roomIndex}:${JSON.stringify(sections)}:${hiddenSections}`;
     if (signature === this.signature) return;
     this.signature = signature;
     this.unmountAll();
-    sections.forEach((section, index) => this.mount(section, index));
+    sections.forEach((matchedSection, index) => this.mount(matchedSection, index, index === sections.length - 1 ? hiddenSections : 0));
   }
 
-  private mount(section: WorldLibrarySection, index: number): void {
+  private mount(matched: MatchedSection, index: number, hiddenSections: number): void {
     const along = SIGN_ALONGS[index];
     if (along === undefined || !this.scene || !this.slot) return;
     const { rect, door } = this.slot;
-    const position = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y);
+    const { libraryId, sectionIndex, section } = matched;
+    const add = (object: THREE.Object3D): void => {
+      this.scene!.add(object);
+      this.mounted.push(object);
+    };
+    const addHit = (id: string, position: [number, number, number], geometry: THREE.BufferGeometry): void => {
+      const hit = new THREE.Mesh(geometry, HIT_MATERIAL);
+      hit.position.set(...position);
+      add(hit);
+      this.picks.push({ id, object: hit });
+    };
+
+    // The section label (issue #221 AC2): clickable, opens the section card listing every
+    // file the section carries, not just the few shown below.
+    const plaquePos = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y + 0.5);
     const plaque = new CSS2DObject(plaqueElement(section));
-    plaque.position.set(position[0], position[1] + 0.5, position[2]);
+    plaque.position.set(...plaquePos);
     plaque.userData.detailSign = { rect, hoverOnly: false };
-    const board = new CSS2DObject(boardElement(section));
-    board.position.set(...position);
-    board.userData.detailSign = { rect, hoverOnly: true };
-    this.scene.add(plaque, board);
-    this.shelves.push({ plaque, board });
+    add(plaque);
+    const sectionId = librarySectionId(libraryId, sectionIndex);
+    addHit(sectionId, plaquePos, SECTION_HIT_GEOMETRY);
+
+    // Each shown entry (issue #221 AC2): its own clickable object, its own line, stacked
+    // downward from the shelf's own depth — no longer one shared board of inert text.
+    const shown = section.entries.slice(0, MAX_ENTRY_LINES);
+    shown.forEach((entry, entryIndex) => {
+      const position = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y - entryIndex * ENTRY_LINE_HEIGHT);
+      const object = new CSS2DObject(entryElement(entry));
+      object.position.set(...position);
+      object.userData.detailSign = { rect, hoverOnly: true };
+      add(object);
+      addHit(libraryEntryId(libraryId, sectionIndex, entryIndex), position, ENTRY_HIT_GEOMETRY);
+    });
+
+    // The "more" sign (issue #221 AC1): a section within the server's own cap can still carry
+    // more entries than `MAX_ENTRY_LINES` physically shows here (review carried over from the
+    // original board), and the last shown section can stand in for a whole library that
+    // carries more sections than the three wall slots seat. Either reason, or both, still
+    // mounts one sign — never silent, always one click from everything the cap actually holds.
+    const hiddenEntries = section.truncated === true || section.entries.length > shown.length;
+    if (hiddenEntries || hiddenSections > 0) {
+      const lines: string[] = [];
+      if (hiddenEntries) lines.push('…more on this shelf');
+      if (hiddenSections > 0) lines.push(`+${hiddenSections} more section${hiddenSections === 1 ? '' : 's'} in the library`);
+      const position = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y - shown.length * ENTRY_LINE_HEIGHT);
+      const object = new CSS2DObject(moreElement(lines));
+      object.position.set(...position);
+      object.userData.detailSign = { rect, hoverOnly: true };
+      add(object);
+      // The bigger reveal wins the click target when both apply: a whole missing library
+      // section is a larger "never hidden" gap than a few extra files already reachable one
+      // click away through the section card below — and the index itself still links back into
+      // this very section (`src/ui/LibraryCard.ts`'s own index-to-section navigation), so
+      // nothing here is actually a dead end either way.
+      addHit(hiddenSections > 0 ? libraryIndexId(libraryId) : sectionId, position, ENTRY_HIT_GEOMETRY);
+    }
   }
 
   private unmountAll(): void {
-    for (const shelf of this.shelves) {
-      shelf.plaque.removeFromParent();
-      shelf.board.removeFromParent();
-    }
-    this.shelves = [];
+    for (const object of this.mounted) object.removeFromParent();
+    this.mounted = [];
+    this.picks = [];
   }
 }
 

@@ -13,6 +13,7 @@ import { LabelDetailController } from './ui/LabelDetail.js';
 import { AgentCard } from './ui/AgentCard.js';
 import { TombstoneCard } from './ui/TombstoneCard.js';
 import { MissionIssuesCard } from './ui/MissionIssuesCard.js';
+import { LibraryCard } from './ui/LibraryCard.js';
 import { OffscreenMarkers } from './ui/OffscreenMarkers.js';
 import { FrameLoop } from './scene/FrameLoop.js';
 import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
@@ -73,6 +74,9 @@ const agentCard = new AgentCard(document.body, { anchor: document.getElementById
 const tombstoneCard = new TombstoneCard(document.body, { anchor: document.getElementById('ui-panel')! });
 // Mission issues card (issue #146): same dock spot and selection, a click on a war room's issue board opens it.
 const missionIssuesCard = new MissionIssuesCard(document.body, { anchor: document.getElementById('ui-panel')! });
+// Library card (issue #221): same dock spot and selection, a click on a shelf entry or a
+// section label (`plugins/floor-library/client.ts`'s own pick targets) opens it.
+const libraryCard = new LibraryCard(document.body, { anchor: document.getElementById('ui-panel')! });
 
 // Camera mode (key I toggles first person and the isometric view) and click to select.
 // Start view: `#view=first-person|iso|desk`, then the last view, then the layout default.
@@ -253,6 +257,7 @@ async function pollWorld(): Promise<void> {
     for (const extension of activeExtensions(scene)) extension.worldChanged?.(world);
     tombstoneCard.render(world.rooms.flatMap((room) => room.sleepers ?? []));
     missionIssuesCard.render(world.rooms.map((room) => ({ id: room.id, title: room.title, issues: room.walls.issues ?? [] })));
+    libraryCard.render(world.libraries ?? []);
     view.sceneChanged();
     labelDetail.sceneChanged();
     frameLoop.sceneChanged();

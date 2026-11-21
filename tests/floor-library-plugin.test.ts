@@ -33,7 +33,7 @@ test('a root with a bibliotheque becomes one library, tagged with its own floor'
   const libraries = readLibraries([pmRoot], resolver);
   assert.deepEqual(libraries, [{
     key: pmRoot,
-    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', archived: false }], truncated: false }],
+    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', archived: false, summary: 'Foot traffic' }], truncated: false }],
     repo: 'org/project-management',
   }]);
 });

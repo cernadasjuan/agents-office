@@ -152,10 +152,16 @@ export interface JiraTicketInput {
 }
 
 /** One entry on a library shelf (issue #191/#119). `archived` is Prospero's rule: a superseded
- * or archived entry still shows, with a visible mark, never silently dropped. */
+ * or archived entry still shows, with a visible mark, never silently dropped. `repoPath` is the
+ * link target's own path relative to the repo root (`plugins/floor-library/bibliotheque.ts`'s
+ * `resolveEntryTarget`), used here only to build `githubUrl` below — it never reaches the
+ * browser itself (issue #221 AC3). */
 export interface LibraryEntryInput {
   title: string;
   archived?: boolean;
+  summary?: string;
+  lastChanged?: string;
+  repoPath?: string;
 }
 
 /** One section's own shelf, built from that section's own `INDEX.md` (issue #119 review:
@@ -440,6 +446,28 @@ function repoTag(value: unknown): string | undefined {
   return typeof value === 'string' && value.includes('/') ? ownerRepo(value) : repoShortName(value);
 }
 
+/** A repo-relative path, forward-slashed, no `.`/`..` segment, no leading slash: the same shape
+ * `resolveEntryTarget` already only ever hands back (issue #221 AC3 defense in depth — this
+ * whitelist runs again at the boundary regardless of what the plugin layer sent). */
+const REPO_PATH = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
+
+function repoPath(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 300 || !REPO_PATH.test(value)) return undefined;
+  return value.split('/').some((segment) => segment === '.' || segment === '..') ? undefined : value;
+}
+
+/**
+ * A document's own "Open on GitHub" link (issue #221 AC3): `https://github.com/<owner>/<repo>
+ * /blob/main/<path>`, built here from an already-whitelisted owner/repo and repo-relative path,
+ * never a URL a plugin hands over whole — the same reasoning `redactPaths` already applies to
+ * free text: nothing resembling a local filesystem path crosses this boundary, only a URL and
+ * display strings built from parts this function itself validated.
+ */
+function githubBlobUrl(owner: string, repo: string, path: string): string | undefined {
+  const url = `https://github.com/${owner}/${repo}/blob/main/${path}`;
+  return httpsUrl(url);
+}
+
 const HEX_COLOR = /^#?([0-9A-Fa-f]{6})$/;
 
 /** A 6-hex color as lowercase `rrggbb`, or undefined. */
@@ -636,22 +664,48 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
   }));
   const jiraTickets = parts.flatMap((part) => part.jiraTickets ?? []).slice(0, 50)
     .map(jiraTicket).filter((ticket): ticket is NonNullable<ReturnType<typeof jiraTicket>> => ticket !== undefined);
-  const libraries = parts.flatMap((part) => part.libraries ?? []).slice(0, 4).map((library) => ({
-    id: publicId(`library:${library.key}`),
-    // Section names and entry titles come straight from a repo's own committed markdown
-    // (issue #119/#191): a title whose own visible link text happens to read as a filesystem
-    // path (a careless `[/Users/alice/notes.md](link)`, the display text rather than the link
-    // itself, which never reaches here) still must not cross this boundary raw (S4) — redacted
-    // the same way free text already is for a tombstone's own story (`redactPaths`, above),
-    // before the display cap, so truncation cannot cut a path in half and leave a fragment.
-    sections: (library.sections ?? []).slice(0, 8).map((section) => ({
-      name: displayText(redactPaths(section.name), 32),
-      entries: (section.entries ?? []).slice(0, 6)
-        .map((entry) => ({ title: displayText(redactPaths(entry.title), 80), ...(entry.archived === true ? { archived: true as const } : {}) }))
-        .filter((entry) => entry.title.length > 0),
-      ...(section.truncated === true ? { truncated: true as const } : {}),
-    })).filter((section) => section.name.length > 0 && section.entries.length > 0),
-    ...(repoTag(library.repo) ? { repo: repoTag(library.repo) } : {}),
-  })).filter((library) => library.sections.length > 0);
+  const libraries = parts.flatMap((part) => part.libraries ?? []).slice(0, 4).map((library) => {
+    // Resolved once per library (issue #221 AC3): a GitHub blob link only ever builds against
+    // the owner/repo this floor's own git remote resolved, never a plugin-supplied URL. A
+    // bare repo name (no remote resolved, `server/floor.ts`'s own fallback) is not an
+    // `owner/repo` pair, so `ownerRepo` below rejects it and every entry's `githubUrl` is
+    // simply absent — graceful degradation, the same shape every other optional field here
+    // already follows.
+    const repo = repoTag(library.repo);
+    const ownerName = repo && OWNER_REPO.test(repo) ? repo.split('/') : undefined;
+    return {
+      id: publicId(`library:${library.key}`),
+      // Section names and entry titles come straight from a repo's own committed markdown
+      // (issue #119/#191): a title whose own visible link text happens to read as a filesystem
+      // path (a careless `[/Users/alice/notes.md](link)`, the display text rather than the link
+      // itself, which never reaches here) still must not cross this boundary raw (S4) — redacted
+      // the same way free text already is for a tombstone's own story (`redactPaths`, above),
+      // before the display cap, so truncation cannot cut a path in half and leave a fragment.
+      // 100x100 (issue #221 AC1, Gabriel's own cap, round 7 part 3): the data layer's own cap,
+      // not the room's physical display limit — `plugins/floor-library/client.ts` shows far
+      // fewer at once and signs the rest, same as `section.truncated` already does below.
+      sections: (library.sections ?? []).slice(0, 100).map((section) => ({
+        name: displayText(redactPaths(section.name), 32),
+        entries: (section.entries ?? []).slice(0, 100)
+          .map((entry) => {
+            const title = displayText(redactPaths(entry.title), 80);
+            const summary = entry.summary ? displayText(redactPaths(entry.summary), 160) : undefined;
+            const lastChanged = isoDate(entry.lastChanged);
+            const path = repoPath(entry.repoPath);
+            const githubUrl = ownerName && path ? githubBlobUrl(ownerName[0], ownerName[1], path) : undefined;
+            return {
+              title,
+              ...(entry.archived === true ? { archived: true as const } : {}),
+              ...(summary ? { summary } : {}),
+              ...(lastChanged ? { lastChanged } : {}),
+              ...(githubUrl ? { githubUrl } : {}),
+            };
+          })
+          .filter((entry) => entry.title.length > 0),
+        ...(section.truncated === true ? { truncated: true as const } : {}),
+      })).filter((section) => section.name.length > 0 && section.entries.length > 0),
+      ...(repo ? { repo } : {}),
+    };
+  }).filter((library) => library.sections.length > 0);
   return { plugins: pluginNames.filter((name) => /^[a-z0-9-]{1,32}$/.test(name)), rooms, boards, jiraTickets, libraries };
 }
