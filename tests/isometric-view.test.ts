@@ -649,6 +649,22 @@ test('issue #249: panning far enough to leave the pinned room (via pan(), not ju
   assert.ok(iso.target.x <= bounds.max.x + 1e-6, 'pan() itself clamps to the default bounds once the pin is left behind');
 });
 
+test('issue #249 review round 3: a shift that lands just past the pinned room, but still short of the default bounds, clamps into the default bounds in the same call — not on some later input or scene poll', () => {
+  // Reproduces the review finding: the old clampTargetAndUnpinIfLeft() clamped against the
+  // widened (pin-union) box, found the result no longer inside the pin, and cleared the pin
+  // — but never re-clamped against the now-narrower default-only box. A target between the
+  // pinned room's edge (x=295) and the default bounds' own edge (x=30) was left stranded
+  // there, outside the active bounds, until a later pan/retrack silently snapped it back.
+  const bounds = BUILDING; // default bounds: x in [-30, 30]
+  const iso = new IsometricController();
+  iso.frame(bounds, 16 / 9);
+  iso.target.set(300, 0, 0);
+  iso.pinBounds(new THREE.Box3(new THREE.Vector3(295, 0, -5), new THREE.Vector3(305, 6, 5)));
+
+  iso.shiftTarget(-6, 0); // target.x -> 294: past the pinned room's min.x, nowhere near default bounds
+  assert.ok(iso.target.x <= bounds.max.x + 1e-6, 'the pin-clearing shift must itself land the target back inside the default bounds, not just outside the pin');
+});
+
 test('a settled isometric view stops moving the camera: the follower is at rest once the goal and the live pose match', () => {
   const { view } = setup('#view=iso');
   settleIso(view);

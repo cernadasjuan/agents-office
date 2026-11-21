@@ -152,7 +152,14 @@ export class IsometricController {
    * never un-pin a room the user has not actually panned away from. */
   private clampTargetAndUnpinIfLeft(): void {
     this.clampTarget();
-    if (this.pinnedBounds && !this.pinnedBounds.containsPoint(this.target)) this.pinnedBounds = null;
+    if (this.pinnedBounds && !this.pinnedBounds.containsPoint(this.target)) {
+      this.pinnedBounds = null;
+      // Review round 3: dropping the pin narrows `clampBox()` back to the plain default
+      // bounds. Re-clamp now, in the same call, so the drag/zoom that left the room never
+      // leaves `target` sitting outside the new (narrower) box until some later input or
+      // scene poll snaps it back unexpectedly.
+      this.clampTarget();
+    }
   }
 
   /**
