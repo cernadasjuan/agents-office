@@ -85,7 +85,7 @@ test('on "all floors" with more than one library configured, every one\'s sectio
     library('harness', [{ name: 'skills', entries: [{ title: 'write-a-skill' }] }]),
   ]));
   const signs = shelfSigns(scene);
-  const plaqueTexts = signs.filter((sign) => sign.userData.detailSign.hoverOnly === false)
+  const plaqueTexts = signs.filter((sign) => sign.userData.shelfRole === 'plaque')
     .map((sign) => (sign as THREE.Object3D & { element: HTMLElement }).element.textContent);
   assert.deepEqual(plaqueTexts, ['vendors', 'skills']);
 });
@@ -105,16 +105,31 @@ test('a focused floor with a matching library mounts one plaque and one board pe
   const signs = shelfSigns(scene);
   assert.equal(signs.length, 6, '3 sections shown x (one plaque + one board) each, the 4th section never mounts');
 
-  const plaqueTexts = signs.filter((sign) => sign.userData.detailSign.hoverOnly === false)
+  const plaqueTexts = signs.filter((sign) => sign.userData.shelfRole === 'plaque')
     .map((sign) => (sign as THREE.Object3D & { element: HTMLElement }).element.textContent);
   assert.deepEqual(plaqueTexts, ['vendors', 'domain', 'surfaces']);
 
-  const boards = signs.filter((sign) => sign.userData.detailSign.hoverOnly === true);
+  const boards = signs.filter((sign) => sign.userData.shelfRole === 'board');
   const vendorsBoard = boards[0] as THREE.Object3D & { element: HTMLElement };
   assert.ok(vendorsBoard.element.textContent!.includes('Placer.ai'));
   assert.ok(vendorsBoard.element.textContent!.includes('Old vendor (archived)'), 'an archived entry keeps its visible mark');
   const domainBoard = boards[1] as THREE.Object3D & { element: HTMLElement };
   assert.ok(domainBoard.element.textContent!.includes('more on this shelf'), 'truncated carries its own notice');
+});
+
+test('#214: neither the section plaque nor the file board is hover-only, and both read from across the room', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'clients', entries: [{ title: 'blinds to go' }] }])]));
+  const signs = shelfSigns(scene);
+  assert.equal(signs.length, 2);
+  for (const sign of signs) {
+    const detail = sign.userData.detailSign as { hoverOnly: boolean; maxDistance: number };
+    assert.equal(detail.hoverOnly, false, `${sign.userData.shelfRole} must not require hovering to read`);
+    assert.ok(detail.maxDistance > 12, `${sign.userData.shelfRole} must read from further than a war room sign's default distance`);
+  }
 });
 
 test('a world update with the same shelves changes nothing (no churn on every 10 s poll)', () => {

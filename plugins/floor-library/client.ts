@@ -66,6 +66,19 @@ const SIGN_ALONGS = [-1.3, 0, 1.3];
 const MAX_SECTIONS_SHOWN = SIGN_ALONGS.length;
 const MAX_ENTRY_LINES = 4;
 
+/**
+ * Round 7 feedback (#214): these labels "fade in and out depending on where I put my mouse"
+ * (Gabriel, verbatim) and he'd like to read them without hovering. They used the war-room-sign
+ * system (`LabelDetail.ts`'s `signVisible`), built for a sign you glance at from across a
+ * floor, not a wall label you read while standing near it: `hoverOnly` gates on a floor
+ * raycast under the mouse, which a natural reading angle (looking up at a shelf, not down at
+ * the floor) usually misses entirely, and the default first-person sign distance (12 units)
+ * sits inside the room's own depth, so the far-wall shelves fade as soon as you're not right
+ * on top of them. Neither label needs hovering here — `maxDistance` covers the room's full
+ * diagonal from any standing point instead of the shorter default.
+ */
+const LIBRARY_SIGN_MAX_DISTANCE = 20;
+
 function plaqueElement(section: WorldLibrarySection): HTMLDivElement {
   const element = document.createElement('div');
   element.textContent = section.name;
@@ -149,10 +162,15 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     const position = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y);
     const plaque = new CSS2DObject(plaqueElement(section));
     plaque.position.set(position[0], position[1] + 0.5, position[2]);
-    plaque.userData.detailSign = { rect, hoverOnly: false };
+    plaque.userData.detailSign = { rect, hoverOnly: false, maxDistance: LIBRARY_SIGN_MAX_DISTANCE };
+    plaque.userData.shelfRole = 'plaque';
     const board = new CSS2DObject(boardElement(section));
     board.position.set(...position);
-    board.userData.detailSign = { rect, hoverOnly: true };
+    // Round 7 (#214): no longer hover-only — Gabriel wants to read the file list without
+    // hunting for the one mouse position that triggers it. Clicking to expand stays a
+    // separate, later spike.
+    board.userData.detailSign = { rect, hoverOnly: false, maxDistance: LIBRARY_SIGN_MAX_DISTANCE };
+    board.userData.shelfRole = 'board';
     this.scene.add(plaque, board);
     this.shelves.push({ plaque, board });
   }

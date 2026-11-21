@@ -7,10 +7,16 @@ export type { WallRect };
 export const EYE_HEIGHT = FIGURE_EYE_HEIGHT;
 /** Crouching (Shift) lowers the eye height, so looking down at a desk or under a table reads differently from standing. */
 export const CROUCH_EYE_HEIGHT = EYE_HEIGHT * 0.6;
-/** A little faster than the old flight-era base speed (6), issue #174's own acceptance criteria. */
-const WALK_SPEED = 7;
-/** Double-tap W (issue #174), not Shift (now crouch): running goes faster than walking. */
-const RUN_MULTIPLIER = 1.8;
+/**
+ * A little faster than the old flight-era base speed (6), issue #174's own acceptance
+ * criteria. Raised again on round 7 (#214, about 1.4x the old 7): Gabriel found walking
+ * around the office too slow. `stepAxis`'s per-iteration cap at `WALL_MARGIN` makes
+ * collision correct at any speed or frame delta, so this is a plain feel tune, not a
+ * collision risk.
+ */
+const WALK_SPEED = 9.8;
+/** Double-tap W (issue #174), not Shift (now crouch): running goes faster than walking. Raised on #214 to about 2.6x walk. */
+const RUN_MULTIPLIER = 2.6;
 /** Shift crouches and moves slower, the reverse of the old "Shift = fast". */
 const CROUCH_SPEED_MULTIPLIER = 0.5;
 const MOUSE_SENSITIVITY = 0.002;

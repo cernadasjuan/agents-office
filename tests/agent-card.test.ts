@@ -314,6 +314,44 @@ test('key F fix: a second F while the pulse is active restarts the 1.5s window i
   assert.equal(button.classList.contains('pulse'), false);
 });
 
+test('key F (#214): triageFocus runs the ready action directly, no click needed', async (t) => {
+  const { card, selection } = makeCard(t);
+  const ran: string[] = [];
+  registerCardAction({ id: 'focus', label: 'Focus in herdr', available: (agent) => agent.extras?.actions?.includes('focus') === true, run: async (agent) => { ran.push(agent.id); return 'Focused in herdr'; } });
+  card.render([{ ...main, extras: { ...main.extras, actions: ['focus'] } }]);
+  selection.select('main-1');
+
+  await card.triageFocus();
+  assert.deepEqual(ran, ['main-1'], 'F sends the same request the button click would');
+});
+
+test('key F (#214): without a ready action, triageFocus does nothing and no error', async (t) => {
+  const { card } = makeCard(t);
+  card.render([main]);
+  await card.triageFocus();
+});
+
+test('key F (#214 review): a second F while the first request is still in flight does not send a duplicate', async (t) => {
+  const { card, selection } = makeCard(t);
+  const ran: string[] = [];
+  let resolveFirst: (value: string) => void = () => {};
+  const pending = new Promise<string>((resolve) => { resolveFirst = resolve; });
+  registerCardAction({
+    id: 'focus',
+    label: 'Focus in herdr',
+    available: (agent) => agent.extras?.actions?.includes('focus') === true,
+    run: async (agent) => { ran.push(agent.id); return pending; },
+  });
+  card.render([{ ...main, extras: { ...main.extras, actions: ['focus'] } }]);
+  selection.select('main-1');
+
+  const first = card.triageFocus();
+  const second = card.triageFocus(); // simulates a held key's auto-repeat, or a fast double-tap
+  resolveFirst('Focused in herdr');
+  await Promise.all([first, second]);
+  assert.deepEqual(ran, ['main-1'], 'only one request went out while the first was pending');
+});
+
 test('the card docks left of the panel, 360 px wide', (t) => {
   const { card, selection, root, document } = makeCard(t);
   const anchor = document.getElementById('ui-panel')!;
