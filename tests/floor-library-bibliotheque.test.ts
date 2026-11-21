@@ -95,3 +95,17 @@ test('an oversized top INDEX.md reads as no library, not a crash', () => {
   write('too-big/documentation/bibliotheque/INDEX.md', 'x'.repeat(200_001));
   assert.equal(readBibliotheque(path.join(root, 'too-big')), undefined);
 });
+
+test('a section directory symlinked outside the bibliotheque root contributes nothing (review: checking only the leaf INDEX.md\'s own lstat missed a symlinked parent directory escaping the root)', () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-outside-bibliotheque-'));
+  fs.writeFileSync(path.join(outside, 'INDEX.md'), '| [Private](private.md) | not meant to be read as a floor library |');
+  write('escape/documentation/bibliotheque/INDEX.md', '| [vendors/INDEX.md](vendors/INDEX.md) | Vendors |');
+  fs.mkdirSync(path.join(root, 'escape', 'documentation', 'bibliotheque'), { recursive: true });
+  fs.symlinkSync(outside, path.join(root, 'escape', 'documentation', 'bibliotheque', 'vendors'));
+  try {
+    const library = readBibliotheque(path.join(root, 'escape'));
+    assert.deepEqual(library, { sections: [] }, 'the symlinked section is dropped, not read through');
+  } finally {
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});

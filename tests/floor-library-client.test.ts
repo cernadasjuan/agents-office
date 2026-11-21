@@ -57,13 +57,37 @@ test('without a library for the focused floor, no shelf mounts (graceful degrada
   assert.equal(shelfSigns(scene).length, 0);
 });
 
-test('on "all floors", no library shelf shows: there is no single focused floor to key "the focused floor\'s library" off', () => {
+test('on "all floors" with exactly one library configured, it shows anyway: the default view every cold start lands on must not hide the only library there is', () => {
   setFocusedFloor(ALL_FLOORS);
   const scene = sceneWithLibraryRoom();
   const extension = new FloorLibraryOfficeExtension();
   extension.start(scene);
   extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }])]));
+  assert.equal(shelfSigns(scene).length, 2, 'one plaque + one board for the single section');
+});
+
+test('on "all floors" with no library at all, nothing shows (graceful degradation, no data)', () => {
+  setFocusedFloor(ALL_FLOORS);
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([]));
   assert.equal(shelfSigns(scene).length, 0);
+});
+
+test('on "all floors" with more than one library configured, every one\'s sections list together rather than picking one floor to guess at', () => {
+  setFocusedFloor(ALL_FLOORS);
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([
+    library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }]),
+    library('harness', [{ name: 'skills', entries: [{ title: 'write-a-skill' }] }]),
+  ]));
+  const signs = shelfSigns(scene);
+  const plaqueTexts = signs.filter((sign) => sign.userData.detailSign.hoverOnly === false)
+    .map((sign) => (sign as THREE.Object3D & { element: HTMLElement }).element.textContent);
+  assert.deepEqual(plaqueTexts, ['vendors', 'skills']);
 });
 
 test('a focused floor with a matching library mounts one plaque and one board per section, capped, each section name and titles visible', () => {
@@ -108,10 +132,18 @@ test('a world update with the same shelves changes nothing (no churn on every 10
 test('a library shelf sign adds zero draw calls: CSS2DObjects carry no geometry for the WebGL renderer to count', () => {
   setFocusedFloor('pm-floor');
   const scene = sceneWithLibraryRoom();
-  const before = countDrawCalls(scene, new THREE.PerspectiveCamera());
+  // The camera looks straight at the library's own far wall (the shelf's own world position,
+  // review: a default, unaimed camera's frustum does not reach there at all, so it would read
+  // "zero" the same way even if a future change swapped the CSS2DObject for a real Mesh board).
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  camera.position.set(20, 1.9, 12);
+  camera.lookAt(26.5, 1.9, 12);
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+  const before = countDrawCalls(scene, camera);
   const extension = new FloorLibraryOfficeExtension();
   extension.start(scene);
   extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }])]));
-  const after = countDrawCalls(scene, new THREE.PerspectiveCamera());
+  const after = countDrawCalls(scene, camera);
   assert.equal(after.total, before.total);
 });

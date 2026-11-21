@@ -619,10 +619,16 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
     .map(jiraTicket).filter((ticket): ticket is NonNullable<ReturnType<typeof jiraTicket>> => ticket !== undefined);
   const libraries = parts.flatMap((part) => part.libraries ?? []).slice(0, 4).map((library) => ({
     id: publicId(`library:${library.key}`),
+    // Section names and entry titles come straight from a repo's own committed markdown
+    // (issue #119/#191): a title whose own visible link text happens to read as a filesystem
+    // path (a careless `[/Users/alice/notes.md](link)`, the display text rather than the link
+    // itself, which never reaches here) still must not cross this boundary raw (S4) — redacted
+    // the same way free text already is for a tombstone's own story (`redactPaths`, above),
+    // before the display cap, so truncation cannot cut a path in half and leave a fragment.
     sections: (library.sections ?? []).slice(0, 8).map((section) => ({
-      name: displayText(section.name, 32),
+      name: displayText(redactPaths(section.name), 32),
       entries: (section.entries ?? []).slice(0, 6)
-        .map((entry) => ({ title: displayText(entry.title, 80), ...(entry.archived === true ? { archived: true as const } : {}) }))
+        .map((entry) => ({ title: displayText(redactPaths(entry.title), 80), ...(entry.archived === true ? { archived: true as const } : {}) }))
         .filter((entry) => entry.title.length > 0),
       ...(section.truncated === true ? { truncated: true as const } : {}),
     })).filter((section) => section.name.length > 0 && section.entries.length > 0),

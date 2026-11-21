@@ -34,13 +34,27 @@ export interface Bibliotheque {
   sections: LibrarySection[];
 }
 
-/** A regular file under the byte cap, or undefined on any read failure (missing, too big, not
- * a plain file). Never throws: a malformed or oversized index is the same as no library. */
-function readCapped(file: string): string | undefined {
+/** True when `real` is `root` itself or genuinely inside it (never a `..`-escaped sibling).
+ * Duplicated from `plugins/missions/sessionStoryReader.ts`'s own `withinRoot` — the same small
+ * boundary check, not cross-imported between sibling plugins. */
+function withinRoot(real: string, root: string): boolean {
+  const relative = path.relative(root, real);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+/** A regular file under the byte cap, inside `allowedRoot` once every symlink resolves, or
+ * undefined on any read failure (missing, too big, not a plain file, or a symlinked section
+ * directory that resolves outside the bibliothèque root — review: checking only the leaf
+ * file's own `lstat` let a symlinked *directory* earlier in the path redirect the read anywhere
+ * on disk, the same escape `findStoryFile` already guards against for a session record). Never
+ * throws: a malformed, oversized or escaping index is the same as no library. */
+function readCapped(file: string, allowedRoot: string): string | undefined {
   try {
-    const stat = fs.lstatSync(file);
+    const real = fs.realpathSync(file);
+    if (!withinRoot(real, allowedRoot)) return undefined;
+    const stat = fs.lstatSync(real);
     if (!stat.isFile() || stat.size > MAX_INDEX_BYTES) return undefined;
-    return fs.readFileSync(file, 'utf-8');
+    return fs.readFileSync(real, 'utf-8');
   } catch {
     return undefined;
   }
@@ -98,11 +112,17 @@ export function parseSectionEntries(sectionIndexMarkdown: string): { entries: Li
  */
 export function readBibliotheque(root: string): Bibliotheque | undefined {
   const base = path.join(root, BIBLIOTHEQUE_RELATIVE);
-  const topIndex = readCapped(path.join(base, 'INDEX.md'));
+  let realBase: string;
+  try {
+    realBase = fs.realpathSync(base);
+  } catch {
+    return undefined;
+  }
+  const topIndex = readCapped(path.join(base, 'INDEX.md'), realBase);
   if (topIndex === undefined) return undefined;
   const sections: LibrarySection[] = [];
   for (const segment of topLevelSections(topIndex).slice(0, MAX_SECTIONS)) {
-    const sectionIndex = readCapped(path.join(base, segment, 'INDEX.md'));
+    const sectionIndex = readCapped(path.join(base, segment, 'INDEX.md'), realBase);
     if (sectionIndex === undefined) continue;
     const { entries, truncated } = parseSectionEntries(sectionIndex);
     if (entries.length === 0) continue;
