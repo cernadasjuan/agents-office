@@ -40,24 +40,40 @@ const { FigureBatch } = await import('../src/characters/FigureBatch.js');
  * (desks, debug stations), and keeps 40 agents live, the same worst-case shape
  * `tests/real-size-office.ts`'s fixture already uses at 9 rooms.
  *
- * Test-honesty review (#244): the PR #204 version measured through a `PerspectiveCamera` with
- * a far plane (100-150) much shorter than the real wing's depth at 42 rooms (`missionSlot`
- * grows one `WAR_ROOM_WIDTH`, 18, per row, 21 rows at 42 rooms — the farthest row sits about
- * 373-391 world units out). That camera silently culled almost the entire wing out of the
- * count, so both assertions below were really only measuring the handful of rooms nearest the
- * corridor entrance. `renderedDrawCalls` now calls `countDrawCalls(scene)` with no camera at
- * all — "without a camera nothing is culled, so the count is the worst case"
+ * Test-honesty review (#244, two parts): the PR #204 version measured through a
+ * `PerspectiveCamera` with a far plane (100-150) much shorter than the real wing's depth at 42
+ * rooms (`missionSlot` grows one `WAR_ROOM_WIDTH`, 18, per row, 21 rows at 42 rooms — the
+ * farthest row sits about 373-391 world units out). That camera silently culled almost the
+ * entire wing out of the count, so both assertions below were really only measuring the handful
+ * of rooms nearest the corridor entrance. `renderedDrawCalls` now calls `countDrawCalls(scene)`
+ * with no camera at all — "without a camera nothing is culled, so the count is the worst case"
  * (`RenderBudget.ts`'s own doc comment), the same convention `render-budget.test.ts`'s pinned
- * assertions already use. The honest numbers are worse than the old ones reported: see #244.
+ * assertions already use.
+ *
+ * With the camera fixed, the honest number (478 draw calls at 42 rooms) exceeded the 430
+ * budget — a real, previously-hidden regression (reported, not hidden behind a cap raise: see
+ * #244's own history). Root cause: each war room's 4 canvas wall boards (statement, docs,
+ * issues, kanban; `missionRooms.ts`'s `canvasBoard`) use a `MeshBasicMaterial`, which
+ * `StaticBatch` never merges (its own doc comment: "canvas boards" are explicitly excluded) —
+ * 4 draw calls per room, forever, the one real per-room growth cost the corridor fix's own
+ * static-merge zones could not absorb. Fixed in `missionRooms.ts`: statement, docs and kanban
+ * (none of the three individually clickable) now share one canvas, one texture and one merged
+ * mesh (`combinedBoard`) — 1 draw call for the three instead of 3. `issues` stays its own plain
+ * `canvasBoard`: it is the one pick target among the four, and pick resolution is by object
+ * identity (`Selection.ts`), so merging a clickable board in would make a click on any of the
+ * others wrongly resolve to it too. Per-room board cost: 4 draw calls -> 2.
  */
 const WAR_ROOM_COUNT = 42;
 const AGENT_COUNT = 40;
 // Honest growth (9 -> 42 populated war rooms, each at its tombstone cap and furniture peak, 40
-// agents live, no culling): 132 draw calls for 33 more rooms (#244) — the old, culled camera
-// measured 14 and missed nearly the whole wing. 145 is that plus a small, fixed margin, the
-// same "measured rate plus headroom, not padding chosen to dodge a failure" rule the original
-// bound used, just honest about what "measured" actually means now.
-const MEASURED_GROWTH_BOUND = 145;
+// agents live, no culling), before and after the #244 board-merge fix:
+// - Before (camera-culling bug fixed, boards still unmerged): 132 draw calls for 33 more rooms
+//   (4 per room — the old, culled camera measured only 14 and missed nearly the whole wing).
+// - After (boards merged, statement+docs+kanban -> 1 mesh): 66 draw calls for 33 more rooms (2
+//   per room). 145 was the honest-but-unmerged bound; 80 (66 plus a small, fixed margin) is the
+//   honest bound now — same "measured rate plus headroom, not padding chosen to dodge a
+//   failure" rule the original bound used.
+const MEASURED_GROWTH_BOUND = 80;
 
 function worldRoom(index: number) {
   return {
@@ -112,17 +128,16 @@ function renderedDrawCalls(scene: THREE.Scene, manager: InstanceType<typeof Agen
   return countDrawCalls(scene).total;
 }
 
-// Test-honesty review (#244): with the camera-culling bug fixed, 42 populated war rooms
-// measures 478 draw calls — over the 430 budget. This is a real, previously-hidden regression,
-// not a test artifact, and it is NOT this fixture's job to paper over: the fix is real-world
-// optimization work (likely merging each room's 4 canvas wall boards into the static batch,
-// see #244), not raising `DRAW_CALL_BUDGET`. Reporting the honest number and leaving this
-// assertion failing, tracked at #244, rather than hiding it behind a camera bug again.
+// Test-honesty review (#244): with the camera-culling bug fixed, 42 populated war rooms first
+// measured 478 draw calls — over the 430 budget, a real, previously-hidden regression, not a
+// test artifact. Fixed at the root (merging each war room's statement/docs/kanban boards into
+// one mesh, `missionRooms.ts`'s `combinedBoard`), not by raising `DRAW_CALL_BUDGET` or
+// reintroducing a culling camera. Honest number now: 394.
 test('issue #123: a populated 42-war-room mission wing stays under the draw-call budget', () => {
   const { scene, manager } = buildPopulatedScene(WAR_ROOM_COUNT);
   const total = renderedDrawCalls(scene, manager);
   console.log(`42 populated war rooms (no culling, the honest worst case): ${total} draw calls`);
-  assert.ok(total < DRAW_CALL_BUDGET, `42 populated war rooms (${total}) exceeds the budget (${DRAW_CALL_BUDGET}) — see #244, not a test bug`);
+  assert.ok(total < DRAW_CALL_BUDGET, `42 populated war rooms (${total}) exceeds the budget (${DRAW_CALL_BUDGET}) — see #244`);
 });
 
 test('issue #123: growing a populated mission wing from 9 to 42 war rooms adds only a handful of draw calls, not one per room', () => {
@@ -134,11 +149,12 @@ test('issue #123: growing a populated mission wing from 9 to 42 war rooms adds o
   console.log(`9 populated rooms: ${smallTotal} draw calls, 42 populated rooms: ${largeTotal} draw calls, growth ${growth} for 33 more rooms`);
   // The floor, walls, ceiling, corridor and furniture merge into the shared static zones a
   // single war room already used (StaticMerge): growing the wing costs nothing there. Each
-  // room's 4 canvas wall boards (statement/docs/issues/kanban, `MeshBasicMaterial`, not a toon
-  // material) are the one real per-room draw-call cost StaticMerge cannot absorb. Review of
-  // the first version (PR #204): its bound (60) had slack baked in that did not match its own
-  // measured rate. This bound is the measured growth plus a small, fixed margin, so a
-  // regression (every room's boards suddenly all drawing, or a new un-merged piece per room)
-  // fails this test instead of hiding inside a loose number.
+  // room's 2 remaining canvas meshes (`MeshBasicMaterial`, not a toon material: the merged
+  // statement/docs/kanban mesh, and the issues board kept separate for its own pick target) are
+  // the one real per-room draw-call cost StaticMerge cannot absorb (#244: down from 4 before the
+  // board merge). Review of the first version (PR #204): its bound (60) had slack baked in that
+  // did not match its own measured rate. This bound is the measured growth plus a small, fixed
+  // margin, so a regression (a board merge undone, or a new un-merged piece per room) fails this
+  // test instead of hiding inside a loose number.
   assert.ok(growth <= MEASURED_GROWTH_BOUND, `expected growth near the measured rate, got ${growth} for 33 more rooms (bound ${MEASURED_GROWTH_BOUND})`);
 });

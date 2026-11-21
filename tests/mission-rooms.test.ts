@@ -314,20 +314,51 @@ test('issue #123 review: every mesh of a built war room stays inside its own roo
 // so once the corridor fix put war room doors on the east/west wall, the board floated meters
 // off the side wall it is meant to sit flush against, instead of touching it. ---
 
+/**
+ * Issue #244: statement, docs and kanban now share one merged mesh (`combinedBoard`), each at
+ * its own `geometry.groups` entry, in the order they were passed in (statement, docs, kanban —
+ * `buildMissionRoom`'s own call) — `mergeGeometries(geometries, true)`'s own documented
+ * behavior, one group per input geometry. Recovers one board's own world-space footprint from
+ * the merged index/position buffers, rather than assuming a fixed vertex count per plane.
+ */
+function combinedBoardWorldCenter(mesh: THREE.Mesh, groupIndex: number): THREE.Vector3 {
+  const geometry = mesh.geometry;
+  const group = geometry.groups[groupIndex];
+  if (!group) throw new Error(`no geometry group ${groupIndex} on the combined board mesh`);
+  const index = geometry.index;
+  if (!index) throw new Error('the combined board mesh has no index buffer');
+  const position = geometry.attributes.position;
+  const box = new THREE.Box3();
+  const vertex = new THREE.Vector3();
+  for (let i = group.start; i < group.start + group.count; i++) {
+    vertex.fromBufferAttribute(position, index.getX(i));
+    box.expandByPoint(vertex);
+  }
+  mesh.updateMatrixWorld(true);
+  box.min.applyMatrix4(mesh.matrixWorld);
+  box.max.applyMatrix4(mesh.matrixWorld);
+  return box.getCenter(new THREE.Vector3());
+}
+
 test('issue #123 review round 2: the kanban board sits flush against a side wall, in both wing columns', () => {
   for (const index of [0, 1]) {
     const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index);
     missionRoom.group.updateMatrixWorld(true);
     const { rect, door } = missionRoom.slot;
     assert.ok(door.side === 'east' || door.side === 'west', `expected an east/west door, got ${door.side}`);
-    let kanban: THREE.Mesh | undefined;
+    let combinedBoardMesh: THREE.Mesh | undefined;
     missionRoom.group.traverse((object) => {
       const mesh = object as THREE.Mesh;
-      const geometry = mesh.geometry as THREE.PlaneGeometry | undefined;
-      if (mesh.isMesh && geometry?.parameters?.width === 3.6 && geometry?.parameters?.height === 1.8) kanban = mesh;
+      // `mesh.geometry.groups.length === 3` alone is not unique: a plain `CylinderGeometry`
+      // (chair poles, desk legs, plant pots) always carries 3 built-in groups (top, bottom,
+      // side) of its own. The combined board mesh is the only `MeshBasicMaterial` with a
+      // canvas-texture map in this room — everything else here is a toon material.
+      const material = mesh.material as THREE.MeshBasicMaterial | undefined;
+      if (mesh.isMesh && (mesh.geometry.groups?.length ?? 0) === 3 && material?.isMeshBasicMaterial && material.map) combinedBoardMesh = mesh;
     });
-    if (!kanban) throw new Error(`room ${index}: kanban board mesh not found`);
-    const position = kanban.getWorldPosition(new THREE.Vector3());
+    if (!combinedBoardMesh) throw new Error(`room ${index}: combined board mesh (statement/docs/kanban) not found`);
+    // `buildMissionRoom` passes statement, docs, kanban to `combinedBoard` in that order (group 2 = kanban).
+    const position = combinedBoardWorldCenter(combinedBoardMesh, 2);
     // A side wall runs the room's full depth at the rect's own z-extremes (the door wall's
     // east/west rows run along z); flush against one of them means within wall thickness of
     // minZ or maxZ, never floating meters toward the room's own z-center.
