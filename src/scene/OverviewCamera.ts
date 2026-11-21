@@ -6,13 +6,6 @@ export interface CameraPose {
   lookAt: THREE.Vector3;
 }
 
-let explicitBounds: THREE.Box3 | null = null;
-
-/** Let a layout say what the isometric view must show. Null goes back to the floor objects. */
-export function setOverviewBounds(box: THREE.Box3 | null): void {
-  explicitBounds = box ? box.clone() : null;
-}
-
 /** The union of all objects marked `userData.floor`, or null when there are none. */
 export function floorBounds(scene: THREE.Object3D): THREE.Box3 | null {
   scene.updateMatrixWorld(true);
@@ -46,9 +39,9 @@ const ROOM_BOUNDS = new THREE.Box3(
   new THREE.Vector3(OFFICE.halfX, 0, OFFICE.halfZ),
 );
 
-/** What the isometric view frames: explicit bounds, then the floor objects, then the fixed room. */
+/** What the isometric view frames: the floor objects, or the fixed room when there are none. */
 export function overviewBounds(scene: THREE.Object3D): THREE.Box3 {
-  return (explicitBounds ?? floorBounds(scene) ?? ROOM_BOUNDS).clone();
+  return (floorBounds(scene) ?? ROOM_BOUNDS).clone();
 }
 
 export function easeInOutCubic(t: number): number {
