@@ -30,6 +30,19 @@ mkdir -p "$dest_dir"
 rm -rf "$app_path"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 
+# Issue #205: a procedurally generated icon (scripts/launcher/icon.svg, packed into
+# scripts/launcher/AgentsOffice.icns by scripts/launcher/generate-icon.mjs — a maintenance
+# tool, not run here). Graceful degradation: a checkout missing the .icns (should not happen,
+# it is committed) still builds the app, just without an icon, same as before this issue.
+icon_src="$script_dir/launcher/AgentsOffice.icns"
+icon_plist_entry=""
+if [ -f "$icon_src" ]; then
+  cp "$icon_src" "$app_path/Contents/Resources/AgentsOffice.icns"
+  icon_plist_entry="  <key>CFBundleIconFile</key>
+  <string>AgentsOffice</string>
+"
+fi
+
 cat > "$app_path/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -49,7 +62,7 @@ cat > "$app_path/Contents/Info.plist" <<PLIST
   <string>APPL</string>
   <key>CFBundleExecutable</key>
   <string>agents-office-launcher</string>
-  <key>LSUIElement</key>
+${icon_plist_entry}  <key>LSUIElement</key>
   <true/>
   <key>LSMinimumSystemVersion</key>
   <string>11.0</string>
