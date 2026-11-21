@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
+import * as THREE from 'three';
 
 // missionRooms.ts pulls in furniture factories that paint toon gradients on a canvas at import time.
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
@@ -51,25 +52,59 @@ test('issue #193 review: no rented room, war room or the hall overlaps any other
   assert.deepEqual(failures, []);
 });
 
-// --- A door gap must clear the hall's own whiteboards (Office.ts: wb1 at x=-5, wb2 at x=5,
-// both z=-12, each ~2.1 wide, so a footprint of roughly x in [-6.05,-3.95] and [3.95,6.05]) ---
+// --- A door gap must clear the hall's own floor fixtures close enough to a first-ring door to
+// sit in its entrance lane: the two whiteboards, and the small corner plants near the back
+// wall (the tall plants, the clock, the wall art and the meeting rug all sit too far from the
+// hall's own z=-13 wall, or are wall-mounted, to matter here). Review of #196 round 2: the
+// first fix moved column 0's door to x=-13.5, straight onto the small corner plant at
+// (-13.5, -11.5) (`Decorations.ts`'s `smallPlantPositions`) — a regression this file's first
+// version, checking only a hardcoded whiteboard footprint, missed. Fixed by moving that one
+// plant out of the lane (`Decorations.ts`). This check reads the real `createWhiteboard` and
+// `createDecorations` meshes and their actual positions (`Office.ts`, `Decorations.ts`)
+// through `THREE.Box3`, not a hand-typed guess, so neither fixture's footprint can drift from
+// what the scene actually builds. ---
 
-const HALL_WHITEBOARDS = [
-  { minX: -6.05, maxX: -3.95 },
-  { minX: 3.95, maxX: 6.05 },
+const { createWhiteboard } = await import('../src/furniture/Whiteboard.js');
+const { createDecorations } = await import('../src/furniture/Decorations.js');
+
+/** The real x-footprint of a built, positioned object, from its own geometry. */
+function footprintX(object: THREE.Object3D): { minX: number; maxX: number } {
+  const box = new THREE.Box3().setFromObject(object);
+  return { minX: box.min.x, maxX: box.max.x };
+}
+
+// Office.ts positions: wb1 at (-5, 0, -12), wb2 at (5, 0, -12).
+const wb1 = createWhiteboard();
+wb1.position.set(-5, 0, -12);
+const wb2 = createWhiteboard();
+wb2.position.set(5, 0, -12);
+
+// Every decoration close enough to the hall's own back wall (z = -13) to sit in a first-ring
+// door's entrance lane; a piece further into the room, or mounted on a wall, never matters here.
+const DOOR_LANE_MAX_Z = -9;
+const decorations = createDecorations();
+const nearWallDecorations = decorations.children.filter((child) => child.position.y < 0.5 && child.position.z < DOOR_LANE_MAX_Z);
+
+const HALL_FLOOR_FIXTURES = [
+  { ...footprintX(wb1), label: 'whiteboard wb1' },
+  { ...footprintX(wb2), label: 'whiteboard wb2' },
+  ...nearWallDecorations.map((child, i) => ({ ...footprintX(child), label: `near-wall decoration ${i} (x=${child.position.x}, z=${child.position.z})` })),
 ];
 const DOOR_HALF_WIDTH = 1.2; // DOOR_WIDTH / 2, from RoomPlanner.ts
 
-test('issue #193 review: every first-ring war room door gap clears the hall whiteboards', () => {
+test('issue #193 review: every first-ring war room door gap clears the hall whiteboards and floor decorations', () => {
+  // Sanity: this building does have near-wall decorations to check against (else the test
+  // would pass even if `createDecorations` were gutted, the exact blind spot this replaces).
+  assert.ok(nearWallDecorations.length > 0, 'expected at least one near-wall hall decoration to check door gaps against');
   const failures: string[] = [];
   for (let i = 0; i < 4; i++) { // first ring: war rooms 0-3, the only ones whose door sits on the hall wall
     const slot = missionSlot(i);
     if (slot.ring !== 0) continue;
     const gapMin = slot.door.at - DOOR_HALF_WIDTH;
     const gapMax = slot.door.at + DOOR_HALF_WIDTH;
-    for (const board of HALL_WHITEBOARDS) {
-      const overlaps = gapMin < board.maxX && board.minX < gapMax;
-      if (overlaps) failures.push(`war room ${i} door gap [${gapMin}, ${gapMax}] crosses whiteboard [${board.minX}, ${board.maxX}]`);
+    for (const fixture of HALL_FLOOR_FIXTURES) {
+      const overlaps = gapMin < fixture.maxX && fixture.minX < gapMax;
+      if (overlaps) failures.push(`war room ${i} door gap [${gapMin}, ${gapMax}] crosses ${fixture.label} [${fixture.minX}, ${fixture.maxX}]`);
     }
     // The door gap must also land on the hall's own wall, not past its edge
     assert.ok(gapMin >= HALL.minX && gapMax <= HALL.maxX, `war room ${i} door gap [${gapMin}, ${gapMax}] exceeds the hall's own wall (${HALL.minX}..${HALL.maxX})`);
