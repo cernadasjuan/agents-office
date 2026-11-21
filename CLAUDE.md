@@ -47,6 +47,17 @@ same bytes for any `repo_root`) reads it back with `cat` into a quoted variable 
 generated script also resolves an nvm default alias (one level of indirection, then the
 highest installed version by `sort -V`) before falling back to the first match.
 
+The app icon (issue #205): `scripts/launcher/icon.svg` (a procedurally drawn office/building
+motif, plain shapes in the app's own palette, no downloaded brand assets) is packed once into
+`scripts/launcher/AgentsOffice.icns` by the maintenance tool `scripts/launcher/generate-icon.mjs`
+(Playwright screenshots the SVG at every size `iconutil`'s `.iconset` format wants, then
+`iconutil -c icns` packs them; needs the `playwright` dev dependency and its Chromium
+download — not a new runtime dependency, and never invoked by an install). Both the `.svg` and
+the generated `.icns` are committed; `build-launcher-app.sh` only `cp`s the committed `.icns`
+into `Contents/Resources/` and adds `CFBundleIconFile` to `Info.plist` when it finds the file —
+a checkout missing it (should not happen) still builds the app, just without an icon
+(graceful degradation, `tests/launcher-build.test.ts`).
+
 ## Architecture
 
 3D office visualization (Three.js + Vite) that shows running Claude Code agents as animated stick figures. Each agent's activity is detected from real session data and mapped to a physical station in the office.
@@ -256,7 +267,9 @@ Three modes, owned by `src/scene/ViewController.ts` (#173 dropped the overview m
 
 ### Selection
 
-`src/scene/Selection.ts` holds the shared selection: `selectAgent(id)`, `clearSelection()`, `selectedAgentId()`, `onSelectionChange(cb)` (returns an unsubscribe function). Extensions and other UI (for example a triage list) use it. A click on a figure (raycast against the figure meshes) or on an agent name in the side panel selects; Esc clears, and so does a click that misses every figure (issue #133; a drag release is not that click, and a click while the first-person camera is locked looks around instead); an agent that leaves is deselected. On a new selection the camera flies to the agent in 0.6 s and `SelectionMarker.ts` draws a ring in the agent's color under it. `#select=<agent id>` (`#focus=`, its older name, still works) selects that agent once it appears. `selectAgent` is a same-id no-op (`SelectionState.select`): clicking an already-selected row does nothing, by design. `selectOrFly(id)` is the one exception: it calls `SelectionState.reselect()` (re-notifies listeners with the current id, unchanged) when `id` is already selected, so `ViewController.selectionChanged` runs again and the camera flies there anyway. The off-screen marker and the top-count chip use `selectOrFly`, since a click there means "take me to this agent" even if it is already the one selected; every other caller keeps plain `selectAgent`.
+`src/scene/Selection.ts` holds the shared selection: `selectAgent(id)`, `clearSelection()`, `selectedAgentId()`, `onSelectionChange(cb)` (returns an unsubscribe function). Extensions and other UI (for example a triage list) use it. A click on a figure (raycast against the figure meshes) or on an agent name in the side panel selects; Esc clears, and so does a click that misses every figure (issue #133; a drag release is not that click); an agent that leaves is deselected. On a new selection the camera flies to the agent in 0.6 s and `SelectionMarker.ts` draws a ring in the agent's color under it. `#select=<agent id>` (`#focus=`, its older name, still works) selects that agent once it appears. `selectAgent` is a same-id no-op (`SelectionState.select`): clicking an already-selected row does nothing, by design. `selectOrFly(id)` is the one exception: it calls `SelectionState.reselect()` (re-notifies listeners with the current id, unchanged) when `id` is already selected, so `ViewController.selectionChanged` runs again and the camera flies there anyway. The off-screen marker and the top-count chip use `selectOrFly`, since a click there means "take me to this agent" even if it is already the one selected; every other caller keeps plain `selectAgent`.
+
+**A locked click selects under the center dot, not the cursor (issue #205).** First person's own click listener (below, `ViewController.listen`) used to treat a click while the pointer is locked as "look around" only (issue #133). It still does that, but a left click now also picks: since the OS-hidden cursor sits pinned to the canvas center under lock, `pickAtCenter()` reads the same raycast `pickAt` does, from the canvas's own center point instead of the click's screen position — the dot and the pick are always the same spot. A hit selects (never leaves pointer lock, never presses Esc); a miss is the old behavior exactly, it only looks around, it never clears the open card (deliberate: looking past an already-selected agent to aim a run is the common case, not "drop its card"). Gated to `currentMode === 'first-person'`, the only mode `setPointerLockFilter`'s own gate ever lets the lock engage in. The dot itself (`#crosshair-dot` in `index.html`, the `crosshair` option on `ViewControllerOptions`) is a CSS `display` toggle driven by one method, `ViewController.updateCrosshair()`: shown only while the mode is first person AND `canvas.ownerDocument.pointerLockElement === canvas`, called after every mode change (`setMode`) and from a `pointerlockchange` listener (the lock engaging or releasing, including `setMode`'s own force-exit entering isometric or desk). Without the `crosshair` option at all, nothing is drawn — graceful degradation, the same rule `hint` already follows.
 
 ### Agent card (src/ui/AgentCard.ts)
 

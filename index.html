@@ -336,6 +336,24 @@
       z-index: 200;
       pointer-events: none;
     }
+    /* Crosshair dot (issue #205): the pick point for a locked click in first person. Hidden by
+       default; `ViewController.updateCrosshair` shows it only in first person while the
+       pointer is locked, through this one display toggle — never a second element, never CSS
+       driving it on its own. */
+    #crosshair-dot {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      width: 6px;
+      height: 6px;
+      margin: -3px 0 0 -3px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+      pointer-events: none;
+      z-index: 60;
+    }
     /* Off-screen marker: an arrow at the screen edge pointing at a fresh wait outside the frame (#86). */
     #offscreen-markers {
       position: fixed;
@@ -396,6 +414,7 @@
 </head>
 <body>
   <div id="pointer-hint">Click to look around &mdash; WASD to move &mdash; Space/Q up/down &mdash; Shift = fast &mdash; ESC to release &mdash; Click a figure to select &mdash; O = overview &mdash; Shift+L = layout</div>
+  <div id="crosshair-dot"></div>
   <div id="offscreen-markers"></div>
   <div id="ui-panel">
     <div class="panel-header">
