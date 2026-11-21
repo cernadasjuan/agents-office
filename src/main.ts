@@ -101,6 +101,9 @@ const view = new ViewController({
     if (viewStatus) viewStatus.textContent = viewStatusText(layoutName(layoutId), mode);
     // Issue #162: leaving desk mode walks a talker back to its queue spot, same as deselecting it.
     agentManager.setDeskTalker(mode === 'desk' ? selectedAgentId() : null);
+    // Issue #243: the desk-view camera sits close enough to the user's own chair that it
+    // otherwise fills the bottom of the frame; hidden only while actually sitting at the desk.
+    layout.setDeskChairVisible?.(mode !== 'desk');
   },
   figureShiftPx: () => agentCard.cameraShiftPx(),
 });

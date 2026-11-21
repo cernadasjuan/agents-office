@@ -174,13 +174,20 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // slot, since its only two non-suppressed occurrences both landed on the `tool`-wins side
   // of an `i % 2` split; it now alternates per full lap of `SKILL_SEQUENCES` instead, so
   // every mapped kind actually gets built at least once before this baseline is pinned).
-  // Pinned here at 427, 424 plus 3: real headroom above the number this fixture actually and
+  // Issue #244 (test-honesty review, mission-corridor-render-budget.test.ts's own fixture
+  // found the real regression this one's culled nowhere-near-worst-case counterpart had
+  // missed) removes 18 from the 424 baseline: each of this fixture's 9 war rooms' statement,
+  // docs and kanban boards (previously 3 separate `MeshBasicMaterial` canvas meshes,
+  // `StaticBatch` never merges that material kind) now share one mesh (`missionRooms.ts`'s
+  // `combinedBoard`), 2 per room instead of 3 — the `issues` board stays its own mesh, the one
+  // pick target among the four — landing it at 406.
+  // Pinned here at 409, 406 plus 3: real headroom above the number this fixture actually and
   // repeatably measures, not a number nobody reproduces. Each PR gets a deliberate, reviewed
-  // addition against the 424 baseline before it must recover headroom elsewhere, not just
+  // addition against the 406 baseline before it must recover headroom elsewhere, not just
   // add to the margin left by the last one. 3 points of headroom remain against the 430 cap
   // — the next addition should still trim an existing item kind before asking for more
   // budget (Gabriel: raise the cap only after measuring his own laptop).
-  assert.ok(after.total <= 427, `worst case ${after.total} exceeds the pinned baseline (424) + 3`);
+  assert.ok(after.total <= 409, `worst case ${after.total} exceeds the pinned baseline (406) + 3`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -208,11 +215,13 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // adds its own 6 buckets on top of that (406), then the full skills equipment catalog
   // (issue #167: v1, the tool crib, and the raw-tool review round together) adds the rest —
   // re-measured with everything in, not a hand-picked sum, landing it at 424 (not the
-  // first-pass undercount of 423: see the baseline comment above). Still exactly one value
-  // across all 8 runs — the fixture's own seeded names (`tests/real-size-office.ts`) never
-  // change which hair style, face state or equipped item an agent lands on between runs, and
-  // the tool crib is one fixed static piece.
-  assert.deepEqual([...totals], [424], `expected every one of 8 runs to measure 424, got ${[...totals]}`);
+  // first-pass undercount of 423: see the baseline comment above). Issue #244 then removes 18
+  // (this fixture's 9 war rooms' statement/docs/kanban boards merged into one mesh each, 2
+  // canvas draw calls per room instead of 3; see the baseline comment above), landing it at
+  // 406. Still exactly one value across all 8 runs — the fixture's own seeded names
+  // (`tests/real-size-office.ts`) never change which hair style, face state or equipped item
+  // an agent lands on between runs, and the tool crib is one fixed static piece.
+  assert.deepEqual([...totals], [406], `expected every one of 8 runs to measure 406, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

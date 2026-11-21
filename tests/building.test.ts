@@ -848,6 +848,40 @@ test('deskView sits inside the office, behind the desk, looking back toward the 
   assert.ok(view.lookAt.x < view.position.x, 'looks toward the door side of the room, where the queue stands');
 });
 
+// --- setDeskChairVisible (issue #243): the desk-view camera sits close enough to the user's
+// own chair that it otherwise fills the bottom of the frame ---
+
+function officeChair(scene: THREE.Scene): THREE.Object3D {
+  const office = scene.getObjectByName('room-0-office');
+  const chair = office?.getObjectByName('desk-chair');
+  if (!chair) throw new Error('no desk-chair found under room-0-office');
+  return chair;
+}
+
+test('setDeskChairVisible(false) hides the office chair, setDeskChairVisible(true) shows it again', () => {
+  const { layout, scene } = setup();
+  const chair = officeChair(scene);
+  assert.equal(chair.visible, true, 'visible by default, the old behavior (isometric and first person)');
+
+  layout.setDeskChairVisible(false);
+  assert.equal(chair.visible, false);
+
+  layout.setDeskChairVisible(true);
+  assert.equal(chair.visible, true);
+});
+
+test('setDeskChairVisible never touches any other desk (a war room desk, for example) — only the office\'s own chair', () => {
+  const { layout, scene } = setup();
+  layout.syncWorldRooms([{ id: 'm0', kind: 'mission', title: 'Media Plan', state: 'open', walls: {} }]);
+  layout.setDeskChairVisible(false);
+  const missionRoom = scene.children.find((child) => /^mission-room-\d+$/.test(child.name));
+  assert.ok(missionRoom, 'a mission (war room) is in the scene');
+  let missionChairs = 0;
+  missionRoom!.traverse((object) => { if (object.name === 'desk-chair') missionChairs++; });
+  assert.ok(missionChairs > 0, 'a war room desk has its own chair(s) too');
+  missionRoom!.traverse((object) => { if (object.name === 'desk-chair') assert.equal(object.visible, true, 'a war room chair is never hidden by the office-only toggle'); });
+});
+
 // --- deskTalkSpot and isQueued (issue #162) ---
 
 test('deskTalkSpot sits between the desk and the queue, standing, facing the desk camera', () => {

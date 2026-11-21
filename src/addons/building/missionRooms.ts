@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { PIECES } from '../../furniture/index.js';
 import { getToonMaterial } from '../../utils/Materials.js';
@@ -98,6 +99,17 @@ export const MAX_TOMBSTONES = 12;
 const TABLE_SEATS = 8;
 const STANDING_SPOTS = 12;
 
+/** The one board-drawing recipe (title line, then up to as many lines as the height fits), at a given pixel offset within whatever canvas owns it — `canvasBoard`'s own canvas, or one region of `combinedBoard`'s shared one. */
+function drawBoardContent(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, title: string, lines: string[]): void {
+  ctx.fillStyle = '#f7f3ea';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#2a2a3e';
+  ctx.font = 'bold 30px system-ui, sans-serif';
+  ctx.fillText(title.slice(0, 34), x + 18, y + 42);
+  ctx.font = '22px system-ui, sans-serif';
+  lines.slice(0, Math.floor((h - 70) / 28)).forEach((line, i) => ctx.fillText(line.slice(0, 44), x + 18, y + 82 + i * 28));
+}
+
 export function canvasBoard(width: number, height: number): { mesh: THREE.Mesh; draw: (title: string, lines: string[]) => void } {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
@@ -107,13 +119,85 @@ export function canvasBoard(width: number, height: number): { mesh: THREE.Mesh; 
   const draw = (title: string, lines: string[]) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.fillStyle = '#f7f3ea';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#2a2a3e';
-    ctx.font = 'bold 30px system-ui, sans-serif';
-    ctx.fillText(title.slice(0, 34), 18, 42);
-    ctx.font = '22px system-ui, sans-serif';
-    lines.slice(0, Math.floor((canvas.height - 70) / 28)).forEach((line, i) => ctx.fillText(line.slice(0, 44), 18, 82 + i * 28));
+    drawBoardContent(ctx, 0, 0, canvas.width, canvas.height, title, lines);
+    texture.needsUpdate = true;
+  };
+  return { mesh, draw };
+}
+
+/**
+ * Several non-interactive wall boards sharing one canvas, one texture and one mesh (issue
+ * #244): `canvasBoard`'s `MeshBasicMaterial` never merges through `StaticBatch` ("canvas
+ * boards" are explicitly excluded, its own doc comment) — a war room with 4 of them cost 4
+ * draw calls forever, the one real per-room growth cost `StaticBatch` could not absorb at the
+ * 42-room scale issue #123 measures (#244's own honest re-measurement: 132 draw calls for 33
+ * more rooms, exactly 4 per room). Each spec's own `position`/`rotationY` (the same values a
+ * `mount()` call used to set on its own separate mesh) bake straight into its slice of the
+ * merged geometry, so the one resulting mesh needs no transform of its own. Shared, reusable
+ * room-furnishing code, not the mission corridor's own layout math (`missionSlot` etc.): the
+ * hex war rooms step 5 brings should call this the same way, with their own positions.
+ *
+ * Not for a board that needs its own pick target: pick resolution is by object identity
+ * (`Selection.ts`'s `pickAgent`), so a clickable board sharing an object with others here would
+ * make a click anywhere on any of them wrongly resolve to the clickable one too. `buildMissionRoom`
+ * keeps the issues board on its own plain `canvasBoard` for exactly this reason.
+ *
+ * Review fix: each spec gets `canvasBoard`'s own pixel sizing (a fixed 512 px width, height
+ * scaled to the spec's own aspect ratio), not one `PX_PER_UNIT` shared across every spec. A
+ * single shared density (the first version of this function) packs a narrower board (docs,
+ * 2.4 wide) into fewer pixels than its old dedicated canvas gave it — `drawBoardContent`'s line
+ * capacity is `Math.floor((h - 70) / 28)`, so the docs board silently dropped from 9 lines to 5,
+ * truncating any mission with 6-9 documents, not just drawing them smaller. Keeping each spec's
+ * own 512-px-wide density preserves its exact old line capacity and text size.
+ */
+export function combinedBoard(specs: ReadonlyArray<{ width: number; height: number; position: THREE.Vector3; rotationY: number }>): {
+  mesh: THREE.Mesh;
+  draw: (index: number, title: string, lines: string[]) => void;
+} {
+  const pixelSizes = specs.map((spec) => ({ w: 512, h: Math.round(512 * (spec.height / spec.width)) }));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(...pixelSizes.map((size) => size.w));
+  canvas.height = pixelSizes.reduce((sum, size) => sum + size.h, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  const geometries: THREE.BufferGeometry[] = [];
+  const regions: Array<{ x: number; y: number; w: number; h: number }> = [];
+  let yTop = 0;
+  for (let i = 0; i < specs.length; i++) {
+    const spec = specs[i];
+    const { w, h } = pixelSizes[i];
+    regions.push({ x: 0, y: yTop, w, h });
+    // Canvas 2D draws top-down (y=0 at the top); a `CanvasTexture`'s default `flipY` reads a
+    // texture bottom-up, so row 0 of the canvas is V=1, and row `canvas.height` is V=0 — the
+    // region's own top edge (closer to row 0) gets the higher V. Only V is ever subdivided
+    // here: every region keeps the canvas's full width (`PlaneGeometry`'s default U, 0 to the
+    // region's own fraction of the shared canvas width), so there is no horizontal slicing to
+    // get backwards the same way.
+    const vTop = 1 - yTop / canvas.height;
+    const vBottom = 1 - (yTop + h) / canvas.height;
+    const uRight = w / canvas.width;
+    const geometry = new THREE.PlaneGeometry(spec.width, spec.height);
+    const uv = geometry.attributes.uv;
+    for (let v = 0; v < uv.count; v++) {
+      uv.setXY(v, uv.getX(v) * uRight, vBottom + uv.getY(v) * (vTop - vBottom));
+    }
+    uv.needsUpdate = true;
+    geometry.rotateY(spec.rotationY);
+    geometry.translate(spec.position.x, spec.position.y, spec.position.z);
+    geometries.push(geometry);
+    yTop += h;
+  }
+  // `useGroups: true` (second arg) tags each input geometry's own vertex range as a group, in
+  // order — lets a test (or a later caller) recover one board's own world-space footprint from
+  // the merged geometry without assuming a fixed vertex count per plane. This costs nothing at
+  // render time: `RenderBudget.ts`'s own `callsOf` counts groups as separate draw calls only
+  // when `material` is an array; this mesh's material is one plain `MeshBasicMaterial`, never an array.
+  const merged = mergeGeometries(geometries, true) ?? new THREE.BufferGeometry();
+  const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ map: texture }));
+  const draw = (index: number, title: string, lines: string[]) => {
+    const ctx = canvas.getContext('2d');
+    const region = regions[index];
+    if (!ctx || !region) return;
+    drawBoardContent(ctx, region.x, region.y, region.w, region.h, title, lines);
     texture.needsUpdate = true;
   };
   return { mesh, draw };
@@ -215,26 +299,33 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
     stations.set(key(TABLE_SEATS + i), { type, position, lookAt: center.clone().setY(1.2), occupied: false, posture: 'standing' });
   }
 
-  // Wall boards: the statement on the far wall, docs and issues beside it, the kanban on a side wall
+  // Wall boards: the statement on the far wall, docs and issues beside it, the kanban on a side
+  // wall. Issue #244: statement, docs and kanban share one mesh (`combinedBoard`) — none of the
+  // three is individually clickable, so merging them costs nothing functionally and saves 2 of
+  // the 4 per-room draw calls a canvas board can never get back through `StaticBatch`. `issues`
+  // stays its own plain `canvasBoard`: it is the one pick target among the four
+  // (`issuesBoardPickTarget` below), and pick resolution is by object identity, so sharing its
+  // mesh with the other three would make a click anywhere on them wrongly resolve to it too.
+  const combined = combinedBoard([
+    { width: 3.6, height: 1.6, position: frame.point(0, ROOM_SIZE - 0.12, 1.7), rotationY: frame.faceDoor },
+    { width: 2.4, height: 1.6, position: frame.point(-3.6, ROOM_SIZE - 0.12, 1.7), rotationY: frame.faceDoor },
+    // Issue #123 review round 2: this used the rect's x-span unconditionally, left over from
+    // when the door wall always ran along x — once the corridor fix moved war room doors onto
+    // the east/west wall, the door-wall's real length became the rect's z-span instead, and the
+    // board floated 3+ meters off the side wall it is meant to sit flush against.
+    { width: 3.6, height: 1.8, position: frame.point(doorWallLength / 2 - 0.12, 6, 1.7), rotationY: frame.faceDoor - Math.PI / 2 },
+  ]);
+  group.add(combined.mesh);
+  const issuesCanvas = canvasBoard(2.4, 1.6);
+  issuesCanvas.mesh.position.copy(frame.point(3.6, ROOM_SIZE - 0.12, 1.7));
+  issuesCanvas.mesh.rotation.y = frame.faceDoor;
+  group.add(issuesCanvas.mesh);
   const boards = {
-    statement: canvasBoard(3.6, 1.6),
-    docs: canvasBoard(2.4, 1.6),
-    issues: canvasBoard(2.4, 1.6),
-    kanban: canvasBoard(3.6, 1.8),
+    statement: { draw: (title: string, lines: string[]) => combined.draw(0, title, lines) },
+    docs: { draw: (title: string, lines: string[]) => combined.draw(1, title, lines) },
+    issues: issuesCanvas,
+    kanban: { draw: (title: string, lines: string[]) => combined.draw(2, title, lines) },
   };
-  const mount = (mesh: THREE.Mesh, a: number, d: number, y: number, rotationY: number) => {
-    mesh.position.copy(frame.point(a, d, y));
-    mesh.rotation.y = rotationY;
-    group.add(mesh);
-  };
-  mount(boards.statement.mesh, 0, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
-  mount(boards.docs.mesh, -3.6, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
-  mount(boards.issues.mesh, 3.6, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
-  // Issue #123 review round 2: this used the rect's x-span unconditionally, left over from
-  // when the door wall always ran along x — once the corridor fix moved war room doors onto
-  // the east/west wall, the door-wall's real length became the rect's z-span instead, and the
-  // board floated 3+ meters off the side wall it is meant to sit flush against.
-  mount(boards.kanban.mesh, doorWallLength / 2 - 0.12, 6, 1.7, frame.faceDoor - Math.PI / 2);
 
   // Issue #124: the title and lock signs sit on the far wall, over the statement board, not
   // near the door frame (the narration: "they are in the door frames so it's kind of weird").
