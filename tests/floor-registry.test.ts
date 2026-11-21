@@ -88,6 +88,11 @@ test('floorStillKnown is false for a stored floor no agent currently resolves to
   assert.equal(floorStillKnown('projects/agents-office', [{ floor: 'gabriel-amyot/agents-office' }]), false);
 });
 
+test('floorStillKnown is true for any floor with zero agents observed anywhere (review: an empty poll is not evidence a floor is gone; a quiet morning must not bounce a perfectly good, simply idle floor back to All floors)', () => {
+  assert.equal(floorStillKnown('agents-office', []), true);
+  assert.equal(floorStillKnown('projects/agents-office', []), true);
+});
+
 // --- defaultFloor ---
 
 test('defaultFloor prefers #floor= in the URL over everything else, "all" included', () => {

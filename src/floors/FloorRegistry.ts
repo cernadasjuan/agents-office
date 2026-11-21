@@ -98,9 +98,17 @@ export function knownFloors(agents: ReadonlyArray<{ floor?: string }>): string[]
  * building goes empty with no error, not a graceful "nothing matched." `GENERAL_FLOOR` is
  * always known (`knownFloors` always includes it), so this is only ever false for a specific
  * renamed or otherwise vanished floor — never for the shared general floor.
+ *
+ * With zero agents observed anywhere (review: the common "nobody is coding right now" case —
+ * the first poll of the day, a quiet night, a page opened just to look around), this always
+ * answers true instead of judging the floor by an empty list. An empty poll carries no evidence
+ * a floor is gone; treating it as "unknown" would bounce a perfectly good, simply idle floor
+ * back to All floors on every quiet morning, discarding the remembered-floor feature for the
+ * ordinary case while only the rename case (something else is observed, never this floor)
+ * actually needs the bounce.
  */
 export function floorStillKnown(floor: string, agents: ReadonlyArray<{ floor?: string }>): boolean {
-  return knownFloors(agents).includes(floor);
+  return agents.length === 0 || knownFloors(agents).includes(floor);
 }
 
 /**
