@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import net from 'node:net';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import { isOfficeHtml, probeOffice } from '../scripts/launcher/detect.mjs';
 
 const OFFICE_HTML = '<!doctype html><html><head><title>Agents Office</title></head><body><div id="ui-panel"></div></body></html>';
@@ -48,16 +48,42 @@ test('probeOffice: not reachable when the request times out (a slow office never
 });
 
 test('probeOffice: headers and body have independent budgets — slow headers do not eat into the body read', async () => {
-  // Headers take almost the entire headers budget to arrive; the body then reads instantly.
-  // With one shared budget this would fail (the body read starting with no time left). With
-  // the two budgets split, the body gets its own full window once the headers land, so a
-  // slow-but-live office still counts as the office for Gabriel.
-  const fetchImpl: typeof fetch = async (_input, init) => {
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    if (init?.signal?.aborted) throw new Error('aborted before headers arrived');
-    return jsonResponse(200, OFFICE_HTML);
-  };
-  assert.deepEqual(await probeOffice(5173, { timeoutMs: 40, bodyTimeoutMs: 40, fetchImpl }), { reachable: true, isOffice: true });
+  // Headers take almost the entire headers budget to arrive (990 ms of a 1000 ms headers
+  // budget), then the body itself needs another 30 ms. With one shared budget this fails: the
+  // body read starts with only 10 ms left on the single clock and gets aborted mid-read. With
+  // the two budgets split, the body gets its own fresh 40 ms window once the headers land, so
+  // a slow-but-live office still counts as the office for Gabriel. Fake timers drive the fetch
+  // delay, the body delay and probeOffice's own abort timers, so every margin here is exact
+  // and deterministic — nothing depends on how fast the machine actually is.
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      await new Promise((resolve) => setTimeout(resolve, 990));
+      if (init?.signal?.aborted) throw new Error('aborted before headers arrived');
+      return {
+        status: 200,
+        text: () =>
+          new Promise((resolve, reject) => {
+            const bodyTimer = setTimeout(() => resolve(OFFICE_HTML), 30);
+            init?.signal?.addEventListener('abort', () => {
+              clearTimeout(bodyTimer);
+              reject(new Error('aborted before the body arrived'));
+            });
+          }),
+      } as unknown as Response;
+    };
+    const resultPromise = probeOffice(5173, { timeoutMs: 1000, bodyTimeoutMs: 40, fetchImpl });
+    mock.timers.tick(990);
+    // Let the headers-phase microtasks (the fetch continuation, clearing the headers timer,
+    // scheduling the body timer) settle before advancing the clock again: a bare second tick
+    // right after the first can fire the body timer before probeOffice has even reacted to
+    // the headers arriving, which is a false race the real event loop never has.
+    await new Promise((resolve) => setImmediate(resolve));
+    mock.timers.tick(30);
+    assert.deepEqual(await resultPromise, { reachable: true, isOffice: true });
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test('probeOffice: reachable but not the office when the body read itself fails (headers arrived, the body did not)', async () => {
