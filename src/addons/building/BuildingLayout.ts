@@ -6,8 +6,7 @@ import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, RoomView, Seat } from '../../layout/LayoutStrategy.js';
 import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type Rect, type RoomSlot } from './RoomPlanner.js';
 import { buildRoom, buildWalls, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, type RoomKind } from './rooms.js';
-import { OFFICE_DESK } from './furnishing.js';
-import { monitorWorldCorners } from './deskMonitors.js';
+import { deskCameraPose, monitorWorldCorners } from './deskGeometry.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
@@ -71,13 +70,6 @@ const MISSIONS_BOARD_REFRESH_MS = 1000;
 const ROOM_KINDS: readonly string[] = ['office', 'desks', 'library', 'lab', 'lounge'];
 /** A standing agent's own eye height (issue #89, `#room=` first person; issue #174 aligned this with `FreeCamera`'s own ground-walk eye height). */
 const ROOM_VIEW_EYE_HEIGHT = FIGURE_EYE_HEIGHT;
-/** Issue #161: sitting at the desk reads lower than `ROOM_VIEW_EYE_HEIGHT`'s standing pose, so the desk and its monitors stay in frame. */
-const DESK_EYE_HEIGHT = FIGURE_EYE_HEIGHT * 0.75;
-/** How far behind the desk (away from the door) the desk-view camera sits — inside the chair, not on top of the desk. */
-const DESK_SEAT_OFFSET = 1.0;
-/** Where the desk-view camera looks: toward the queue in front of the desk, at a standing agent's eye level (`queueSpots`'s own `look` height). */
-const DESK_LOOK_OFFSET = 3.0;
-const DESK_LOOK_EYE_HEIGHT = 1.2;
 
 /**
  * Lowercased, non-alphanumeric runs collapsed to one `-`, leading/trailing `-` trimmed
@@ -270,19 +262,16 @@ export class BuildingLayout implements LayoutStrategy {
    * mid-rebuild is still handled the same way `roomView` handles an unknown name.
    */
   deskView(): { position: THREE.Vector3; lookAt: THREE.Vector3 } | null {
-    const record = this.rooms.find((room) => room.kind === 'office');
-    if (!record) return null;
-    const frame = new RoomFrame(slotFor(record.index).rect, slotFor(record.index).door);
-    const position = frame.point(OFFICE_DESK.a, OFFICE_DESK.d + DESK_SEAT_OFFSET, DESK_EYE_HEIGHT);
-    const lookAt = frame.point(OFFICE_DESK.a, OFFICE_DESK.d - DESK_LOOK_OFFSET, DESK_LOOK_EYE_HEIGHT);
-    return { position, lookAt };
+    if (!this.rooms.some((room) => room.kind === 'office')) return null;
+    return deskCameraPose();
   }
 
   /**
-   * World corners of each desk monitor's face, left then right (issue #161 review, defect 4):
-   * lets the label declutter keep a queued agent's label clear of them in desk mode. Delegates
-   * to the pure geometry in `deskMonitors.ts` — the one source of where a monitor actually
-   * sits, so this can never drift from what is actually drawn there.
+   * World corners of each desk monitor's bezel, left then right (issue #161 review): lets the
+   * label declutter keep a queued agent's label clear of them in desk mode. Delegates to the
+   * pure geometry in `deskGeometry.ts` — the one source of where a monitor actually sits, the
+   * same one the desk camera pose above and the mesh builder in `deskMonitors.ts` read, so
+   * none of the three can drift from the others (review round 2's own root cause).
    */
   deskMonitorCorners(): THREE.Vector3[][] {
     return monitorWorldCorners();

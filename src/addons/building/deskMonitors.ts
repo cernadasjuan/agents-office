@@ -1,9 +1,7 @@
 import * as THREE from 'three';
 import { getToonMaterial } from '../../utils/Materials.js';
 import { Colors } from '../../utils/Colors.js';
-import { OFFICE_DESK } from './furnishing.js';
-import { RoomFrame } from './rooms.js';
-import { slotFor } from './RoomPlanner.js';
+import { MONITOR_A_OFFSET, MONITOR_BEZEL_MARGIN, MONITOR_HEIGHT, MONITOR_WIDTH, monitorPose, monitorWorldCorners } from './deskGeometry.js';
 import { triageQueue } from '../../ui/attention.js';
 import { registerExtension, type OfficeExtension, type World } from '../../extensions.js';
 import type { ManagedAgent } from '../../agents/AgentManager.js';
@@ -13,7 +11,8 @@ import type { ManagedAgent } from '../../agents/AgentManager.js';
  * personal Jira board (#145, opt-in, off without credentials) and a mirror of the triage
  * panel's waiting list (core, always available). Canvas textures, the same cheap pattern as
  * the Jira wall board (`plugins/jira/client.ts`) and the GitHub cards: a frame mesh plus one
- * textured face, never merged into the static batch (a dynamic texture redraws).
+ * textured face, never merged into the static batch (a dynamic texture redraws). Where they
+ * sit and face is `deskGeometry.ts`'s own job — this file only draws and mounts them.
  *
  * The office room is always the first rented room (`room-0-office`, `rooms.ts`'s own naming;
  * the Jira wall board makes the same assumption for its slot). Without that room in the scene
@@ -22,47 +21,10 @@ import type { ManagedAgent } from '../../agents/AgentManager.js';
  */
 
 const OFFICE_ROOM_NAME = 'room-0-office';
-const MONITOR_WIDTH = 0.5;
-const MONITOR_HEIGHT = 0.32;
-const MONITOR_CANVAS = { width: 320, height: 200 };
+const MONITOR_CANVAS = { width: 360, height: 220 };
 const MAX_ROWS = 5;
-/** A little in front of the seat, either side of the desk's own center monitor. */
-const MONITOR_A_OFFSET = 0.6;
-const MONITOR_D_OFFSET = 0.8;
-const MONITOR_Y = 1.05;
 
-function officeFrame(): RoomFrame {
-  const slot = slotFor(0);
-  return new RoomFrame(slot.rect, slot.door);
-}
-
-/** Each monitor's own `a` offset (left negative, right positive): the one list `buildMonitor` and `monitorWorldCorners` both walk, so neither can drift from the other. */
-const MONITOR_A_OFFSETS = [-MONITOR_A_OFFSET, MONITOR_A_OFFSET] as const;
-
-/** Where a monitor's own group sits and faces. Pure geometry, shared by the mesh builder below and `monitorWorldCorners`. */
-function monitorPose(a: number): { position: THREE.Vector3; rotationY: number } {
-  const frame = officeFrame();
-  return { position: frame.point(a, OFFICE_DESK.d - MONITOR_D_OFFSET, MONITOR_Y), rotationY: frame.faceAway };
-}
-
-/**
- * The world-space corners of each monitor's face, left then right (issue #161 review, defect
- * 4): lets the label declutter keep a queued agent's label clear of them, in desk mode. Pure —
- * no scene, no mounted group needed: the office's own slot (ring 0, index 0) is a fixed
- * assumption the whole module already makes (the same one the Jira wall board makes for its
- * own slot), so this needs nothing from the live scene to compute.
- */
-export function monitorWorldCorners(): THREE.Vector3[][] {
-  return MONITOR_A_OFFSETS.map((a) => {
-    const { position, rotationY } = monitorPose(a);
-    const up = new THREE.Vector3(0, 1, 0);
-    return ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as const).map(([sx, sy]) => {
-      const local = new THREE.Vector3(sx * (MONITOR_WIDTH / 2), sy * (MONITOR_HEIGHT / 2), 0);
-      local.applyAxisAngle(up, rotationY);
-      return local.add(position);
-    });
-  });
-}
+export { monitorWorldCorners };
 
 function canvasEl(width: number, height: number): HTMLCanvasElement {
   const element = document.createElement('canvas');
@@ -86,30 +48,32 @@ export function drawMiniBoard(target: HTMLCanvasElement, title: string, rows: st
   ctx.fillStyle = '#1d2733';
   ctx.fillRect(0, 0, width, height);
   ctx.fillStyle = '#eef3f8';
-  ctx.font = 'bold 20px sans-serif';
+  // Issue #161 review round 2: a larger font throughout, now that the monitor itself is a
+  // little bigger too — it reads from the desk camera's own distance, not a close-up crop.
+  ctx.font = 'bold 26px sans-serif';
   ctx.textBaseline = 'top';
-  ctx.fillText(title, 10, 8);
+  ctx.fillText(title, 12, 10);
   if (rows.length === 0) {
     ctx.fillStyle = '#8ea0b2';
-    ctx.font = '14px sans-serif';
-    ctx.fillText(empty, 10, 40);
+    ctx.font = '18px sans-serif';
+    ctx.fillText(empty, 12, 48);
     return;
   }
-  const top = 36;
-  const rowHeight = 28;
+  const top = 46;
+  const rowHeight = 32;
   const shown = rows.slice(0, MAX_ROWS);
   shown.forEach((row, i) => {
     const y = top + i * rowHeight;
     ctx.fillStyle = i % 2 === 0 ? '#263340' : '#1d2733';
     ctx.fillRect(4, y, width - 8, rowHeight - 3);
     ctx.fillStyle = '#eef3f8';
-    ctx.font = '14px sans-serif';
-    ctx.fillText(fittedText(ctx, row, width - 20), 10, y + 6);
+    ctx.font = '18px sans-serif';
+    ctx.fillText(fittedText(ctx, row, width - 24), 12, y + 7);
   });
   if (rows.length > shown.length) {
     ctx.fillStyle = '#8ea0b2';
-    ctx.font = '12px sans-serif';
-    ctx.fillText(`+${rows.length - shown.length} more`, 10, top + shown.length * rowHeight + 4);
+    ctx.font = '14px sans-serif';
+    ctx.fillText(`+${rows.length - shown.length} more`, 12, top + shown.length * rowHeight + 4);
   }
 }
 
@@ -131,7 +95,7 @@ function buildMonitor(a: number): MountedMonitor {
   group.position.copy(position);
   group.rotation.y = rotationY;
 
-  const bezelGeometry = new THREE.BoxGeometry(MONITOR_WIDTH + 0.04, MONITOR_HEIGHT + 0.04, 0.03);
+  const bezelGeometry = new THREE.BoxGeometry(MONITOR_WIDTH + MONITOR_BEZEL_MARGIN * 2, MONITOR_HEIGHT + MONITOR_BEZEL_MARGIN * 2, 0.03);
   const bezelMaterial = getToonMaterial(Colors.monitor);
   const bezel = new THREE.Mesh(bezelGeometry, bezelMaterial);
   group.add(bezel);

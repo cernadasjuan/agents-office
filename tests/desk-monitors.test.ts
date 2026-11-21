@@ -20,6 +20,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { DeskMonitorsExtension, drawMiniBoard, monitorWorldCorners } = await import('../src/addons/building/deskMonitors.js');
 const { countDrawCalls } = await import('../src/scene/RenderBudget.js');
+const { deskCameraPose, queueSpotWorldPositions, rayBlockedByQuad } = await import('../src/addons/building/deskGeometry.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -139,4 +140,45 @@ test('monitorWorldCorners returns one quad of 4 points per monitor, left then ri
   // zero area in y, i.e. two corners share each height, and the two monitors sit apart in x+z
   // (both rotated to face the same way, so x or z differs rather than y).
   assert.notDeepEqual(left!.map((p) => [p.x, p.z]), right!.map((p) => [p.x, p.z]), 'the two monitors sit at different world positions');
+});
+
+// --- Issue #161 review round 2: the desk camera must see the queue past the monitors ---
+
+test('from the desk camera pose, a ray to every queue spot clears both monitors', () => {
+  const { position: camera } = deskCameraPose();
+  const monitors = monitorWorldCorners();
+  const blocked = queueSpotWorldPositions().filter((spot) => monitors.some((quad) => rayBlockedByQuad(camera, spot, quad)));
+  assert.deepEqual(blocked, [], `${blocked.length} queue spot(s) have a monitor in the way`);
+});
+
+test('both monitor faces sit inside the desk camera\'s own view frustum', () => {
+  const { position, lookAt } = deskCameraPose();
+  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
+  camera.position.copy(position);
+  camera.lookAt(lookAt);
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(
+    new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
+  );
+  for (const [side, quad] of (['left', 'right'] as const).map((s, i) => [s, monitorWorldCorners()[i]!] as const)) {
+    const box = new THREE.Box3().setFromPoints(quad);
+    assert.ok(frustum.intersectsBox(box), `the ${side} monitor is outside the desk camera's own frustum`);
+  }
+});
+
+test('a ray to a queue spot is blocked when a monitor actually stands in the way (the check itself is not a tautology)', () => {
+  // A quad placed directly between the camera and a near queue spot, at the same height as
+  // the spot itself: this must read as blocked, proving `rayBlockedByQuad` can fail, not just
+  // always pass by construction.
+  const { position: camera } = deskCameraPose();
+  const spot = queueSpotWorldPositions()[0]!;
+  const midpoint = camera.clone().lerp(spot, 0.5);
+  const quad = [
+    midpoint.clone().add(new THREE.Vector3(-1, -1, 0)),
+    midpoint.clone().add(new THREE.Vector3(1, -1, 0)),
+    midpoint.clone().add(new THREE.Vector3(1, 1, 0)),
+    midpoint.clone().add(new THREE.Vector3(-1, 1, 0)),
+  ];
+  assert.equal(rayBlockedByQuad(camera, spot, quad), true);
 });
