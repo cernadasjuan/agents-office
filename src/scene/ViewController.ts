@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
-import { focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
+import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setPointerLockFilter, updateFreeCamera } from './FreeCamera.js';
 import { IsometricController, IsometricTween, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricState } from './IsometricCamera.js';
 import { OverviewController, PoseTween, floorUnder, frameForBounds, overviewBounds, zoomTowardCursor as zoomOverviewTowardCursor, type CameraPose } from './OverviewCamera.js';
 import type { RoomView } from '../layout/LayoutStrategy.js';
@@ -9,13 +9,12 @@ import { isClick, isViewFromAbove, officeSelection, parseViewHash, pickAgent, ty
 
 const FLIGHT_SECONDS = 0.6;
 const FIRST_PERSON_FOCUS_DISTANCE = 4;
-const FIRST_PERSON_FOCUS_HEIGHT = 1.2;
 const FIGURE_CHEST = 1.1;
 const PAN_SPEED_PER_DISTANCE = 0.9;
 const FAST_MULTIPLIER = 2.5;
 
 export const VIEW_HINTS: Record<ViewMode, string> = {
-  'first-person': 'Click to look around — WASD to move — Space/Q up/down — Shift = fast — ESC to release — Click a figure to select — O = overview — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
+  'first-person': 'Click to look around — WASD to walk — double-tap W to run — Shift to crouch — Space to jump — ESC to release — Click a figure to select — O = overview — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
   overview: 'Overview — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — O = first person — I = isometric — Shift+L = layout — N = next — F = focus — / = filter',
   isometric: 'Isometric — Drag to pan — Wheel to zoom — WASD to pan — Click a figure to select — Esc clears — I = back — O = overview — Shift+L = layout — N = next — F = focus — / = filter',
 };
@@ -239,7 +238,14 @@ export class ViewController {
       const pose = this.flight.tween.advance(delta);
       this.applyPose(pose);
       if (this.flight.tween.done) {
-        if (this.currentMode === 'first-person') setFreeCameraLook(camera, this.flight.end.position, this.flight.end.lookAt);
+        if (this.currentMode === 'first-person') {
+          // Re-read the live eye height on arrival (re-review, round 2), not the one baked in
+          // when the flight was built: crouching or standing up during the 0.6 s flight would
+          // otherwise leave the landing height stale, popping to the live one a frame later,
+          // the same class of bug this round's own fix already closed for the common case.
+          this.flight.end.position.y = currentEyeHeight();
+          setFreeCameraLook(camera, this.flight.end.position, this.flight.end.lookAt);
+        }
         this.flight = null;
       }
     } else if (this.currentMode === 'overview') {
@@ -408,8 +414,11 @@ export class ViewController {
     away.y = 0;
     if (away.lengthSq() < 1e-6) away.set(0, 0, 1);
     away.normalize();
-    // Inside the figure's room: the camera stays on the figure's side of every wall
-    const position = focusPosition(lookAt, away, floorUnder(this.options.scene, point), FIRST_PERSON_FOCUS_DISTANCE, FIRST_PERSON_FOCUS_HEIGHT);
+    // Inside the figure's room: the camera stays on the figure's side of every wall. The
+    // height lands exactly at ground-walk's own eye height (issue #174/#185 review): a fixed
+    // offset above the figure's chest used to pop down to the standing height one frame after
+    // the flight landed, since ground-walk forces that height on every later frame regardless.
+    const position = focusPosition(lookAt, away, floorUnder(this.options.scene, point), FIRST_PERSON_FOCUS_DISTANCE, currentEyeHeight() - lookAt.y);
     away.set(position.x - lookAt.x, 0, position.z - lookAt.z).normalize();
     // Turn only the aim to the screen right, so the figure shows left of the card.
     // The camera stays where the plain flight puts it: a sideways move could end inside a wall.
