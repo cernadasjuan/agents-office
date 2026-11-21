@@ -115,6 +115,25 @@ test('matchesFloor never matches a specific floor when the tag is missing (unsco
   assert.equal(matchesFloor('agents-office', undefined), false);
 });
 
+// --- Revision: when both the floor and the tag carry an owner, matchesFloor compares the
+// full owner/repo exactly, since a trailing-segment match alone cannot tell apart two repos
+// that share a leaf name under different owners. ---
+
+test('with an owner on both sides, matchesFloor requires an exact owner/repo match, not just the trailing segment', () => {
+  assert.equal(matchesFloor('gabriel-amyot/project-management', 'gabriel-amyot/project-management'), true);
+  assert.equal(matchesFloor('grp-beklever-com/project-management', 'gabriel-amyot/project-management'), false,
+    'same repo name, different owner: a trailing-segment match would wrongly accept this');
+});
+
+test('with an owner on only one side, matchesFloor falls back to the trailing segment', () => {
+  // The floor has no remote-derived owner (a local-only checkout); the tag does (from a GitHub
+  // issue ref). Best effort still matches on the bare repo name.
+  assert.equal(matchesFloor('agents-office', 'gabriel-amyot/agents-office'), true);
+  // The floor carries an owner (its own remote); the tag is a bare name (no owner known, for
+  // example a github-plugin board whose configured repo could not be parsed further).
+  assert.equal(matchesFloor('gabriel-amyot/agents-office', 'agents-office'), true);
+});
+
 // --- reloadForFloorSwitch ---
 
 function fakeLocation(href: string): { assigned: string[]; reloaded: number; href: string; hash: string; assign(url: string): void; reload(): void } {

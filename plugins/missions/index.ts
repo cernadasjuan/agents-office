@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
-import { FloorResolver, GENERAL_FLOOR } from '../../server/floor.js';
-import { repoShortName, type Enricher, type Observation, type OfficePlugin, type RoomInput, type WorldProvider } from '../../server/seam.js';
+import { FloorResolver } from '../../server/floor.js';
+import type { Enricher, Observation, OfficePlugin, RoomInput, WorldProvider } from '../../server/seam.js';
 import { EMPTY_GITHUB_CONFIG, parseGithubConfig, readSessionStory, SESSION_SLUG, type GithubConfig } from './sessionStoryReader.js';
 
 /**
@@ -40,11 +40,11 @@ export interface MissionSummary {
   createdAt?: string;
   /** When a closed mission stopped, approximated by its last `updated` timestamp. Open missions have none. */
   closedAt?: string;
-  /** The mission's own repo, for the focused floor to scope its war room by (issue #191): the
-   * bare short name of its `root_issue`'s repo, else its first GitHub member's, else — with
-   * neither — the mission's own root directory's floor, qualifying parent dropped the same way
-   * (`'general'` when that root resolves to no repo at all). Absent only when no root was given
-   * either (`summarizeMission` called directly, with nothing to fall back to). */
+  /** The mission's own repo, for the focused floor to scope its war room by (issue #191): its
+   * `root_issue`'s own `owner/repo`, else its first GitHub member's, else — with neither — the
+   * mission's own root directory's floor (`'general'` when that root resolves to no repo at
+   * all). Absent only when no root was given either (`summarizeMission` called directly, with
+   * nothing to fall back to). */
   repo?: string;
 }
 
@@ -95,21 +95,21 @@ function threadNumber(id: unknown): number | undefined {
 }
 
 /**
- * The mission's own repo (issue #191), a bare short name: its `root_issue`'s repo first, else
- * its first GitHub member's, else — with neither — `root`'s own floor (the mission record's
- * directory, resolved the same way a session's cwd is), qualifying parent dropped the same way.
- * `undefined` only when no root was given either, the shape `summarizeMission`'s direct callers
- * (every existing test) already use.
+ * The mission's own repo (issue #191): its `root_issue`'s own `owner/repo` first, else its
+ * first GitHub member's, kept whole (never shortened — `matchesFloor` needs the owner half for
+ * an exact comparison against an org-qualified floor). With neither, it falls back to `root`'s
+ * own floor (the mission record's directory, resolved the same way a session's cwd is, so it
+ * may itself be `owner/repo` when that directory's own git remote resolves one). `undefined`
+ * only when no root was given either, the shape `summarizeMission`'s direct callers (every
+ * existing test) already use.
  */
 function missionRepo(mission: Record<string, unknown>, root: string | undefined): string | undefined {
-  const fromRootIssue = repoShortName(rootIssue(mission)?.repo);
+  const fromRootIssue = rootIssue(mission)?.repo;
   if (fromRootIssue) return fromRootIssue;
   const member = list(mission.members).find((m) => text(m.kind) === 'gh' && issueRef(m.ref)?.repo);
-  const fromMember = member ? repoShortName(issueRef(member.ref)?.repo) : undefined;
+  const fromMember = member ? issueRef(member.ref)?.repo : undefined;
   if (fromMember) return fromMember;
-  if (!root) return undefined;
-  const floor = floorResolver.resolve(root);
-  return floor === GENERAL_FLOOR ? GENERAL_FLOOR : floor.slice(floor.lastIndexOf('/') + 1);
+  return root ? floorResolver.resolve(root) : undefined;
 }
 
 /** Turn one mission record into what its room shows. Unknown or missing fields give empty walls.

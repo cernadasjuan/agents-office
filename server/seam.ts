@@ -386,6 +386,17 @@ function ownerRepo(value: unknown): string | undefined {
   return typeof value === 'string' && OWNER_REPO.test(value) && value !== './.' ? value : undefined;
 }
 
+/**
+ * A `RoomInput`/`BoardInput` repo tag (issue #191 revision): a full `owner/repo` pair kept
+ * whole when the value already has that shape, else the bare short name. Never `repoShortName`
+ * alone for a value that already carries an owner: that function keeps only the text after the
+ * *last* slash and would silently destroy the owner half `matchesFloor`
+ * (`src/floors/FloorRegistry.ts`) needs for an exact comparison against an org-qualified floor.
+ */
+function repoTag(value: unknown): string | undefined {
+  return ownerRepo(value) ?? repoShortName(value);
+}
+
 const HEX_COLOR = /^#?([0-9A-Fa-f]{6})$/;
 
 /** A 6-hex color as lowercase `rrggbb`, or undefined. */
@@ -530,7 +541,7 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         const story = projectStory(entry?.story);
         return [{ id: publicId(`sleeper:${room.key}:${rawId}`), ...(endedAt ? { endedAt } : {}), ...(name ? { name } : {}), ...(story ? { story } : {}) }];
       });
-    const repo = repoShortName(room.repo);
+    const repo = repoTag(room.repo);
     return {
       id: publicId(`room:${room.key}`),
       kind: room.kind === 'workspace' ? 'workspace' : 'mission',
@@ -568,7 +579,7 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         .map((card) => ({ number: wholeNumber(card.number, 10_000_000), title: displayText(card.title, 60) }))
         .filter((card) => card.number !== undefined),
     })),
-    ...(repoShortName(board.repo) ? { repo: repoShortName(board.repo) } : {}),
+    ...(repoTag(board.repo) ? { repo: repoTag(board.repo) } : {}),
   }));
   const jiraTickets = parts.flatMap((part) => part.jiraTickets ?? []).slice(0, 50)
     .map(jiraTicket).filter((ticket): ticket is NonNullable<ReturnType<typeof jiraTicket>> => ticket !== undefined);

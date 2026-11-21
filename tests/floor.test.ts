@@ -16,6 +16,15 @@ function makeRepo(name: string, parent = 'repos'): string {
   return repo;
 }
 
+/** A repo whose `.git/config` names an `origin` remote (issue #191's revision: the floor name
+ * prefers the remote's own owner/name over the parent-dir qualifier, since that is what Gabriel
+ * actually expects to see, not a filesystem accident like `projects/`). */
+function makeRepoWithRemote(name: string, remoteUrl: string, parent = 'repos'): string {
+  const repo = makeRepo(name, parent);
+  fs.writeFileSync(path.join(repo, '.git', 'config'), `[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = ${remoteUrl}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n`);
+  return repo;
+}
+
 function makeWorktree(mainRepo: string, name: string, gitdir?: string): string {
   const worktree = path.join(root, 'worktrees', name);
   fs.mkdirSync(worktree, { recursive: true });
@@ -84,6 +93,49 @@ test('a resolved name caches by directory, so a second resolve for the same sess
 });
 
 // --- Review fixes ---
+
+// --- Issue #191 revision: the git remote's own owner/name wins over the parent-dir qualifier ---
+
+test('a repo with a GitHub HTTPS origin resolves to its own owner/repo, not its parent directory name', () => {
+  const repo = makeRepoWithRemote('https-origin-repo', 'https://github.com/gabriel-amyot/agents-office.git', 'projects');
+  assert.equal(new FloorResolver().resolve(repo), 'gabriel-amyot/agents-office');
+});
+
+test('a repo with a GitHub SSH origin resolves the same owner/repo as the HTTPS form', () => {
+  const repo = makeRepoWithRemote('ssh-origin-repo', 'git@github.com:gabriel-amyot/agents-office.git', 'projects');
+  assert.equal(new FloorResolver().resolve(repo), 'gabriel-amyot/agents-office');
+});
+
+test('a GitLab origin with nested subgroups keeps only the last group segment and the repo name', () => {
+  const repo = makeRepoWithRemote('gitlab-origin-repo', 'https://cicd.prod.datasophia.com/grp-dac/sub1/sub2/project-management.git', 'orgs');
+  assert.equal(new FloorResolver().resolve(repo), 'sub2/project-management');
+});
+
+test('an origin URL with no .git suffix and a trailing slash still resolves cleanly', () => {
+  const repo = makeRepoWithRemote('trailing-slash-repo', 'https://github.com/gabriel-amyot/agents-office/', 'projects');
+  assert.equal(new FloorResolver().resolve(repo), 'gabriel-amyot/agents-office');
+});
+
+test('a repo with no remote at all falls back to the parent-dir qualifier, unchanged from before this revision', () => {
+  const repo = makeRepo('no-remote-repo', 'projects');
+  assert.equal(new FloorResolver().resolve(repo), 'projects/no-remote-repo');
+});
+
+test('a repo whose config has no origin remote, or an unparsable url, falls back to the parent-dir qualifier', () => {
+  const noOrigin = makeRepo('no-origin', 'projects');
+  fs.writeFileSync(path.join(noOrigin, '.git', 'config'), '[core]\n\trepositoryformatversion = 0\n');
+  assert.equal(new FloorResolver().resolve(noOrigin), 'projects/no-origin');
+
+  const badUrl = makeRepo('bad-url', 'projects');
+  fs.writeFileSync(path.join(badUrl, '.git', 'config'), '[remote "origin"]\n\turl = not a url at all\n');
+  assert.equal(new FloorResolver().resolve(badUrl), 'projects/bad-url');
+});
+
+test('a worktree resolves its main repository\'s own remote owner/repo, not the worktree directory', () => {
+  const mainRepo = makeRepoWithRemote('worktree-main-repo', 'https://github.com/gabriel-amyot/agents-office.git', 'projects');
+  const worktree = makeWorktree(mainRepo, '191-floors-step2');
+  assert.equal(new FloorResolver().resolve(worktree), 'gabriel-amyot/agents-office');
+});
 
 test('two repos that share a leaf folder name under different parent directories resolve to two different floors', () => {
   const repoA = makeRepo('project-management', 'grp-beklever-com');

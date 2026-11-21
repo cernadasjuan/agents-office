@@ -130,11 +130,11 @@ test('the board has To do, In progress and Done columns derived from state, assi
 
 // --- Issue #191: a board scopes to its own repo, for the focused floor to filter by ---
 
-test('a board carries its own repo short name, for the focused floor to scope by', async () => {
+test('a board carries its own full owner/repo, for an exact match against an org-qualified floor', async () => {
   const { plugin: p } = plugin('gabriel-amyot/agents-office');
   const { boards } = projectWorld(await world(p), ['github'], (raw) => `h(${raw})`);
 
-  assert.equal(boards[0].repo, 'agents-office');
+  assert.equal(boards[0].repo, 'gabriel-amyot/agents-office');
 });
 
 test('Done keeps closed issues of the last 7 days, newest first, at most 8', () => {

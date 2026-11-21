@@ -68,7 +68,11 @@ export function createGithubPlugin(options: GithubPluginOptions = {}): OfficePlu
         const boards: BoardInput[] = [];
         for (const repo of repos) {
           const issues = cache.issues(repo);
-          if (issues) boards.push({ key: `github:${repo}`, title: repo, columns: boardColumns(issues, now()), repo: shortName(repo) });
+          // The board's own repo tag (issue #191 revision) keeps the full `owner/repo` the
+          // configuration already names, unlike the issue card's own `repo` (`shortName`,
+          // below): `matchesFloor` needs the owner half to tell apart two repos that share a
+          // leaf name under different owners, the same way a floor's own remote-derived name does.
+          if (issues) boards.push({ key: `github:${repo}`, title: repo, columns: boardColumns(issues, now()), repo });
         }
         return boards.length > 0 ? { boards } : {};
       },

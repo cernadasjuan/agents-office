@@ -122,15 +122,22 @@ export function floorRepo(floor: string): string {
 
 /**
  * Whether a repo-tagged datum (a mission war room, a GitHub kanban board, issue #191) belongs
- * on a focused floor. A plugin's own repo tag is always the bare repo name (`server/seam.ts`'s
- * `repoShortName`), while the focused floor may be org-qualified (`owner/repo`) — so this
- * compares against the floor's own trailing segment, never exact string equality. A missing
- * tag (a room or board whose own repo could not be resolved at all) never matches a specific
- * floor: review, it must not silently guess onto whichever floor happens to be focused; it
- * only ever shows on `ALL_FLOORS` (the caller's own job to check, not this function's).
+ * on a focused floor. A plugin's own repo tag is a bare repo name, or a full `owner/repo` pair
+ * when the plugin actually knows the owner (a GitHub issue ref, a configured kanban repo); a
+ * floor name is the same shape, `owner/repo` when its own git remote resolved one, else a bare
+ * name (`server/floor.ts`'s `qualifiedFloorName`). When both sides carry an owner, this
+ * compares the pair exactly: two repos that share a leaf name under different owners must
+ * never match just because their trailing segment is equal. With an owner on only one side (or
+ * neither), it falls back to the trailing segment, the best match either side can make without
+ * guessing the missing owner. A missing tag (a room or board whose own repo could not be
+ * resolved at all) never matches a specific floor: review, it must not silently guess onto
+ * whichever floor happens to be focused; it only ever shows on `ALL_FLOORS` (the caller's own
+ * job to check, not this function's).
  */
 export function matchesFloor(floor: string, repo: string | undefined): boolean {
-  return repo !== undefined && floorRepo(floor) === repo;
+  if (repo === undefined) return false;
+  if (floor.includes('/') && repo.includes('/')) return floor === repo;
+  return floorRepo(floor) === floorRepo(repo);
 }
 
 /** The parts of `window.location` a floor switch needs; injectable for tests. */
