@@ -10,7 +10,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   get: () => () => undefined,
   set: () => true,
 })) as never;
-const { furnishWarRoom, tierFor, MAX_DESK_SLOTS, DOOR_PATH_CLEARANCE } = await import('../src/addons/building/warRoomFurnishing.js');
+const { furnishWarRoom, tierFor, MAX_DESK_SLOTS, DOOR_PATH_CLEARANCE, WAR_ROOM_WIDTH } = await import('../src/addons/building/warRoomFurnishing.js');
 const { DOOR_WIDTH, ROOM_SIZE } = await import('../src/addons/building/RoomPlanner.js');
 const { QUEUE_SPOT_RADIUS } = await import('../src/addons/building/furnishing.js');
 after(() => {
@@ -77,6 +77,19 @@ test('AC2: two different mission ids are not forced into the same layout', () =>
   assert.notDeepEqual(a.pieces.map((p) => [p.a, p.d]), b.pieces.map((p) => [p.a, p.d]), 'jitter differs by seed');
 });
 
+// --- Issue #193: the desk grid fits 6 to 8 desks, not 4, in the now-wider war room ---
+
+test('issue #193: the room fits 6 to 8 desks, up from the original 4', () => {
+  assert.ok(MAX_DESK_SLOTS >= 6 && MAX_DESK_SLOTS <= 8, `MAX_DESK_SLOTS is ${MAX_DESK_SLOTS}, expected 6-8`);
+  assert.ok(WAR_ROOM_WIDTH > ROOM_SIZE, `a war room's width (${WAR_ROOM_WIDTH}) should be wider than a generic room's (${ROOM_SIZE})`);
+});
+
+test('issue #193: every agent gets a desk at the room\'s own new physical fit, not the old 4-desk cap', () => {
+  const plan = furnishWarRoom('mission-full-193', { deskLike: MAX_DESK_SLOTS - 2, debugging: 2 });
+  const deskPieces = plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation');
+  assert.equal(deskPieces.length, MAX_DESK_SLOTS, `expected every requested agent (${MAX_DESK_SLOTS}) to get a desk`);
+});
+
 // --- Desk grid: debug stations fill first, capped at the room's physical fit ---
 
 test('desk-like and debugging agents each get their own station, debug stations first', () => {
@@ -111,7 +124,9 @@ test('no floor-standing piece blocks the door path or the far-wall gap, at the f
   for (const placement of plan.pieces.filter(standsOnFloor)) {
     const box = footprint(placement);
     const name = `${placement.piece.name} at (${placement.a.toFixed(2)}, ${placement.d.toFixed(2)})`;
-    assert.ok(box.minA >= -ROOM_SIZE / 2 && box.maxA <= ROOM_SIZE / 2 && box.minD >= 0 && box.maxD <= ROOM_SIZE, `${name} stands inside the room`);
+    // Issue #193: a war room's width (`a`) is `WAR_ROOM_WIDTH`, wider than its depth (`d`,
+    // still `ROOM_SIZE`) — the two axes are no longer the same constant.
+    assert.ok(box.minA >= -WAR_ROOM_WIDTH / 2 && box.maxA <= WAR_ROOM_WIDTH / 2 && box.minD >= 0 && box.maxD <= ROOM_SIZE, `${name} stands inside the room`);
     assert.ok(!hitsRect(box, -DOOR_WIDTH / 2, DOOR_WIDTH / 2, 0, 2.5), `${name} blocks the door`);
     assert.ok(!hitsRect(box, -DOOR_WIDTH / 2, DOOR_WIDTH / 2, ROOM_SIZE - 1, ROOM_SIZE), `${name} blocks the far-wall gap`);
   }
@@ -136,8 +151,11 @@ test('no floor-standing piece blocks an off-center door path, at the full desk c
 // above (-1, -3, 1, 3) are all far enough from the threshold that a wrong constant (2.2
 // instead of 2.3, say) would still pass them. ---
 
+// Issue #193: requesting the full MAX_DESK_SLOTS (8) so the drop is visible in the count —
+// with fewer requested than the 7 slots left after one drops, the request itself (not the
+// clearance rule) would cap the count, hiding whether the drop happened at all.
 function deskPieceCount(doorAlong: number): number {
-  const plan = furnishWarRoom(`mission-threshold-${doorAlong}`, { deskLike: 4, debugging: 0 }, doorAlong);
+  const plan = furnishWarRoom(`mission-threshold-${doorAlong}`, { deskLike: MAX_DESK_SLOTS, debugging: 0 }, doorAlong);
   return plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation').length;
 }
 
@@ -145,8 +163,8 @@ test('the door clearance drops a slot exactly at DOOR_PATH_CLEARANCE, keeps one 
   assert.equal(DOOR_PATH_CLEARANCE, 2.3);
   // The slot at a = 2.4: at doorAlong = 0.11 it is 2.29 away (just inside clearance, dropped);
   // at doorAlong = 0.09 it is 2.31 away (just outside, kept). Neither other slot is affected.
-  assert.equal(deskPieceCount(0.11), 3, 'the a = 2.4 slot is dropped just inside the threshold');
-  assert.equal(deskPieceCount(0.09), 4, 'the a = 2.4 slot is kept just outside the threshold');
+  assert.equal(deskPieceCount(0.11), MAX_DESK_SLOTS - 1, 'the a = 2.4 slot is dropped just inside the threshold');
+  assert.equal(deskPieceCount(0.09), MAX_DESK_SLOTS, 'the a = 2.4 slot is kept just outside the threshold');
 });
 
 // --- No two floor-standing pieces overlap, at the full desk cap, over many seeds (issue

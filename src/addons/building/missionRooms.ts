@@ -9,13 +9,23 @@ import type { WorldRoom } from '../../extensions.js';
 import { ROOM_SIZE, type Rect, type RoomSlot } from './RoomPlanner.js';
 import { buildCeiling, buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
 import { sceneOf, setTombstoneName, tombstoneNameBatchFor, tombstoneNameplate } from './tombstoneNames.js';
-import { furnishWarRoom, type WarRoomCounts } from './warRoomFurnishing.js';
+import { furnishWarRoom, WAR_ROOM_WIDTH, type WarRoomCounts } from './warRoomFurnishing.js';
 
 /**
  * The mission wing: war rooms north of the hall, behind its back wall, two per
  * row. Doors open between the whiteboards. Further rows open into the row before.
+ *
+ * Issue #193: a war room's door-wall width is `WAR_ROOM_WIDTH` (18), wider than a generic
+ * room's `ROOM_SIZE` (12, which stays its depth), so the desk grid fits 6-8 desks instead of
+ * 4. The two columns grow outward from the shared boundary at x = -2 (the old touching edge
+ * nudged out by 1 on each side, so they still tile with no gap and no overlap), each door
+ * kept at roughly the same offset from its own column's center the old 12-wide columns used
+ * (col 0: -1, col 1: -3; both already exercised by the fuzz tests below).
  */
-const WING_COLUMNS = [{ minX: -15, maxX: -3, door: -10 }, { minX: -3, maxX: 9, door: 0 }];
+const WING_COLUMNS = [
+  { minX: -2 - WAR_ROOM_WIDTH, maxX: -2, door: -12 },
+  { minX: -2, maxX: -2 + WAR_ROOM_WIDTH, door: 4 },
+];
 
 export function missionSlot(index: number): RoomSlot {
   const column = WING_COLUMNS[index % WING_COLUMNS.length];
@@ -106,7 +116,9 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   const key = (n: number) => `mission${index}_seat_${n}`;
   const type = `room:${room.id}`;
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE), getToonMaterial(FLOOR_OPEN));
+  // Issue #193: a war room's own width (`WAR_ROOM_WIDTH`) is wider than its depth
+  // (`ROOM_SIZE`, unchanged), so the floor is the slot's real rect, not a square.
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(slot.rect.maxX - slot.rect.minX, slot.rect.maxZ - slot.rect.minZ), getToonMaterial(FLOOR_OPEN));
   floor.rotation.x = -Math.PI / 2;
   floor.position.copy(frame.point(0, ROOM_SIZE / 2, 0.005));
   floor.userData.floor = true;
@@ -153,7 +165,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   mount(boards.statement.mesh, 0, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
   mount(boards.docs.mesh, -3.6, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
   mount(boards.issues.mesh, 3.6, ROOM_SIZE - 0.12, 1.7, frame.faceDoor);
-  mount(boards.kanban.mesh, ROOM_SIZE / 2 - 0.12, 6, 1.7, frame.faceDoor - Math.PI / 2);
+  mount(boards.kanban.mesh, (slot.rect.maxX - slot.rect.minX) / 2 - 0.12, 6, 1.7, frame.faceDoor - Math.PI / 2);
 
   // Issue #124: the title and lock signs sit on the far wall, over the statement board, not
   // near the door frame (the narration: "they are in the door frames so it's kind of weird").

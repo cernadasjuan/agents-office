@@ -67,20 +67,35 @@ export function tierFor(liveDeskAgents: number): RoomTier {
 }
 
 /**
- * Up to 4 desk slots (rulebook §3's physical-fit cap). Every desk and debug station
- * carries its own chair (`Desk.ts`, `DebugStation.ts`), so a piece's real depth reaches
- * past its own row. That rules out a second row at two of the three columns:
+ * Issue #193: a war room's door-wall width, moderately wider than a generic room's
+ * `ROOM_SIZE` (12, which stays the war room's own depth — unchanged, so every `d` position
+ * below still lines up with the meeting table, the far wall and the tombstone strip exactly
+ * as before). The extra 6 m of width is what fits the two new desk columns below.
+ */
+export const WAR_ROOM_WIDTH = 18;
+
+/**
+ * Up to 8 desk slots (rulebook §3's physical-fit cap, issue #193 review: was 4, at
+ * `ROOM_SIZE`-wide rooms). Every desk and debug station carries its own chair (`Desk.ts`,
+ * `DebugStation.ts`), so a piece's real depth reaches past its own row. That rules out a
+ * second row at the two middle columns:
  * - `a = -2.4` and `a = 2.4` sit under the room's own meeting table and standing ring
  *   (`missionRooms.ts`'s `TABLE_SEATS`/`STANDING_SPOTS`, centered on the room at
  *   `d = 6.2`); a row deep enough to clear the row in front of it would land inside
  *   a seat or a standing spot there.
  * - `a = -4.6` would overlap the ended-session tombstone strip, the same reason the
- *   grid has only 3 columns instead of 4.
- * `a = 4.6` sits clear of both and is the only column with a second row.
+ *   original grid (12-wide rooms) had only 3 columns instead of 4.
+ * `a = 4.6` sits clear of both and keeps its second row from the original grid.
+ * `a = ±7.0` is the new width's own outer pair (issue #193): clear of the tombstone strip
+ * (anchored on `ROOM_SIZE`, not this wider `WAR_ROOM_WIDTH`, so it never moved), clear of the
+ * meeting ring (whose widest spot, the standing ring at radius 3.0, never reaches past
+ * `a = ±3.0`), and clear of the near-wall furniture (the sofa, low table, water cooler and
+ * TV, all anchored off `nearWall` at a different `d`, so a desk row here shares no depth with
+ * any of them) — both columns get the same two-row depth the original `a = 4.6` column did.
  */
 const DESK_SLOTS: ReadonlyArray<{ a: number; d: number }> = [
   { a: -2.4, d: 1.4 }, { a: 2.4, d: 1.4 }, { a: 4.6, d: 1.4 },
-  { a: 4.6, d: 3.6 },
+  { a: 4.6, d: 3.6 }, { a: -7.0, d: 1.4 }, { a: -7.0, d: 3.6 }, { a: 7.0, d: 1.4 }, { a: 7.0, d: 3.6 },
 ];
 export const MAX_DESK_SLOTS = DESK_SLOTS.length;
 
@@ -124,7 +139,7 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
   }
 
   // --- Must-haves: a clock, plants, a sofa, a bookshelf, a whiteboard ---
-  const nearWall = ROOM_SIZE / 2 - 0.1; // just inside the side walls (a = ±6)
+  const nearWall = WAR_ROOM_WIDTH / 2 - 0.1; // just inside the side walls (a = ±9)
   pieces.push({ piece: PIECES.clock(), a: jitter(rand, -1.6, 0.1), d: jitter(rand, ROOM_SIZE - 0.15, 0.05), y: 2.3 });
   const whiteboardA = jitter(rand, -2.4, 0.08);
   const whiteboardD = jitter(rand, ROOM_SIZE - 0.6, 0.08);
