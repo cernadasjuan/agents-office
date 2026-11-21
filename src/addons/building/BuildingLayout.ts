@@ -14,6 +14,7 @@ import type { WarRoomCounts } from './warRoomFurnishing.js';
 import type { WorldRoom } from '../../extensions.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
 import { markStatic } from '../../scene/StaticMerge.js';
+import { createStool } from '../../furniture/Stool.js';
 import type { PickTarget } from '../../scene/Selection.js';
 import { FIGURE_EYE_HEIGHT } from '../../characters/StickFigureParts.js';
 import { createMissionsBoard, placeMissionsBoard, type MissionBoardEntry } from './missionsBoard.js';
@@ -453,7 +454,16 @@ export class BuildingLayout implements LayoutStrategy {
     return free ? this.claim([free], 'room') : this.claimOfType('idle');
   }
 
-  /** Spots around the parent's anchor (its war room seat, else its home desk) for its subagents. */
+  /**
+   * Spots around the parent's anchor (its war room seat, else its home desk) for
+   * its subagents. Each pod gets its own small stool (issue #164): a pod stood by
+   * design before, for any activity, which read as "something is wrong" once idle
+   * lost its continuous sway (#163) — a standing figure with no activity-driven
+   * reason to stand. A stool next to the parent's desk gives every pod subagent a
+   * seated posture instead, the same `postureOverride` mechanism the sofa's idle
+   * seats already use (`ActivityAnimations.ts`), so a busy or idle pod subagent
+   * both read as "has a place," not as a crowd that needs attention.
+   */
   private podKeys(parent: AgentState): string[] {
     const anchorKey = parent.target?.startsWith('room:') && parent.seat ? parent.seat : parent.home!;
     const desk = this.stations.get(anchorKey)!;
@@ -465,7 +475,12 @@ export class BuildingLayout implements LayoutStrategy {
       const key = `${anchorKey}_pod${i}`;
       if (!this.stations.has(key)) {
         const position = desk.position.clone().addScaledVector(side, across).addScaledVector(facing, ahead);
-        this.stations.set(key, { type: 'pod', position, lookAt: desk.lookAt.clone(), occupied: false, posture: 'standing' });
+        const stool = createStool();
+        stool.position.copy(position);
+        stool.rotation.y = Math.atan2(facing.x, facing.z);
+        markStatic(stool, { zone: 'pods' });
+        this.scene.add(stool);
+        this.stations.set(key, { type: 'pod', position, lookAt: desk.lookAt.clone(), occupied: false, posture: 'seated' });
       }
       keys.push(key);
     });
