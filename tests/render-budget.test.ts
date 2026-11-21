@@ -109,18 +109,23 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // genuinely worn (`tests/real-size-office.ts`'s own PERSONAS list, issue #128 review) and
   // its one source of randomness seeded (the library's bookshelves, same file, issue #128
   // review round 2: an unseeded book count and color made this total drift between runs,
-  // 368 to 372, depending on how many book colors a shelf happened to draw). The mission
+  // 368 to 372, depending on how many book colors a shelf happened to draw). Two more things
+  // land on top of 372, together in this round, 402: issue #176's per-room ceilings (every
+  // room's ceiling merges into the one shared zone `buildCeiling` marks it for, `rooms.ts`'s
+  // `CEILING_ZONE`; `FrameLoop` toggles that *merged* mesh's own `visible` by name on a view
+  // switch, review, #184 round 2, not each source's, so the cost is one call for every room's
+  // ceiling together, war rooms included now that they build one too), and the mission
   // wing's own furniture package (issue #125: a clock, whiteboard, bookshelf, sofa, low
   // table, water cooler, TV, low divider, debug station and desk per war room, up to 9 of
-  // them) lands it at 401: a new piece-type variety the fixture did not carry before, not a
-  // regression in either feature. Issue #159's tombstone engraving adds one more: a single
-  // instanced draw call for the whole scene's engraved names (`TombstoneNameBatch`), however
-  // many tombstones exist, landing it at 402. Pinned here at 406, 402 plus 4 (the 5-per-PR
-  // allowance, minus the 1 this PR itself used): real headroom above the number this fixture
+  // them, a new piece-type variety the fixture did not carry before), landing it at 402 on
+  // `origin/main` (ceilings plus the mission furniture package). Issue #159's tombstone
+  // engraving adds one more on top of that merge: a single instanced draw call for the whole
+  // scene's engraved names (`TombstoneNameBatch`), however many tombstones exist, landing it
+  // at 403. Pinned here at 406, 403 plus 3: real headroom above the number this fixture
   // actually and repeatably measures, not a number nobody reproduces. Each PR gets up to 5
-  // more against the 402 baseline before it must recover headroom elsewhere, not just add to
+  // more against the 403 baseline before it must recover headroom elsewhere, not just add to
   // the margin left by the last one.
-  assert.ok(after.total <= 406, `worst case ${after.total} exceeds the pinned baseline (402) + 4`);
+  assert.ok(after.total <= 406, `worst case ${after.total} exceeds the pinned baseline (403) + 3`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -137,12 +142,14 @@ test('the worst case measures the same total every run: the fixture\'s one rando
     new FigureBatch(scene).sync(agents.map((managed) => managed.figure.group));
     totals.add(countDrawCalls(scene).total);
   }
-  // 402, not 372: the mission wing's own furniture package (issue #125) added to this
-  // fixture; see the baseline comment above. 401 became 402 with issue #159's tombstone
-  // engraving: one instanced draw call for the whole scene's engraved names, not one per
-  // tombstone (`TombstoneNameBatch`), so the full MAX_TOMBSTONES cap across all 9 mission
-  // rooms this fixture builds still only costs +1. Still exactly one value across all 8 runs.
-  assert.deepEqual([...totals], [402], `expected every one of 8 runs to measure 402, got ${[...totals]}`);
+  // 402, not the pre-#176/#182 372: every room's ceiling merges into one mesh (one more call
+  // together, not one per room), and the mission wing's own furniture package (issue #125)
+  // added to this fixture; see the baseline comment above. 402 became 403 with issue #159's
+  // tombstone engraving: one instanced draw call for the whole scene's engraved names, not
+  // one per tombstone (`TombstoneNameBatch`), so the full MAX_TOMBSTONES cap across all 9
+  // mission rooms this fixture builds still only costs +1. Still exactly one value across
+  // all 8 runs.
+  assert.deepEqual([...totals], [403], `expected every one of 8 runs to measure 403, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

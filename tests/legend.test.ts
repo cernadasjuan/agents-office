@@ -75,7 +75,7 @@ test('the legend explains the beacon, the raised hand, the attention bands, the 
   const { button, signs, overlay } = setup(t);
   button.click();
   const shown = signs();
-  for (const sign of ['Beacon', 'Raised hand', 'Fresh wait', 'Aging wait', 'Cold wait', 'Done', 'Your office', 'Desks', 'Lounge', 'O', 'V', 'N', 'F', '/', '?']) {
+  for (const sign of ['Beacon', 'Raised hand', 'Fresh wait', 'Aging wait', 'Cold wait', 'Done', 'Your office', 'Desks', 'Lounge', 'I', 'V', 'N', 'F', '/', '?']) {
     assert.ok(shown.includes(sign), `missing ${sign} in ${shown.join(', ')}`);
   }
   assert.match(overlay().textContent!, /15 min/, 'the band limits come from the attention bands');

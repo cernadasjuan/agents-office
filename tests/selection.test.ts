@@ -115,22 +115,26 @@ test('a press and release close together is a click, a drag is not', () => {
 
 test('the URL hash picks the start view and the agent to focus', () => {
   assert.deepEqual(parseViewHash(''), { view: 'first-person', focus: null, zoom: null, room: null });
-  assert.deepEqual(parseViewHash('#view=overview'), { view: 'overview', focus: null, zoom: null, room: null });
-  assert.deepEqual(parseViewHash('#focus=ab12cd&view=overview'), { view: 'overview', focus: 'ab12cd', zoom: null, room: null });
+  assert.deepEqual(parseViewHash('#view=iso'), { view: 'isometric', focus: null, zoom: null, room: null });
+  assert.deepEqual(parseViewHash('#focus=ab12cd&view=iso'), { view: 'isometric', focus: 'ab12cd', zoom: null, room: null });
   assert.deepEqual(parseViewHash('#view=sideways&focus=a'), { view: 'first-person', focus: 'a', zoom: null, room: null });
+  // parseViewHash's own fallback only; chooseViewMode (ViewMemory.ts) layers the saved view and
+  // the layout default on top, so the live app does not always land in first person for this
+  // (see tests/navigation.test.ts's #173 review test: the building layout lands in isometric).
+  assert.deepEqual(parseViewHash('#view=overview&focus=a'), { view: 'first-person', focus: 'a', zoom: null, room: null }, 'the overview mode is gone (#173): an unknown view falls back to first person here');
   assert.deepEqual(parseViewHash('#focus=<script>'), { view: 'first-person', focus: null, zoom: null, room: null });
   assert.deepEqual(parseViewHash(`#focus=${'a'.repeat(200)}`), { view: 'first-person', focus: null, zoom: null, room: null });
 });
 
 test('issue #89: #select= is the current name for the agent to focus; #focus= still works', () => {
-  assert.deepEqual(parseViewHash('#select=ab12cd&view=overview'), { view: 'overview', focus: 'ab12cd', zoom: null, room: null });
+  assert.deepEqual(parseViewHash('#select=ab12cd&view=iso'), { view: 'isometric', focus: 'ab12cd', zoom: null, room: null });
   // Both given: #select wins, it is the name the issue's own acceptance criteria use.
   assert.deepEqual(parseViewHash('#select=a&focus=b'), { view: 'first-person', focus: 'a', zoom: null, room: null });
   assert.deepEqual(parseViewHash('#select=<script>'), { view: 'first-person', focus: null, zoom: null, room: null });
 });
 
 test('issue #89: #zoom= starts the view at that camera distance', () => {
-  assert.deepEqual(parseViewHash('#view=overview&zoom=12.5'), { view: 'overview', focus: null, zoom: 12.5, room: null });
+  assert.deepEqual(parseViewHash('#view=iso&zoom=12.5'), { view: 'isometric', focus: null, zoom: 12.5, room: null });
   assert.deepEqual(parseViewHash('#zoom=0'), { view: 'first-person', focus: null, zoom: null, room: null }, 'zero is not a usable distance');
   assert.deepEqual(parseViewHash('#zoom=-5'), { view: 'first-person', focus: null, zoom: null, room: null }, 'negative is not a usable distance');
   assert.deepEqual(parseViewHash('#zoom=not-a-number'), { view: 'first-person', focus: null, zoom: null, room: null });

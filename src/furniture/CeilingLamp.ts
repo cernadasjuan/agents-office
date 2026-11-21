@@ -76,7 +76,7 @@ export function createCeilingLampWithLight(x: number, z: number): {
   const lampGroup = createCeilingLamp();
   const lampY = 5.2;
   lampGroup.position.set(x, lampY, z);
-  lampGroup.userData.overviewHidden = true;
+  lampGroup.userData.hiddenFromAbove = true;
   markStatic(lampGroup);
 
   // SpotLight pointing down from the lamp

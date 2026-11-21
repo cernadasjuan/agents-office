@@ -7,7 +7,7 @@ import { markStatic } from '../../scene/StaticMerge.js';
 import type { PickTarget } from '../../scene/Selection.js';
 import type { WorldRoom } from '../../extensions.js';
 import { ROOM_SIZE, type Rect, type RoomSlot } from './RoomPlanner.js';
-import { buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
+import { buildCeiling, buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
 import { sceneOf, setTombstoneName, tombstoneNameBatchFor, tombstoneNameplate } from './tombstoneNames.js';
 import { furnishWarRoom, type WarRoomCounts } from './warRoomFurnishing.js';
 
@@ -118,6 +118,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   const doorway = doorFrame(slot.rect, slot.door, FLOOR_OPEN);
   markDoorCutaway(doorway);
   group.add(doorway);
+  group.add(buildCeiling(slot.rect));
   const label = roomLabel(room.title, frame.point(0, ROOM_SIZE / 2), slot.rect);
   group.add(label);
 

@@ -14,7 +14,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
  *
  * Never merged, so they keep their own draw call and can change: meshes whose
  * material is not a `MeshToonMaterial` (canvas boards), transparent meshes, and
- * meshes under an object marked `userData.dynamic` or `userData.overviewHidden`.
+ * meshes under an object marked `userData.dynamic` or `userData.hiddenFromAbove`.
  */
 export const STATIC_SOURCE_LAYER = 31;
 
@@ -138,8 +138,8 @@ export class StaticBatch {
       key = mark.zone ? `zone:${mark.zone}` : `root:${object.uuid}`;
       this.batchFor(key, mark, object).seen = true;
       // An in-place root keeps its own overview flag: the merged meshes inside it follow it
-      isBlocked = mark.zone ? Boolean(object.userData.overviewHidden || object.userData.dynamic) : false;
-    } else if (key && (object.userData.overviewHidden || object.userData.dynamic)) {
+      isBlocked = mark.zone ? Boolean(object.userData.hiddenFromAbove || object.userData.dynamic) : false;
+    } else if (key && (object.userData.hiddenFromAbove || object.userData.dynamic)) {
       isBlocked = true;
     }
     // An in-place root's own visibility does not matter: its merged meshes inside it follow it

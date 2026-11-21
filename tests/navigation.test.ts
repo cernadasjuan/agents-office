@@ -21,9 +21,11 @@ const { SelectionState } = await import('../src/scene/Selection.js');
 const { updateFreeCamera, setFreeCameraLook, focusPosition, initFreeCamera, EYE_HEIGHT, CROUCH_EYE_HEIGHT } = await import('../src/scene/FreeCamera.js');
 const { floorUnder } = await import('../src/scene/OverviewCamera.js');
 const { chooseViewMode, rememberViewMode, viewStatusText, VIEW_STORAGE_KEY } = await import('../src/scene/ViewMemory.js');
-const { applyCeilingCut, findCeilings, CEILING_HEIGHT } = await import('../src/scene/Cutaway.js');
+const { applyCeilingCut, findCeilings } = await import('../src/scene/Cutaway.js');
 const { createWalls } = await import('../src/furniture/Walls.js');
 const { FrameLoop } = await import('../src/scene/FrameLoop.js');
+const { buildRoom, CEILING_ZONE_NAME } = await import('../src/addons/building/rooms.js');
+const { slotFor } = await import('../src/addons/building/RoomPlanner.js');
 const registry = await import('../src/layout/registry.js');
 after(() => {
   dom.window.close();
@@ -114,7 +116,7 @@ test('floorUnder finds the floor that holds a point, or null outside every floor
   assert.equal(floorUnder(scene, new THREE.Vector3(100, 0, 100)), null);
 });
 
-function viewSetup(options: { hash?: string; seat?: THREE.Vector3; floors?: THREE.Box3[]; view?: 'overview' | 'first-person'; modes?: string[] } = {}) {
+function viewSetup(options: { hash?: string; seat?: THREE.Vector3; floors?: THREE.Box3[]; view?: 'isometric' | 'first-person'; modes?: string[] } = {}) {
   const document = dom.window.document;
   const scene = new THREE.Scene();
   for (const box of options.floors ?? []) scene.add(floorPlane(box));
@@ -245,41 +247,53 @@ test('key F fix: refocus on an agent no longer in the scene does nothing', () =>
 // --- Start view and remembered view ---
 
 test('the start view: a #view hash, then the saved view, then the layout default', () => {
-  assert.equal(chooseViewMode('', undefined, 'overview'), 'overview');
+  assert.equal(chooseViewMode('', undefined, 'isometric'), 'isometric');
   assert.equal(chooseViewMode('', undefined, 'first-person'), 'first-person');
-  assert.equal(chooseViewMode('', memoryStorage({ [VIEW_STORAGE_KEY]: 'first-person' }), 'overview'), 'first-person');
-  assert.equal(chooseViewMode('#view=overview', memoryStorage({ [VIEW_STORAGE_KEY]: 'first-person' }), 'first-person'), 'overview');
-  assert.equal(chooseViewMode('#view=first-person', memoryStorage({ [VIEW_STORAGE_KEY]: 'overview' }), 'overview'), 'first-person');
-  assert.equal(chooseViewMode('#view=sideways', memoryStorage({ [VIEW_STORAGE_KEY]: 'junk' }), 'overview'), 'overview');
+  assert.equal(chooseViewMode('', memoryStorage({ [VIEW_STORAGE_KEY]: 'first-person' }), 'isometric'), 'first-person');
+  assert.equal(chooseViewMode('#view=iso', memoryStorage({ [VIEW_STORAGE_KEY]: 'first-person' }), 'first-person'), 'isometric');
+  assert.equal(chooseViewMode('#view=first-person', memoryStorage({ [VIEW_STORAGE_KEY]: 'isometric' }), 'isometric'), 'first-person');
+  assert.equal(chooseViewMode('#view=sideways', memoryStorage({ [VIEW_STORAGE_KEY]: 'junk' }), 'isometric'), 'isometric');
   const throwing = { getItem: () => { throw new Error('blocked'); } };
-  assert.equal(chooseViewMode('', throwing, 'overview'), 'overview');
+  assert.equal(chooseViewMode('', throwing, 'isometric'), 'isometric');
+});
+
+test('#173 review: #view=overview, the retired mode\'s own name, lands on the layout default, not hardcoded to first person', () => {
+  // `chooseViewMode` never special-cases "overview": an unrecognized hash value is exactly as
+  // unrecognized as any other, so it falls through to storage, then the layout's own default.
+  // The building layout's default is isometric (#173: the closest view from above), so that is
+  // where `#view=overview` lands when nothing else is saved — not first person, a wrong claim an
+  // earlier revision of this PR made (review, #184).
+  assert.equal(chooseViewMode('#view=overview', memoryStorage(), 'isometric'), 'isometric');
+  assert.equal(chooseViewMode('#view=overview', memoryStorage(), 'first-person'), 'first-person');
+  // A saved view still wins over the layout default, the same as any other unrecognized hash.
+  assert.equal(chooseViewMode('#view=overview', memoryStorage({ [VIEW_STORAGE_KEY]: 'first-person' }), 'isometric'), 'first-person');
 });
 
 test('the view mode is saved in the browser and a blocked storage does not break it', () => {
   const storage = memoryStorage();
   rememberViewMode('first-person', storage);
   assert.equal(storage.data.get(VIEW_STORAGE_KEY), 'first-person');
-  assert.doesNotThrow(() => rememberViewMode('overview', { setItem: () => { throw new Error('full'); } }));
+  assert.doesNotThrow(() => rememberViewMode('isometric', { setItem: () => { throw new Error('full'); } }));
 });
 
-test('the view controller starts in the given view and reports each mode change', () => {
+test('the view controller starts in the given view and reports each mode change (#173: key I, not O)', () => {
   const modes: string[] = [];
-  const { view, press, camera } = viewSetup({ view: 'overview', modes });
+  const { view, press, camera } = viewSetup({ view: 'isometric', modes });
   view.update(0, 1 / 60);
-  assert.equal(view.mode, 'overview');
-  assert.ok(camera.position.y > 15);
-  press('KeyO');
+  assert.equal(view.mode, 'isometric');
+  assert.notEqual(view.activeCamera, camera, 'isometric draws through its own orthographic camera');
+  press('KeyI');
   assert.equal(view.mode, 'first-person');
-  assert.deepEqual(modes, ['overview', 'first-person']);
+  assert.deepEqual(modes, ['isometric', 'first-person']);
 });
 
 test('without a given view the hash still decides and first person stays the default', () => {
   assert.equal(viewSetup().view.mode, 'first-person');
-  assert.equal(viewSetup({ hash: '#view=overview' }).view.mode, 'overview');
+  assert.equal(viewSetup({ hash: '#view=iso' }).view.mode, 'isometric');
 });
 
 test('the header text names the layout and the view', () => {
-  assert.equal(viewStatusText(registry.layoutName('building'), 'overview'), 'Building layout · Overview');
+  assert.equal(viewStatusText(registry.layoutName('building'), 'isometric'), 'Building layout · Isometric');
   assert.equal(viewStatusText(registry.layoutName('activity'), 'first-person'), 'Activity layout · First person');
 });
 
@@ -305,14 +319,14 @@ test('the layout changes only when the user confirms', () => {
   assert.match(questions[0], new RegExp(registry.layoutName(next)));
 });
 
-test('a layout can ask for the overview as its start view; others keep first person', () => {
-  registry.registerLayout('nav-overview', () => ({ id: 'nav-overview', seatFor: () => null, release: () => undefined }), { defaultView: 'overview' });
-  assert.equal(registry.defaultViewFor('nav-overview'), 'overview');
+test('a layout can ask for the isometric view as its start view; others keep first person', () => {
+  registry.registerLayout('nav-isometric', () => ({ id: 'nav-isometric', seatFor: () => null, release: () => undefined }), { defaultView: 'isometric' });
+  assert.equal(registry.defaultViewFor('nav-isometric'), 'isometric');
   assert.equal(registry.defaultViewFor('activity'), 'first-person');
   assert.equal(registry.defaultViewFor('unknown'), 'first-person');
 });
 
-// --- Ceiling: hidden above the ceiling height and in the overview ---
+// --- Ceiling: shown in first person, hidden in the isometric view (issue #176) ---
 
 test('the ceiling is its own marked mesh so it can hide without a static merge rebuild', () => {
   const ceilings = findCeilings(createWalls());
@@ -320,19 +334,18 @@ test('the ceiling is its own marked mesh so it can hide without a static merge r
   assert.equal(ceilings[0].userData.dynamic, true);
 });
 
-test('the ceiling hides above the ceiling height and in the overview, and comes back below', () => {
+test('the ceiling always shows in first person; it hides only in the isometric view', () => {
+  const scene = new THREE.Scene();
   const ceilings = findCeilings(createWalls());
-  assert.equal(applyCeilingCut(ceilings, 1.7, false), false, 'nothing changes below the ceiling');
+  assert.equal(applyCeilingCut(scene, ceilings, false), false, 'nothing changes: already shown');
   assert.equal(ceilings[0].visible, true);
-  assert.equal(applyCeilingCut(ceilings, CEILING_HEIGHT + 0.5, false), true);
+  assert.equal(applyCeilingCut(scene, ceilings, true), true);
   assert.equal(ceilings[0].visible, false);
-  assert.equal(applyCeilingCut(ceilings, 1.7, false), true);
+  assert.equal(applyCeilingCut(scene, ceilings, false), true);
   assert.equal(ceilings[0].visible, true);
-  assert.equal(applyCeilingCut(ceilings, 1.7, true), true);
-  assert.equal(ceilings[0].visible, false);
 });
 
-test('the frame loop renders and hides the ceiling when the camera rises above it', () => {
+test('the frame loop shows the ceiling in first person and hides it in the isometric view, however high the camera sits', () => {
   const scene = new THREE.Scene();
   scene.add(createWalls());
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
@@ -342,21 +355,55 @@ test('the frame loop renders and hides the ceiling when the camera rises above i
     render: () => { renders++; }, info: { render: { calls: 0, triangles: 0 }, reset: () => undefined },
     shadowMap: { needsUpdate: false, type: THREE.PCFSoftShadowMap }, getPixelRatio: () => 1, setPixelRatio: () => undefined,
   };
+  let mode: 'first-person' | 'isometric' = 'first-person';
   const loop = new FrameLoop({
     scene, camera, renderer: renderer as never, labelRenderer: { render: () => undefined },
-    update: () => undefined, figures: () => [], mode: () => 'first-person',
+    update: () => undefined, figures: () => [], mode: () => mode,
   });
   loop.frame(0);
   const ceiling = findCeilings(scene)[0];
   assert.equal(ceiling.visible, true);
+  // A tall camera, still in first person (ground-walk's eventual height cap is a different
+  // rule): the ceiling stays up, unlike the old height-based rule the overview mode needed.
   camera.position.y = 9;
   loop.frame(100);
+  assert.equal(ceiling.visible, true);
+  mode = 'isometric';
+  loop.frame(200);
   assert.equal(ceiling.visible, false);
   const before = renders;
+  mode = 'first-person';
   camera.position.y = 1.7;
-  loop.frame(200);
+  loop.frame(300);
   assert.equal(ceiling.visible, true);
   assert.equal(renders, before + 1);
+});
+
+test('a room\'s own (merged) ceiling also shows in first person and hides in isometric, through a real frame loop (review, #184 round 2)', () => {
+  const scene = new THREE.Scene();
+  scene.add(createWalls());
+  scene.add(buildRoom('library', slotFor(1), 1, []).group);
+  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
+  camera.position.set(0, 1.7, 5);
+  const renderer = {
+    render: () => undefined, info: { render: { calls: 0, triangles: 0 }, reset: () => undefined },
+    shadowMap: { needsUpdate: false, type: THREE.PCFSoftShadowMap }, getPixelRatio: () => 1, setPixelRatio: () => undefined,
+  };
+  let mode: 'first-person' | 'isometric' = 'first-person';
+  const loop = new FrameLoop({
+    scene, camera, renderer: renderer as never, labelRenderer: { render: () => undefined },
+    update: () => undefined, figures: () => [], mode: () => mode,
+  });
+  loop.frame(0);
+  const merged = scene.getObjectByName(CEILING_ZONE_NAME);
+  assert.ok(merged, 'the room ceiling merged into its shared zone on the first frame');
+  assert.equal(merged!.visible, true, 'first person: the merged room ceiling shows');
+  mode = 'isometric';
+  loop.frame(100);
+  assert.equal(merged!.visible, false, 'isometric: the merged room ceiling hides');
+  mode = 'first-person';
+  loop.frame(200);
+  assert.equal(merged!.visible, true, 'back in first person: it shows again');
 });
 
 test('a ceiling change alone, with a still camera, makes the frame loop render', () => {
