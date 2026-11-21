@@ -18,8 +18,11 @@ after(() => {
 const { createOffice } = await import('../src/scene/Office.js');
 const { addLighting } = await import('../src/scene/SceneSetup.js');
 const { BuildingLayout } = await import('../src/addons/building/BuildingLayout.js');
+const { MAX_TOMBSTONES } = await import('../src/addons/building/missionRooms.js');
+const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { countDrawCalls, DRAW_CALL_BUDGET } = await import('../src/scene/RenderBudget.js');
 const { StaticBatch } = await import('../src/scene/StaticMerge.js');
+const { FigureBatch } = await import('../src/characters/FigureBatch.js');
 
 /**
  * Issue #123 (no cap on the mission wing): the corridor fix merges every war room's floor,
@@ -29,59 +32,95 @@ const { StaticBatch } = await import('../src/scene/StaticMerge.js');
  * handled by `LabelDetailController`'s distance culling (`src/ui/LabelDetail.ts`), not draw
  * calls. This measures 42 war rooms (well past the ~9 the other render-budget fixture carries,
  * and past the 30-50 room range Winston's assessment named as the likely bite point) against
- * the real draw-call budget, with no agents and no GitHub/BMAD plugins — isolating what the
- * mission wing itself costs.
+ * the real draw-call budget.
+ *
+ * Review of the first version (PR #204): the fixture had no agents, furniture state or
+ * tombstones, so it measured only the empty-room case, well below what a populated wing
+ * actually costs. This version pushes every room to its tombstone cap and its furniture peak
+ * (desks, debug stations), and keeps 40 agents live, the same worst-case shape
+ * `tests/real-size-office.ts`'s fixture already uses at 9 rooms.
  */
 const WAR_ROOM_COUNT = 42;
+const AGENT_COUNT = 40;
+// Measured growth (9 -> 42 populated war rooms, each at its tombstone cap and furniture peak,
+// 40 agents live) is 14 draw calls for 33 more rooms. 25 is that plus an 11-call margin — real
+// headroom above a number this fixture actually and repeatably measures, not padding chosen to
+// avoid a failure (review of PR #204's first version, which used slack this way).
+const MEASURED_GROWTH_BOUND = 25;
 
-function buildScene(count: number): THREE.Scene {
+function worldRoom(index: number) {
+  return {
+    id: `m${index}`, kind: 'mission' as const, title: `Mission ${index}`, state: 'open' as const,
+    // Worst case: every war room at the tombstone cap, not just a handful (same as the
+    // real-size fixture).
+    sleepers: Array.from({ length: MAX_TOMBSTONES }, (_, j) => ({ id: `m${index}-tomb-${j}`, endedAt: '2026-11-18' })),
+    walls: { statement: 'x', docs: ['a'], issues: [], kanban: [] },
+  };
+}
+
+function buildPopulatedScene(roomCount: number): { scene: THREE.Scene; manager: InstanceType<typeof AgentManager> } {
   const scene = new THREE.Scene();
   addLighting(scene);
   const layout = new BuildingLayout(scene, createOffice(scene), {
     storage: { getItem: () => null, setItem: () => undefined },
   });
-  layout.syncWorldRooms(Array.from({ length: count }, (_, i) => ({
-    id: `m${i}`, kind: 'mission', title: `Mission ${i}`, state: 'open' as const,
-    sleepers: [],
-    walls: { statement: 'x', docs: ['a'], issues: [], kanban: [] },
-  })));
-  return scene;
+  layout.syncWorldRooms(Array.from({ length: roomCount }, (_, i) => worldRoom(i)));
+  const manager = new AgentManager(scene, layout);
+  for (let i = 0; i < AGENT_COUNT; i++) {
+    manager.addAgent({ id: `a${i}`, name: `agent ${i}`, activity: 'implementing', extras: { room: `m${i % roomCount}` } });
+  }
+  // Push every room's furniture to its peak (desks, debug stations), the same worst-case
+  // the other render-budget fixture uses: furniture grows with the peak live count and never
+  // shrinks back, so a room that briefly holds 8 agents keeps its full desk grid after they leave.
+  for (let room = 0; room < roomCount; room++) {
+    const stressIds: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      const id = `stress-${room}-${i}`;
+      stressIds.push(id);
+      manager.addAgent({ id, name: id, activity: i < 4 ? 'debugging' : 'implementing', extras: { room: `m${room}` } });
+    }
+    layout.update();
+    for (const id of stressIds) manager.removeAgent(id);
+  }
+  return { scene, manager };
 }
 
-test('issue #123: a 42-war-room mission wing stays under the draw-call budget', () => {
-  const scene = buildScene(WAR_ROOM_COUNT);
+function renderedDrawCalls(scene: THREE.Scene, manager: InstanceType<typeof AgentManager>, camera: THREE.Camera): number {
   scene.updateMatrixWorld();
-  const statics = new StaticBatch(scene);
-  statics.update();
-  const camera = new THREE.PerspectiveCamera(60, 1280 / 800, 0.1, 100);
-  camera.position.set(0, 40, 0);
-  camera.lookAt(0, 0, -80);
-  camera.updateMatrixWorld();
-  const after = countDrawCalls(scene, camera);
-  console.log(`42 war rooms: ${JSON.stringify(after)}`);
-  assert.ok(after.total < DRAW_CALL_BUDGET, `42 war rooms ${JSON.stringify(after)} exceeds the budget (${DRAW_CALL_BUDGET})`);
-});
+  new StaticBatch(scene).update();
+  new FigureBatch(scene).sync(manager.getAgents().map((managed) => managed.figure.group));
+  return countDrawCalls(scene, camera).total;
+}
 
-test('issue #123: growing the mission wing from 9 to 42 war rooms adds only a handful of draw calls, not one per room', () => {
-  const small = buildScene(9);
-  const large = buildScene(WAR_ROOM_COUNT);
-  const camera = new THREE.PerspectiveCamera(60, 1280 / 800, 0.1, 150);
+test('issue #123: a populated 42-war-room mission wing stays under the draw-call budget', () => {
+  const { scene, manager } = buildPopulatedScene(WAR_ROOM_COUNT);
+  const camera = new THREE.PerspectiveCamera(60, 1280 / 800, 0.1, 100);
   camera.position.set(0, 60, 0);
   camera.lookAt(0, 0, -120);
   camera.updateMatrixWorld();
-  for (const scene of [small, large]) scene.updateMatrixWorld();
-  new StaticBatch(small).update();
-  new StaticBatch(large).update();
-  const smallTotal = countDrawCalls(small, camera).total;
-  const largeTotal = countDrawCalls(large, camera).total;
-  console.log(`9 rooms: ${smallTotal} draw calls, 42 rooms: ${largeTotal} draw calls, camera-culled`);
+  const total = renderedDrawCalls(scene, manager, camera);
+  console.log(`42 populated war rooms: ${total} draw calls`);
+  assert.ok(total < DRAW_CALL_BUDGET, `42 populated war rooms (${total}) exceeds the budget (${DRAW_CALL_BUDGET})`);
+});
+
+test('issue #123: growing a populated mission wing from 9 to 42 war rooms adds only a handful of draw calls, not one per room', () => {
+  const small = buildPopulatedScene(9);
+  const large = buildPopulatedScene(WAR_ROOM_COUNT);
+  const camera = new THREE.PerspectiveCamera(60, 1280 / 800, 0.1, 150);
+  camera.position.set(0, 80, 0);
+  camera.lookAt(0, 0, -150);
+  camera.updateMatrixWorld();
+  const smallTotal = renderedDrawCalls(small.scene, small.manager, camera);
+  const largeTotal = renderedDrawCalls(large.scene, large.manager, camera);
+  const growth = largeTotal - smallTotal;
+  console.log(`9 populated rooms: ${smallTotal} draw calls, 42 populated rooms: ${largeTotal} draw calls, growth ${growth} for 33 more rooms`);
   // The floor, walls, ceiling, corridor and furniture merge into the shared static zones a
   // single war room already used (StaticMerge): growing the wing costs nothing there. Each
   // room's 4 canvas wall boards (statement/docs/issues/kanban, `MeshBasicMaterial`, not a toon
-  // material) are the one real per-room draw-call cost `StaticMerge` cannot absorb; measured
-  // at ~1.4 per added room once the camera culls the rooms behind it (not the worst-case 4 per
-  // room with no camera at all). A regression here (every room's boards suddenly all drawing,
-  // or a new un-merged piece added per room) would push this well past a loose bound, not
-  // nudge it — 60 is 33 rooms' worth of headroom above the measured 46.
-  assert.ok(largeTotal - smallTotal <= 60, `expected growth well below one draw call per room, got ${largeTotal - smallTotal} for 33 more rooms`);
+  // material) are the one real per-room draw-call cost StaticMerge cannot absorb. Review of
+  // the first version (PR #204): its bound (60) had slack baked in that did not match its own
+  // measured rate. This bound is the measured growth plus a small, fixed margin, so a
+  // regression (every room's boards suddenly all drawing, or a new un-merged piece per room)
+  // fails this test instead of hiding inside a loose number.
+  assert.ok(growth <= MEASURED_GROWTH_BOUND, `expected growth near the measured rate, got ${growth} for 33 more rooms (bound ${MEASURED_GROWTH_BOUND})`);
 });
