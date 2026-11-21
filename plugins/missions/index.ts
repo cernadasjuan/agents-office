@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
 import type { Enricher, Observation, OfficePlugin, RoomInput, WorldProvider } from '../../server/seam.js';
+import { EMPTY_GITHUB_CONFIG, parseGithubConfig, readSessionStory, SESSION_SLUG, type GithubConfig } from './sessionStoryReader.js';
 
 /**
  * Mission war rooms. Reads mission records (`<root>/missions/<slug>/mission.yaml`)
@@ -25,8 +26,10 @@ export interface MissionSummary {
   /** The root issue (`root_issue` in mission.yaml), first in the list, when the record has one. */
   issues: Array<{ number: number; repo?: string; title: string; state: 'open' | 'closed' }>;
   kanban: Array<{ column: string; cards: Array<{ number: number; title: string }> }>;
-  /** One entry per ended session (a tombstone), its own journey id and the day it ended. */
-  sleepers: Array<{ id: string; endedAt?: string }>;
+  /** One entry per ended session (a tombstone), its own journey id and the day it ended. `session`
+   * is the journey entry's own `session:` field (its slug, issue #159/#160's lookup key) when the
+   * record names one; the journey id (`id`) stays the pick-target key either way. */
+  sleepers: Array<{ id: string; endedAt?: string; session?: string }>;
   /** When the mission started (`created` in mission.yaml), for the missions board (issue #144). */
   createdAt?: string;
   /** When a closed mission stopped, approximated by its last `updated` timestamp. Open missions have none. */
@@ -114,7 +117,7 @@ export function summarizeMission(slug: string, record: unknown): MissionSummary 
     ],
     sleepers: list(mission.journey)
       .filter((entry) => text(entry.kind) === 'session' || text(entry.kind) === 'night_run')
-      .map((entry) => ({ id: text(entry.id), ...(text(entry.end) ? { endedAt: text(entry.end) } : {}) }))
+      .map((entry) => ({ id: text(entry.id), ...(text(entry.end) ? { endedAt: text(entry.end) } : {}), ...(text(entry.session) ? { session: text(entry.session) } : {}) }))
       .filter((entry) => entry.id !== ''),
     ...(text(mission.created) ? { createdAt: text(mission.created) } : {}),
     ...(status === 'done' || status === 'abandoned' ? (text(mission.updated) ? { closedAt: text(mission.updated) } : {}) : {}),
@@ -168,7 +171,7 @@ export function missionsInToolCalls(chunk: string, known: Set<string>): string[]
 
 interface ScanState { size: number; offset: number; latest: string | null }
 
-export function missionsPlugin(roots: string[], now: () => number = Date.now): OfficePlugin {
+export function missionsPlugin(roots: string[], now: () => number = Date.now, githubConfig: GithubConfig = EMPTY_GITHUB_CONFIG): OfficePlugin {
   let cached: { at: number; missions: MissionSummary[] } | null = null;
   const scans = new Map<string, ScanState>();
 
@@ -223,6 +226,23 @@ export function missionsPlugin(roots: string[], now: () => number = Date.now): O
     },
   };
 
+  type SleeperInput = NonNullable<RoomInput['sleepers']>[number];
+
+  // Issue #159/#160: a sleeper whose session slug actually has a slug's own shape carries it as
+  // its engraved `name` and, when an archived record exists for it, the story its card reads.
+  // Review round 1: a mission record's own `session:` field is free text until checked here —
+  // without this, something other than a clean slug could reach the stone's own engraving, with
+  // only a length cap. A sleeper that fails the check gets neither; the card falls back to its
+  // own "Ended session" default, same as a sleeper with no `session:` field at all.
+  const sleeperInput = (sleeper: MissionSummary['sleepers'][number]): SleeperInput => {
+    const slug = sleeper.session && SESSION_SLUG.test(sleeper.session) ? sleeper.session : undefined;
+    return {
+      id: sleeper.id,
+      ...(sleeper.endedAt ? { endedAt: sleeper.endedAt } : {}),
+      ...(slug ? { name: slug, story: readSessionStory(roots, slug, Date.now, githubConfig) ?? undefined } : {}),
+    };
+  };
+
   const world: WorldProvider = {
     id: 'mission-rooms',
     world: () => ({
@@ -231,7 +251,7 @@ export function missionsPlugin(roots: string[], now: () => number = Date.now): O
         kind: 'mission',
         title: mission.title,
         state: mission.state,
-        sleepers: mission.sleepers,
+        sleepers: mission.sleepers.map(sleeperInput),
         ...(mission.createdAt ? { createdAt: mission.createdAt } : {}),
         ...(mission.closedAt ? { closedAt: mission.closedAt } : {}),
         walls: { statement: mission.statement, docs: mission.docs, issues: mission.issues, kanban: mission.kanban },
@@ -242,4 +262,8 @@ export function missionsPlugin(roots: string[], now: () => number = Date.now): O
   return { name: 'missions', enrichers: [enricher], world: [world] };
 }
 
-export default missionsPlugin(parseRoots(process.env.AGENTS_OFFICE_MISSION_ROOTS));
+export default missionsPlugin(
+  parseRoots(process.env.AGENTS_OFFICE_MISSION_ROOTS),
+  Date.now,
+  parseGithubConfig(process.env.AGENTS_OFFICE_GITHUB_REPOS, process.env.AGENTS_OFFICE_GITHUB_OWNERS),
+);

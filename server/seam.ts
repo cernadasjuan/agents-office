@@ -1,4 +1,5 @@
 import { maskedLine } from './secrets.js';
+import { PERSONAS } from '../plugins/bmad/roster.js';
 
 /**
  * Extension seam. Sources find agents, enrichers add display data, world
@@ -65,13 +66,42 @@ export interface Enricher {
   enrich(observations: Observation[]): void | Promise<void>;
 }
 
+/**
+ * A session's story (issue #160), read from the archived `intent-tree.md` the
+ * session plugin writes at close (never the live ledger). `personas` is checked
+ * again below against `SESSION_PERSONAS`, a closed set: a reader free-texting
+ * something else never leaves the server. `issues` arrives already resolved
+ * (review round 2: a real archived record's `tickets_referenced` is often a bare
+ * `repo#N`, with no owner; `plugins/missions/sessionStoryReader.ts` is the one
+ * place that knows the configured repo/owner list needed to resolve that, so it
+ * hands over a display label and an optional link, never a raw ref string for
+ * this module to interpret) — `label` always shows, `url` only when resolved.
+ */
+export interface SessionStoryInput {
+  intent?: string;
+  personas?: string[];
+  counts?: { done?: number; open?: number; abandoned?: number };
+  doneList?: string[];
+  handoffs?: string[];
+  issues?: Array<{ label?: string; url?: string }>;
+}
+
+/**
+ * The closed set of persona names a story may name: every name in `plugins/bmad/roster.ts`,
+ * the same roster the BMAD enricher itself uses (review round 1: this used to be its own
+ * hand-typed, shorter list — a second source of truth that could drift from the real one).
+ */
+export const SESSION_PERSONAS: readonly string[] = PERSONAS.map((persona) => persona.name);
+
 export interface RoomInput {
   key: string;
   kind: 'mission' | 'workspace';
   title: string;
   state: 'open' | 'locked';
-  /** One entry per ended session, its own id and the day it ended (a tombstone). */
-  sleepers?: Array<{ id: string; endedAt?: string }>;
+  /** One entry per ended session, its own id and the day it ended (a tombstone). `name` is the
+   * session's own slug (issue #159): not a secret, already how Gabriel names sessions elsewhere,
+   * engraved on the stone in place of the old hover sign. `story` is issue #160's card data. */
+  sleepers?: Array<{ id: string; endedAt?: string; name?: string; story?: SessionStoryInput }>;
   /** For the missions board (issue #144): when a mission started, and when a closed one stopped. */
   createdAt?: string;
   closedAt?: string;
@@ -232,6 +262,87 @@ function repoShortName(value: unknown): string | undefined {
   return REPO_SHORT.test(short) && short !== '.' && short !== '..' ? short : undefined;
 }
 
+/**
+ * Path-like text redacted before it reaches a free-text story field (issue #160's own AC:
+ * "No path ... appears anywhere on the card", review round 1 — `displayText` alone only strips
+ * control characters and truncates). Catches a `file://` URL, a `~/...` home path, a POSIX
+ * path of two or more segments, a single-segment absolute path (review round 2: `/tmp`, `/etc`
+ * alone, with nothing after, were not caught by the two-or-more-segment rule), a relative path
+ * (`./x`, `../x`) and a Windows drive path. The lookbehind keeps a bare `/` or `.` mid-sentence
+ * (a fraction, an ellipsis) from being mistaken for the start of a path, while still catching a
+ * single-segment or relative path introduced by a quote, backtick, paren, `=` or `:` (review
+ * round 2 follow-up: `Read "/tmp"`, `` `/etc` `` and `TMPDIR=/private` all read unchanged
+ * without this — ordinary quoting should not defeat the privacy boundary).
+ */
+const PATH_START = "^|[\\s\"'`(=:,[]";
+const PATH_LIKE = new RegExp(
+  `file://\\S+|~/\\S+|(?<=${PATH_START})\\.{1,2}/\\S+|/(?:[\\w.-]+/)+[\\w.-]+|(?<=${PATH_START})/[\\w.-]+|[A-Za-z]:[\\\\/]\\S*`,
+  'g',
+);
+
+function redactPaths(value: unknown): string {
+  return typeof value === 'string' ? value.replace(PATH_LIKE, '[path]') : '';
+}
+
+/** A session slug's own shape. Duplicated from `plugins/missions/sessionStoryReader.ts`'s
+ * `SESSION_SLUG` (not imported: that module already imports from this one, and a plugin
+ * importing back from the server it is read by would be circular). Keep the two in sync. */
+const SESSION_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+const STORY_MAX_PERSONAS = 6;
+const STORY_MAX_DONE_ITEMS = 8;
+const STORY_MAX_HANDOFFS = 6;
+const STORY_MAX_ISSUES = 8;
+
+/**
+ * The tombstone story card's whitelist (issue #160, S4): a short intent, persona names from
+ * the closed `SESSION_PERSONAS` set, done/open/abandoned counts, a capped done list, handoff
+ * file names (never a path) and resolved issue links. `issues` is always present (even empty)
+ * once a story exists, so the card can tell "no issue yet" apart from "no record at all".
+ */
+function projectStory(input: SessionStoryInput | undefined) {
+  if (!input || typeof input !== 'object') return undefined;
+  // Redacted before the length cap, not after: truncating first could cut a path in half and
+  // leave an unredacted fragment of it behind (review round 1).
+  const intent = displayText(redactPaths(input.intent), 160);
+  const personas = Array.isArray(input.personas)
+    ? [...new Set(input.personas.filter((name): name is string => SESSION_PERSONAS.includes(name)))].slice(0, STORY_MAX_PERSONAS)
+    : [];
+  const rawCounts = input.counts;
+  const counts = rawCounts && typeof rawCounts === 'object'
+    ? { done: wholeNumber(rawCounts.done, 999) ?? 0, open: wholeNumber(rawCounts.open, 999) ?? 0, abandoned: wholeNumber(rawCounts.abandoned, 999) ?? 0 }
+    : undefined;
+  const doneList = Array.isArray(input.doneList)
+    ? input.doneList.map((item) => displayText(redactPaths(item), 100)).filter(Boolean).slice(0, STORY_MAX_DONE_ITEMS)
+    : [];
+  // A handoff is a file name, never a path (issue #160's privacy rule): the last path
+  // segment only, whichever separator a reader's own OS happened to use.
+  const handoffs = Array.isArray(input.handoffs)
+    ? input.handoffs.map((file) => displayText(file, 80).split(/[/\\]/).pop() ?? '').filter(Boolean).slice(0, STORY_MAX_HANDOFFS)
+    : [];
+  // A resolved issue carries a link; an unresolved one (review round 2: a bare `repo#N` whose
+  // owner could not be resolved, or a Jira-style key) is still a real reference and still
+  // shows, just as plain text — never dropped into "no issue yet" when a ref actually exists.
+  const issues = (Array.isArray(input.issues) ? input.issues : [])
+    .map((issue) => {
+      const label = displayText(issue?.label, 40);
+      if (!label) return undefined;
+      const url = httpsUrl(issue?.url);
+      return { label, ...(url ? { url } : {}) };
+    })
+    .filter((issue): issue is { label: string; url?: string } => issue !== undefined)
+    .slice(0, STORY_MAX_ISSUES);
+  if (!intent && personas.length === 0 && !counts && doneList.length === 0 && handoffs.length === 0 && issues.length === 0) return undefined;
+  return {
+    ...(intent ? { intent } : {}),
+    ...(personas.length > 0 ? { personas } : {}),
+    ...(counts ? { counts } : {}),
+    ...(doneList.length > 0 ? { doneList } : {}),
+    ...(handoffs.length > 0 ? { handoffs } : {}),
+    issues,
+  };
+}
+
 const OWNER_REPO = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
 
 /** A full `owner/name` pair, or undefined when the value does not match that shape. */
@@ -373,7 +484,13 @@ export function projectWorld(parts: WorldInput[], pluginNames: string[], publicI
         const rawId = displayText(entry?.id, 64);
         if (!rawId) return [];
         const endedAt = isoDate(entry?.endedAt);
-        return [{ id: publicId(`sleeper:${room.key}:${rawId}`), ...(endedAt ? { endedAt } : {}) }];
+        // Same shape as `plugins/missions/sessionStoryReader.ts`'s `SESSION_SLUG` (review round
+        // 1, defense in depth): the plugin already checks this before it ever sets `name`, but
+        // the server never trusts a plugin's own output without checking it again here too,
+        // the same way personas and issue references are rechecked below.
+        const name = SESSION_SLUG.test(String(entry?.name ?? '')) ? displayText(entry?.name, 64) : undefined;
+        const story = projectStory(entry?.story);
+        return [{ id: publicId(`sleeper:${room.key}:${rawId}`), ...(endedAt ? { endedAt } : {}), ...(name ? { name } : {}), ...(story ? { story } : {}) }];
       });
     return {
       id: publicId(`room:${room.key}`),

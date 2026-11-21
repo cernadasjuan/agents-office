@@ -129,6 +129,101 @@ test('the world projection cleans rooms and boards and hashes their keys', () =>
   assert.deepEqual(world.boards[0].columns[0].cards, []);
 });
 
+// --- Issue #159/#160: engraved name and tombstone story, whitelisted and capped ---
+
+test('a sleeper\'s name is capped display text; without one, the output carries no name key', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter' }, { id: 'J-2' }] }] }], ['missions'], publicId);
+  assert.deepEqual(world.rooms[0].sleepers, [{ id: 'h(sleeper:m-1:J-1)', name: 'tidy-otter' }, { id: 'h(sleeper:m-1:J-2)' }]);
+});
+
+test('a story keeps only known personas, caps every list, and always carries an issues key once present', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter', story: {
+      intent: 'Fix the git situation safely',
+      personas: ['Amelia', 'NotAPersona', 'Amelia'],
+      counts: { done: 11, open: 0, abandoned: 0 },
+      doneList: Array.from({ length: 20 }, (_, i) => `item ${i}`),
+      handoffs: ['/etc/passwd', '2026-11-17-handoff.md'],
+      issues: [{ label: 'gabriel-amyot/agents-office#160', url: 'https://github.com/gabriel-amyot/agents-office/issues/160' }, { label: '' }],
+    } }] }] }], ['missions'], publicId);
+
+  const story = world.rooms[0].sleepers![0].story;
+  assert.deepEqual(story?.personas, ['Amelia']);
+  assert.deepEqual(story?.counts, { done: 11, open: 0, abandoned: 0 });
+  assert.equal(story?.doneList?.length, 8);
+  // A handoff is a file name, never a path (issue #160): only the last path segment survives.
+  assert.deepEqual(story?.handoffs, ['passwd', '2026-11-17-handoff.md']);
+  // A blank label drops (review round 2: the seam never trusts the reader's own resolution
+  // blindly, same as personas and the sleeper name); a real one keeps its resolved link.
+  assert.deepEqual(story?.issues, [{ label: 'gabriel-amyot/agents-office#160', url: 'https://github.com/gabriel-amyot/agents-office/issues/160' }]);
+});
+
+test('review round 2: an issue with no resolvable owner still shows as plain text, and an unsafe url is dropped, not the whole issue', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter', story: {
+      intent: 'x',
+      issues: [{ label: 'agents-office#160' }, { label: 'KTP-951' }, { label: 'owner/repo#5', url: 'javascript:alert(1)' }],
+    } }] }] }], ['missions'], publicId);
+  assert.deepEqual(world.rooms[0].sleepers![0].story?.issues, [
+    { label: 'agents-office#160' },
+    { label: 'KTP-951' },
+    { label: 'owner/repo#5' },
+  ]);
+});
+
+test('a sleeper with no story at all carries no story key (the card tells the difference from zero issues)', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter' }] }] }], ['missions'], publicId);
+  assert.ok(!('story' in world.rooms[0].sleepers![0]));
+});
+
+test('review round 1: a name that is not a clean slug never reaches the client', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [
+      { id: 'J-1', name: '../escape' },
+      { id: 'J-2', name: 'Not_A_Slug' },
+      { id: 'J-3', name: 'a-clean-slug' },
+    ] }] }], ['missions'], publicId);
+  const byId = new Map(world.rooms[0].sleepers!.map((sleeper) => [sleeper.id, sleeper]));
+  assert.equal(byId.get('h(sleeper:m-1:J-1)')?.name, undefined);
+  assert.equal(byId.get('h(sleeper:m-1:J-2)')?.name, undefined);
+  assert.equal(byId.get('h(sleeper:m-1:J-3)')?.name, 'a-clean-slug');
+});
+
+test('review round 1: a path mentioned in free-text story fields is redacted, not just truncated', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter', story: {
+      intent: 'Fix the git situation in ~/.claude-shared-config safely',
+      doneList: ['Read /Users/gamyot/Developer/project/file.ts', 'Opened file:///etc/hosts', 'A plain line'],
+    } }] }] }], ['missions'], publicId);
+  const story = world.rooms[0].sleepers![0].story;
+  assert.equal(story?.intent, 'Fix the git situation in [path] safely');
+  assert.deepEqual(story?.doneList, ['Read [path]', 'Opened [path]', 'A plain line']);
+});
+
+test('review round 2: a single-segment absolute path and a relative path are also redacted', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter', story: {
+      intent: 'Wrote a file under /tmp then checked /etc for the config',
+      doneList: ['Ran ./build.sh', 'Compared against ../baseline/out.json', 'A plain line with no path at all', '50/50 split, not a path'],
+    } }] }] }], ['missions'], publicId);
+  const story = world.rooms[0].sleepers![0].story;
+  assert.equal(story?.intent, 'Wrote a file under [path] then checked [path] for the config');
+  assert.deepEqual(story?.doneList, ['Ran [path]', 'Compared against [path]', 'A plain line with no path at all', '50/50 split, not a path']);
+});
+
+test('review round 2 follow-up: a quoted, backticked or env-assigned path is redacted too', () => {
+  const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
+    sleepers: [{ id: 'J-1', name: 'tidy-otter', story: {
+      intent: 'Set TMPDIR=/private/tmp before running the build',
+      doneList: ['Read "/tmp" for the scratch file', 'Checked `/etc` for the config', '3/4 of the work is done, not a path'],
+    } }] }] }], ['missions'], publicId);
+  const story = world.rooms[0].sleepers![0].story;
+  assert.equal(story?.intent, 'Set TMPDIR=[path] before running the build');
+  assert.deepEqual(story?.doneList, ['Read "[path]" for the scratch file', 'Checked `[path]` for the config', '3/4 of the work is done, not a path']);
+});
+
 test('a mission issue keeps a clean owner/repo, and drops one that does not match the shape (#146)', () => {
   const world = projectWorld([{ rooms: [{ key: 'm-1', kind: 'mission', title: 'War room', state: 'open',
     walls: { issues: [

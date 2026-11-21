@@ -2,13 +2,28 @@ import type { ManagedAgent } from './agents/AgentManager.js';
 import type { PickTarget } from './scene/Selection.js';
 import type * as THREE from 'three';
 
+/** A session's story (issue #160): the tombstone card's data, read from the session's own
+ * archived record. Absent entirely means no record was found for this tombstone; an empty
+ * `issues` list on an otherwise-present story means the session named none yet. An issue
+ * entry with no `url` (review round 2: a real archived record's bare `repo#N` ref, or a
+ * Jira-style key) still shows on the card, as plain text instead of a link. */
+export interface WorldSessionStory {
+  intent?: string;
+  personas?: string[];
+  counts?: { done: number; open: number; abandoned: number };
+  doneList?: string[];
+  handoffs?: string[];
+  issues?: Array<{ label: string; url?: string }>;
+}
+
 export interface WorldRoom {
   id: string;
   kind: 'mission' | 'workspace';
   title: string;
   state: 'open' | 'locked';
-  /** One entry per ended session (a tombstone): its own public id and the day it ended. */
-  sleepers?: Array<{ id: string; endedAt?: string }>;
+  /** One entry per ended session (a tombstone): its own public id, the day it ended, its
+   * engraved name (issue #159, the session's own slug) and its story card (issue #160). */
+  sleepers?: Array<{ id: string; endedAt?: string; name?: string; story?: WorldSessionStory }>;
   /** For the missions board (issue #144): when a mission started, and when a closed one stopped. */
   createdAt?: string;
   closedAt?: string;

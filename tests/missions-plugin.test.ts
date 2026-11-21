@@ -37,6 +37,17 @@ threads:
 writeMission('old-mission', 'title: Old\nstatus: done\n');
 fs.mkdirSync(path.join(root, 'missions', '_meta'), { recursive: true });
 
+// Issue #159 review round 1: a sleeper's `session:` field is free text until checked against
+// the slug shape, same as the story lookup's own check.
+writeMission('slug-check', `
+title: "Slug check"
+status: active
+journey:
+  - {id: J-1, kind: session, session: tidy-otter}
+  - {id: J-2, kind: session, session: "../escape"}
+  - {id: J-3, kind: session, session: "Not_A_Slug"}
+`);
+
 test('a mission record becomes room walls: statement, docs, issues, kanban and past sessions', () => {
   const [mission] = readMissions([root]).filter((m) => m.slug === 'office-roadmap');
   assert.equal(mission.title, 'Office roadmap');
@@ -122,7 +133,18 @@ test('a session and its subagents join the room of the open mission its tool cal
   assert.deepEqual(observations.map((o) => o.display.roomKey), ['mission:office-roadmap', 'mission:office-roadmap', undefined]);
 
   const world = await plugin.world![0].world(observations);
-  assert.deepEqual(world.rooms!.map((r) => [r.key, r.state]).sort(), [['mission:office-roadmap', 'open'], ['mission:old-mission', 'locked']].sort());
+  assert.deepEqual(world.rooms!.map((r) => [r.key, r.state]).sort(),
+    [['mission:office-roadmap', 'open'], ['mission:old-mission', 'locked'], ['mission:slug-check', 'open']].sort());
+});
+
+test('AC: a sleeper\'s session field is published as the engraved name only when it has a slug\'s own shape', async () => {
+  const plugin = missionsPlugin([root]);
+  const world = await plugin.world![0].world([]);
+  const room = world.rooms!.find((r) => r.key === 'mission:slug-check')!;
+  const byId = new Map(room.sleepers!.map((sleeper) => [sleeper.id, sleeper]));
+  assert.equal(byId.get('J-1')?.name, 'tidy-otter');
+  assert.equal(byId.get('J-2')?.name, undefined, 'a session field with a path-like value is not a slug');
+  assert.equal(byId.get('J-3')?.name, undefined, 'a session field with underscores or capitals is not a slug');
 });
 
 test('without mission roots the plugin adds nothing', async () => {

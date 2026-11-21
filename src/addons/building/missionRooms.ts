@@ -8,6 +8,7 @@ import type { PickTarget } from '../../scene/Selection.js';
 import type { WorldRoom } from '../../extensions.js';
 import { ROOM_SIZE, type Rect, type RoomSlot } from './RoomPlanner.js';
 import { buildCeiling, buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
+import { sceneOf, setTombstoneName, tombstoneNameBatchFor, tombstoneNameplate } from './tombstoneNames.js';
 import { furnishWarRoom, type WarRoomCounts } from './warRoomFurnishing.js';
 
 /**
@@ -162,7 +163,10 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   group.add(tombstonesGroup);
   // One tombstone per ended session, along the side wall opposite the kanban, keyed by its own id
   // (not by position): a session that returns removes its own tombstone, not whichever is oldest.
-  const tombstones = new Map<string, { object: THREE.Object3D; hoverSign: CSS2DObject; endedAt?: string }>();
+  // `nameplate` is a child of `object` (issue #159, review round 1: a texture decal, not a
+  // floating `CSS2DObject`): it moves with the stone for free, and the scene's one shared
+  // `TombstoneNameBatch` draws every tombstone's name in a single call regardless of count.
+  const tombstones = new Map<string, { object: THREE.Object3D; nameplate: THREE.Object3D; name?: string }>();
   const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.4, 0.1), getToonMaterial(0x5a4a3a));
   door.position.copy(frame.point(slot.door.at - (slot.rect.minX + slot.rect.maxX) / 2, 0.02, 1.2));
   door.visible = false;
@@ -244,26 +248,39 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
       const sleepers = next.sleepers ?? [];
       const shown = sleepers.slice(0, MAX_TOMBSTONES);
       const keep = new Set(shown.map((entry) => entry.id));
-      for (const [id, { object, hoverSign }] of [...tombstones]) {
+      for (const [id, { object, nameplate }] of [...tombstones]) {
         if (keep.has(id)) continue;
+        // Issue #159 review round 1: stop drawing its nameplate first. The shared batch holds a
+        // reference to this handle on its own, so a removed tombstone leaves nothing behind.
+        const scene = sceneOf(object);
+        if (scene) tombstoneNameBatchFor(scene).untrack(nameplate);
         tombstonesGroup.remove(object);
-        group.remove(hoverSign);
         tombstones.delete(id);
       }
       shown.forEach((entry, i) => {
         const position = frame.point(-ROOM_SIZE / 2 + 0.7 + (i % 2) * 1.05, 2.2 + Math.floor(i / 2) * 1.6, 0);
+        const name = entry.name ?? 'Ended session';
         let item = tombstones.get(entry.id);
         if (!item) {
           const object = PIECES.tombstone().create();
           object.rotation.y = frame.faceDoor + Math.PI / 2;
+          // Issue #159, review round 1: the engraved name is a texture decal flush with the
+          // stone's grey face (`tombstoneNameplate`), not a floating `CSS2DObject`. It replaces
+          // the old hover-only sign. A handle created before the room is attached to a scene
+          // picks up its batch lazily (`BuildingLayout`'s `collect` call); one created afterward
+          // (a later `update()` on an already-attached room) tracks itself right away.
+          const nameplate = tombstoneNameplate(name);
+          object.add(nameplate);
           tombstonesGroup.add(object);
-          const hoverSign = sign(`Ended ${entry.endedAt ?? 'unknown'}`, position.clone().setY(0.6), slot.rect, true);
-          group.add(hoverSign);
-          item = { object, hoverSign, endedAt: entry.endedAt };
+          const scene = sceneOf(object);
+          if (scene) tombstoneNameBatchFor(scene).track(nameplate);
+          item = { object, nameplate, name: entry.name };
           tombstones.set(entry.id, item);
+        } else if (item.name !== entry.name) {
+          item.name = entry.name;
+          setTombstoneName(item.nameplate, name);
         }
         item.object.position.copy(position);
-        item.hoverSign.position.copy(position.clone().setY(0.6));
       });
       const extra = sleepers.length - shown.length;
       if (sleepersSign) group.remove(sleepersSign);

@@ -10,6 +10,7 @@ import { deskCameraPose, monitorWorldCorners } from './deskGeometry.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
 import { buildMissionRoom, missionSlot, type MissionRoom } from './missionRooms.js';
+import { tombstoneNameBatchFor } from './tombstoneNames.js';
 import type { WarRoomCounts } from './warRoomFurnishing.js';
 import type { WorldRoom } from '../../extensions.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
@@ -187,6 +188,9 @@ export class BuildingLayout implements LayoutStrategy {
       this.missionRooms.set(room.id, built);
       this.scene.add(built.group);
       roomLabelBatchFor(this.scene).collect(built.group);
+      // Issue #159 review round 1: a room built with sleepers already present (a reload, not a
+      // fresh mission) creates its nameplates before `this.scene.add` above; this catches them.
+      tombstoneNameBatchFor(this.scene).collect(built.group);
       for (const [key, station] of built.stations) this.stations.set(key, station);
       if (built.slot.ring === 0) this.rebuildHallWalls();
       else {
