@@ -641,6 +641,18 @@ test('a mission sign shows only when you zoom in or hover; the past sessions sig
   assert.equal(signVisible({ hovered: false, distance: far, hoverOnly: true }, view({ mode: 'all' })), true);
 });
 
+test('maxDistance overrides FIRST_PERSON_SIGN_DISTANCE in first person, for a sign meant to read from anywhere in its own room (round 7, #214: the library\'s shelf labels)', () => {
+  const beyondDefault = FIRST_PERSON_SIGN_DISTANCE + 5;
+  // Without maxDistance: unchanged, the old default still applies.
+  assert.equal(signVisible({ hovered: false, distance: beyondDefault, hoverOnly: false }, view({ viewMode: 'first-person' })), false);
+  // With a wider maxDistance: visible past the old default, right up to the override.
+  assert.equal(signVisible({ hovered: false, distance: beyondDefault, hoverOnly: false, maxDistance: 20 }, view({ viewMode: 'first-person' })), true);
+  assert.equal(signVisible({ hovered: false, distance: 21, hoverOnly: false, maxDistance: 20 }, view({ viewMode: 'first-person' })), false);
+  // maxDistance only ever widens or narrows the first-person distance check; the isometric
+  // view keeps its own separate zoom-based rule regardless (ISOMETRIC_SIGN_ZOOM, unaffected).
+  assert.equal(signVisible({ hovered: false, distance: beyondDefault, hoverOnly: false, maxDistance: 20 }, view({ zoomDistance: ISOMETRIC_SIGN_ZOOM + 1 })), false);
+});
+
 test('war room signs are marked as detail signs with their room', () => {
   const room = buildMissionRoom(missionRoom('Roadmap', 2), 0);
   const signs = room.group.children.filter((child): child is CSS2DObject => child instanceof CSS2DObject);

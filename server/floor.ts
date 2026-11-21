@@ -131,23 +131,45 @@ export class FloorResolver {
     return floor;
   }
 
+  /**
+   * The floor's own real git remote `owner/repo` (issue #221 review): distinct from
+   * `resolve()`'s own floor name, which falls back to a bare `parent-dir/repo-dir` pair when
+   * there is no remote at all (`qualifiedFloorName`'s own fallback) — a fallback pair reads
+   * exactly like a real `owner/repo` and must never be mistaken for one, e.g. to build a
+   * GitHub link to a repo of the same name that is not actually this one. Undefined for a
+   * relative `cwd`, a `cwd` outside any repo, or a real repo with no `origin` remote at all.
+   */
+  resolveRemoteOwnerRepo(cwd: string | undefined): string | undefined {
+    if (!cwd) return undefined;
+    const repoDir = this.repoDirFor(cwd);
+    return repoDir ? this.cachedRemoteOwnerRepo(repoDir) : undefined;
+  }
+
   private resolveUncached(cwd: string): string {
-    if (!path.isAbsolute(cwd)) return GENERAL_FLOOR;
+    const repoDir = this.repoDirFor(cwd);
+    return repoDir ? this.qualifiedFloorName(repoDir) : GENERAL_FLOOR;
+  }
+
+  /** The repository directory `resolve()`'s own walk would use (a worktree already resolved to
+   * its main repo), or undefined off a relative `cwd` or one outside any repository. Shared by
+   * `resolve()` and `resolveRemoteOwnerRepo()` so the two never disagree about which directory
+   * answers for a given `cwd`. */
+  private repoDirFor(cwd: string): string | undefined {
+    if (!path.isAbsolute(cwd)) return undefined;
     let current = path.resolve(cwd);
     for (let depth = 0; depth < MAX_WALK_DEPTH; depth++) {
       const git = path.join(current, '.git');
       try {
         const stat = fs.lstatSync(git);
-        if (!stat.isFile()) return this.qualifiedFloorName(current);
-        const mainDir = worktreeMainDir(git, current);
-        return mainDir ? this.qualifiedFloorName(mainDir) : GENERAL_FLOOR;
+        if (!stat.isFile()) return current;
+        return worktreeMainDir(git, current);
       } catch {
         const parent = path.dirname(current);
-        if (parent === current) return GENERAL_FLOOR;
+        if (parent === current) return undefined;
         current = parent;
       }
     }
-    return GENERAL_FLOOR;
+    return undefined;
   }
 
   /** `remoteOwnerRepo(repoDir)`, cached per repo root, capped and cleared the same way `cache` is. */

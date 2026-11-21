@@ -327,7 +327,7 @@ test('a library section and entry are cleaned and capped, and a key is hashed, n
   }]);
 });
 
-test('an entry\'s summary, lastChanged and a GitHub blob link cross the seam, built only from whitelisted parts (issue #221 AC2/AC3)', () => {
+test('an entry\'s summary, lastChanged and a GitHub blob link cross the seam, built only from remoteRepo (issue #221 AC2/AC3)', () => {
   const world = projectWorld([{ libraries: [{
     key: '/Users/gab/project-management',
     sections: [{ name: 'vendors', entries: [{
@@ -335,6 +335,7 @@ test('an entry\'s summary, lastChanged and a GitHub blob link cross the seam, bu
       repoPath: 'documentation/bibliotheque/vendors/placer.md',
     }] }],
     repo: 'gabriel-amyot/klever-project-management',
+    remoteRepo: 'gabriel-amyot/klever-project-management',
   }] }], ['floor-library'], publicId);
 
   assert.deepEqual(world.libraries[0].sections[0].entries[0], {
@@ -353,6 +354,32 @@ test('a bare repo name (no git remote resolved, server/floor.ts\'s own fallback)
   }] }], ['floor-library'], publicId);
 
   assert.equal('githubUrl' in world.libraries[0].sections[0].entries[0], false);
+});
+
+test('issue #221 review: repo carrying the directory-name fallback (same owner/repo shape as a real remote) never builds a GitHub link without a matching remoteRepo', () => {
+  const world = projectWorld([{ libraries: [{
+    key: '/Users/gab/project-management',
+    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', repoPath: 'documentation/bibliotheque/vendors/placer.md' }] }],
+    // `server/floor.ts`'s own `qualifiedFloorName` fallback: a parent-dir/repo-dir pair with
+    // no git remote behind it at all, indistinguishable from a real owner/repo by shape alone.
+    repo: 'some-parent-dir/project-management',
+    // remoteRepo deliberately absent: no real git remote resolved for this floor.
+  }] }], ['floor-library'], publicId);
+
+  assert.equal('githubUrl' in world.libraries[0].sections[0].entries[0], false);
+});
+
+test('issue #221 review: remoteRepo alone (without repo) still builds a GitHub link — the two fields are independent', () => {
+  const world = projectWorld([{ libraries: [{
+    key: '/Users/gab/project-management',
+    sections: [{ name: 'vendors', entries: [{ title: 'Placer.ai', repoPath: 'documentation/bibliotheque/vendors/placer.md' }] }],
+    remoteRepo: 'gabriel-amyot/klever-project-management',
+  }] }], ['floor-library'], publicId);
+
+  assert.equal(
+    world.libraries[0].sections[0].entries[0].githubUrl,
+    'https://github.com/gabriel-amyot/klever-project-management/blob/main/documentation/bibliotheque/vendors/placer.md',
+  );
 });
 
 test('an entry\'s own repoPath never crosses the seam itself, only the URL built from it (issue #221 AC3: no absolute local path, ever)', () => {

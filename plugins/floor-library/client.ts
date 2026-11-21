@@ -65,6 +65,22 @@ function shelfPoint(rect: Rect, door: Door, a: number, d: number, y: number): [n
 }
 
 /**
+ * Review (issue #221 FAIL round): a hit-test box's own long axis (local X, `ENTRY_HIT_GEOMETRY`/
+ * `SECTION_HIT_GEOMETRY`'s 1.0/1.2 dimension) is built to run along the shelf row — the "a"
+ * axis `shelfPoint` reads above — but that axis is world Z for a west/east door room and world
+ * X for a north/south one (the same `(-nz, nx)` pair `shelfPoint` itself uses). Left unrotated,
+ * every hit box pointed along world X regardless, so it lined up with the visible label only
+ * in a north/south-door room and sat rotated 90° off it — wrong footprint, same area — in a
+ * west/east-door one (today: the library room most commonly rents a west-door slot). A Y
+ * rotation of this box is symmetric (the geometry is centered, so the sign of the angle
+ * doesn't matter, only whether it's rotated at all): 0 for north/south, a quarter turn for
+ * west/east.
+ */
+function hitRotationY(door: Door): number {
+  return door.side === 'north' || door.side === 'south' ? 0 : Math.PI / 2;
+}
+
+/**
  * `d = 11.5` is the far wall, the same depth `furnishLibrary` already shelves at; `a` in
  * `[-1.3, 0, 1.3]` sits inside the open middle gap that plan leaves on purpose (its own
  * shelves sit off-center at `a = +/-2.2` and `+/-3.9`), so a sign never shares wall space with
@@ -84,7 +100,24 @@ const SIGN_Y = 1.9;
 const SIGN_ALONGS = [-1.3, 0, 1.3];
 const MAX_SECTIONS_SHOWN = SIGN_ALONGS.length;
 const MAX_ENTRY_LINES = 4;
-const ENTRY_LINE_HEIGHT = 0.24;
+/**
+ * Review (issue #221 FAIL round): the section label and its first entry visually merged at a
+ * normal isometric zoom. A CSS2D label never shrinks with distance (it is a fixed-size DOM
+ * element wherever it projects to), but the screen-space *gap* between two labels' world
+ * positions does shrink with distance, the same as anything else under perspective — 0.24
+ * world units between entries (0.5 between the plaque and the first entry) was simply too
+ * tight once that shrink was accounted for at a normal viewing distance. Both are wider now.
+ */
+const ENTRY_LINE_HEIGHT = 0.44;
+const PLAQUE_GAP = 0.7;
+/**
+ * Round 7 feedback (#214, reconciled here since that PR and this one touch the same file):
+ * these labels used to fade in and out depending on where the mouse pointed (`hoverOnly:
+ * true`), only within the generic war-room-sign read distance — Gabriel wants to read them by
+ * standing near the shelf, not by hunting for the one mouse position that reveals them. Every
+ * sign here is `hoverOnly: false` with its own, more generous read distance instead.
+ */
+const LIBRARY_SIGN_MAX_DISTANCE = 20;
 
 function plaqueElement(section: WorldLibrarySection): HTMLDivElement {
   const element = document.createElement('div');
@@ -183,7 +216,18 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     const roomIndex = findLibraryRoomIndex(this.scene);
     this.slot = roomIndex === undefined ? null : slotFor(roomIndex);
     const sections = this.slot ? matched.slice(0, MAX_SECTIONS_SHOWN) : [];
-    const hiddenSections = this.slot ? Math.max(0, matched.length - sections.length) : 0;
+    // Review (issue #221 FAIL round): with more than one library visible at once (`ALL_FLOORS`
+    // combining them), the hidden-sections count used to be the *global* overflow across every
+    // library combined, always attached to the last shown slot's own library — so a "+N more"
+    // sign could point a library's index at sections that actually belong to a different
+    // library entirely, which that index has no way to show. Scoped to "how many of THIS SAME
+    // library's own sections didn't get a slot" instead, the count and the index it opens
+    // always agree, however many libraries are configured.
+    const lastLibraryId = sections.length > 0 ? sections[sections.length - 1]!.libraryId : undefined;
+    const hiddenSections = this.slot && lastLibraryId !== undefined
+      ? matched.filter((candidate) => candidate.libraryId === lastLibraryId).length
+        - sections.filter((candidate) => candidate.libraryId === lastLibraryId).length
+      : 0;
     const signature = `${roomIndex}:${JSON.stringify(sections)}:${hiddenSections}`;
     if (signature === this.signature) return;
     this.signature = signature;
@@ -196,6 +240,7 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     if (along === undefined || !this.scene || !this.slot) return;
     const { rect, door } = this.slot;
     const { libraryId, sectionIndex, section } = matched;
+    const rotationY = hitRotationY(door);
     const add = (object: THREE.Object3D): void => {
       this.scene!.add(object);
       this.mounted.push(object);
@@ -203,16 +248,21 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     const addHit = (id: string, position: [number, number, number], geometry: THREE.BufferGeometry): void => {
       const hit = new THREE.Mesh(geometry, HIT_MATERIAL);
       hit.position.set(...position);
+      hit.rotation.y = rotationY;
       add(hit);
       this.picks.push({ id, object: hit });
     };
+    // Round 7 (#214): no longer hover-only, and read from `LIBRARY_SIGN_MAX_DISTANCE` away —
+    // every sign in this room shares both, not just the section label.
+    const detailSign = { rect, hoverOnly: false, maxDistance: LIBRARY_SIGN_MAX_DISTANCE };
 
     // The section label (issue #221 AC2): clickable, opens the section card listing every
     // file the section carries, not just the few shown below.
-    const plaquePos = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y + 0.5);
+    const plaquePos = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y + PLAQUE_GAP);
     const plaque = new CSS2DObject(plaqueElement(section));
     plaque.position.set(...plaquePos);
-    plaque.userData.detailSign = { rect, hoverOnly: false };
+    plaque.userData.detailSign = detailSign;
+    plaque.userData.shelfRole = 'plaque';
     add(plaque);
     const sectionId = librarySectionId(libraryId, sectionIndex);
     addHit(sectionId, plaquePos, SECTION_HIT_GEOMETRY);
@@ -224,7 +274,8 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
       const position = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y - entryIndex * ENTRY_LINE_HEIGHT);
       const object = new CSS2DObject(entryElement(entry));
       object.position.set(...position);
-      object.userData.detailSign = { rect, hoverOnly: true };
+      object.userData.detailSign = detailSign;
+      object.userData.shelfRole = 'entry';
       add(object);
       addHit(libraryEntryId(libraryId, sectionIndex, entryIndex), position, ENTRY_HIT_GEOMETRY);
     });
@@ -242,13 +293,15 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
       const position = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y - shown.length * ENTRY_LINE_HEIGHT);
       const object = new CSS2DObject(moreElement(lines));
       object.position.set(...position);
-      object.userData.detailSign = { rect, hoverOnly: true };
+      object.userData.detailSign = detailSign;
+      object.userData.shelfRole = 'more';
       add(object);
       // The bigger reveal wins the click target when both apply: a whole missing library
       // section is a larger "never hidden" gap than a few extra files already reachable one
       // click away through the section card below — and the index itself still links back into
       // this very section (`src/ui/LibraryCard.ts`'s own index-to-section navigation), so
-      // nothing here is actually a dead end either way.
+      // nothing here is actually a dead end either way. `hiddenSections` is already scoped to
+      // this section's own library (`worldChanged`), so the index it opens always matches.
       addHit(hiddenSections > 0 ? libraryIndexId(libraryId) : sectionId, position, ENTRY_HIT_GEOMETRY);
     }
   }

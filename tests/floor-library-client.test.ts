@@ -89,7 +89,7 @@ test('on "all floors" with more than one library configured, every one\'s sectio
     library('harness', [{ name: 'skills', entries: [{ title: 'write-a-skill' }] }], 'lib-b'),
   ]));
   const signs = shelfSigns(scene);
-  const plaqueTexts = signs.filter((sign) => sign.userData.detailSign.hoverOnly === false)
+  const plaqueTexts = signs.filter((sign) => sign.userData.shelfRole === 'plaque')
     .map((sign) => (sign as THREE.Object3D & { element: HTMLElement }).element.textContent);
   assert.deepEqual(plaqueTexts, ['vendors', 'skills']);
 });
@@ -108,10 +108,10 @@ test('a focused floor with a matching library mounts one plaque and one line per
   extension.worldChanged(world([library('pm-floor', sections)]));
   const signs = shelfSigns(scene);
 
-  const plaques = signs.filter((sign) => sign.userData.detailSign.hoverOnly === false);
+  const plaques = signs.filter((sign) => sign.userData.shelfRole === 'plaque');
   assert.deepEqual(plaques.map((sign) => (sign as THREE.Object3D & { element: HTMLElement }).element.textContent), ['vendors', 'domain', 'surfaces']);
 
-  const lines = signs.filter((sign) => sign.userData.detailSign.hoverOnly === true)
+  const lines = signs.filter((sign) => sign.userData.shelfRole === 'entry' || sign.userData.shelfRole === 'more')
     .map((sign) => (sign as THREE.Object3D & { element: HTMLElement }).element.textContent);
   // vendors: both its entries fit under the 4-line cap, nothing truncated, not the last slot —
   // no "more" sign for it at all.
@@ -179,6 +179,69 @@ test('a library shelf and its pick targets add zero draw calls: CSS2D labels car
   ];
   extension.worldChanged(world([library('pm-floor', sections)]));
   assert.ok(extension.pickTargets().length > 0, 'the budget claim means nothing without real pick targets mounted');
+  // Review: `countDrawCalls` reads each mesh's own `matrixWorld`, which only `updateMatrixWorld`
+  // refreshes — without it every newly added hit-test mesh is still at the identity matrix (the
+  // scene's own origin), nowhere near the camera's frustum, so this assertion would pass even if
+  // `callsOf` and `material.visible` were both wrong: the meshes would be "zero calls" simply
+  // because they look culled at the wrong place, not because they are genuinely invisible.
+  scene.updateMatrixWorld(true);
   const after = countDrawCalls(scene, camera);
   assert.equal(after.total, before.total);
+  // Positive control: the exact same geometry and positions, but with a visible material,
+  // must show up in the count. Without this, a regression that flips `HIT_MATERIAL.visible`
+  // back to `true` would still pass the assertion above for the wrong reason (frustum culling
+  // at the origin, not `material.visible`), rather than failing as it should.
+  const visibleProbe = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.22, 0.2), new THREE.MeshBasicMaterial({ visible: true }));
+  const firstHit = extension.pickTargets()[0]!.object as THREE.Mesh;
+  visibleProbe.position.copy(firstHit.position);
+  scene.add(visibleProbe);
+  scene.updateMatrixWorld(true);
+  const withVisibleProbe = countDrawCalls(scene, camera);
+  assert.ok(withVisibleProbe.total > after.total, 'a visible mesh at a real shelf position must move the count, or this test cannot catch a flipped material.visible');
+  visibleProbe.removeFromParent();
+});
+
+test('issue #221 FAIL round: a hit box is rotated to match its label\'s own orientation, so a click along the shelf row (not just dead center) still hits it, on the library room\'s real (west) door', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoom(); // room-1-library -> slotFor(1) -> a west-door room
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }])]));
+
+  const entryHit = extension.pickTargets().find((target) => target.id.startsWith('lib-entry:'))!;
+  assert.ok(entryHit, 'the one entry mounted has its own pick target');
+  const mesh = entryHit.object as THREE.Mesh;
+  scene.updateMatrixWorld(true);
+
+  // A west door room's own "along the shelf row" axis is world Z (`shelfPoint`'s own `-nz*a`
+  // term with `nz = 0` for west): offset the ray along Z, not X, by less than the hit box's
+  // own half-length (1.0 / 2 = 0.5) but well past its own half-depth (0.2 / 2 = 0.1) — a click
+  // that visibly lands on the label's own row, not its exact center point. Before the fix,
+  // this box's long axis ran along world X regardless of door side, so the same offset along Z
+  // would miss it entirely (the box's Z footprint was only +/-0.1).
+  const origin = mesh.position.clone().setY(mesh.position.y + 5);
+  const alongZOffset = new THREE.Vector3(mesh.position.x, mesh.position.y, mesh.position.z + 0.4);
+  const raycaster = new THREE.Raycaster(origin, alongZOffset.clone().sub(origin).normalize());
+  const hits = raycaster.intersectObject(mesh, false);
+  assert.ok(hits.length > 0, 'a point offset along the shelf row\'s own axis still hits the (rotated) box');
+});
+
+test('issue #221 FAIL round: in "all floors" with two libraries, the "+N more" sign on an overflowing library opens THAT library\'s own index, never a different library\'s', () => {
+  setFocusedFloor(ALL_FLOORS);
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  // Library A alone already has more sections (4) than the room's own 3 wall slots; library B
+  // (a single section) is listed after it and never gets a slot at all under the combined cap.
+  const libraryA = library('floor-a', [
+    { name: 'vendors', entries: [{ title: 'Placer.ai' }] },
+    { name: 'domain', entries: [{ title: 'Proximity' }] },
+    { name: 'surfaces', entries: [{ title: 'Registry' }] },
+    { name: 'clients', entries: [{ title: 'Clover' }] }, // A's own 4th section: no slot
+  ], 'lib-a');
+  const libraryB = library('floor-b', [{ name: 'skills', entries: [{ title: 'write-a-skill' }] }], 'lib-b');
+  extension.worldChanged(world([libraryA, libraryB]));
+
+  const moreSignId = extension.pickTargets().find((target) => target.id.startsWith('lib-index:'))?.id;
+  assert.equal(moreSignId, libraryIndexId('lib-a'), 'the overflow is library A\'s own 4th section, so the sign must open A\'s index, never B\'s — B never even got a slot to overflow from');
 });
