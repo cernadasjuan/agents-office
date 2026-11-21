@@ -160,20 +160,25 @@ export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlo
   // table — a war room is a work space, not a place to relax; an idle mission agent goes to
   // the main room's lounge instead (`BuildingLayout.ts`'s routing). ---
   const nearWall = WAR_ROOM_WIDTH / 2 - 0.1; // just inside the side walls (a = ±9)
-  pieces.push({ piece: PIECES.clock(), a: jitter(rand, -1.6, 0.1), d: jitter(rand, ROOM_SIZE - 0.15, 0.05), y: 2.3 });
-  const whiteboardA = jitter(rand, -2.4, 0.08);
+  // Issue #223: Gabriel named the clock, the whiteboard and the bookshelf as the pieces
+  // standing in front of the far wall's display boards ("the library shelf, the clock and the
+  // whiteboard should not be in front of those"). All three still stand against the far wall
+  // (the same reasoning as before: the side walls are already spoken for, tombstones and
+  // kanban), but out past the board row's own span (statement/docs/issues tile a = -4.8 to
+  // 4.8, `missionRooms.ts`), clear of `missionRooms.ts`'s new sessions board too (a = 5.3 to
+  // 7.9, on the kanban side wall, not this one, but kept this far out anyway for the hex
+  // rebuild's sake). Checked clear of the plant spots below and of the desk grid (a different
+  // depth entirely) by hand; `tests/war-room-furnishing.test.ts` guards the no-overlap rule.
+  pieces.push({ piece: PIECES.clock(), a: jitter(rand, -7.6, 0.1), d: jitter(rand, ROOM_SIZE - 0.15, 0.05), y: 2.3 });
+  const whiteboardA = jitter(rand, -6.8, 0.08);
   const whiteboardD = jitter(rand, ROOM_SIZE - 0.6, 0.08);
-  // The whiteboard and bookshelf stand against the far wall, not a side wall: a side wall on
-  // this side also carries the ended-session tombstone strip (`missionRooms.ts`), which can
-  // grow the full depth of the room, so nothing else stands against that wall. Facing the
-  // door (no turn) like the far-wall shelves in `furnishLibrary`, clear of the door-wall gap
-  // rule and of the statement/docs/issues boards mounted at a = 0, -3.6 and 3.6.
+  // Facing the door (no turn), the same as before.
   pieces.push({ piece: PIECES.whiteboard(), a: whiteboardA, d: whiteboardD });
   // Issue #126: a planning agent stands at this board, facing it (a = same, standing closer to
   // the room, since the board now faces the door rather than the side wall it used to).
   stations.push({ type: 'planning', a: whiteboardA, d: whiteboardD - 0.9, look: [whiteboardA, whiteboardD, 1.5], posture: 'standing' });
 
-  const bookshelfA = jitter(rand, 2.6, 0.08);
+  const bookshelfA = jitter(rand, 6.8, 0.08);
   const bookshelfD = jitter(rand, ROOM_SIZE - 0.6, 0.08);
   pieces.push({ piece: PIECES.bookshelf(undefined, rand, BOOKSHELF_COLORS), a: bookshelfA, d: bookshelfD });
   // Issue #126: a researching agent stands at the mission's own shelf, not the library

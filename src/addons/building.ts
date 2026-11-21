@@ -31,6 +31,11 @@ registerLayout('building', (scene, stations) => {
 registerExtension({
   id: 'building-world-rooms',
   worldChanged: (world) => { activeBuilding?.syncWorldRooms(world.rooms); },
-  // A war room's tombstones (issue #127) and issue board (issue #146), pickable by a click.
-  pickTargets: () => [...(activeBuilding?.tombstonePickTargets() ?? []), ...(activeBuilding?.issuesBoardPickTargets() ?? [])],
+  // A war room's tombstones (issue #127), issue board (issue #146) and live-sessions board
+  // (issue #223), pickable by a click.
+  pickTargets: () => [
+    ...(activeBuilding?.tombstonePickTargets() ?? []),
+    ...(activeBuilding?.issuesBoardPickTargets() ?? []),
+    ...(activeBuilding?.sessionsBoardPickTargets() ?? []),
+  ],
 });

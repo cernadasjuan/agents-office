@@ -37,6 +37,11 @@ export interface LayoutAgent {
   id: string;
   activity: Activity;
   extras?: AgentExtras;
+  /** The caller (`AgentManager`) always passes the full `AgentInfo`, which has a name; declared
+   * optional here only because a layout's own seat-choosing logic has never needed it before
+   * issue #223's display wall, which reads it off the same object `BuildingLayout` already
+   * tracks per agent, rather than carry a second, parallel agent list just for a name. */
+  name?: string;
 }
 
 /**

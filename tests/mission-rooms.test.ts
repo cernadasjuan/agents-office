@@ -276,6 +276,39 @@ test('the issue board is pickable, and its pick id points at this room', () => {
   assert.ok(target.object instanceof THREE.Object3D);
 });
 
+test('issue #223: the sessions board shares the kanban mesh (no extra draw call) and its `resolve` reaches the clicked session', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const kanbanLikeTarget = missionRoom.issuesBoardPickTarget(); // a different mesh, for the identity check below
+  const target = missionRoom.sessionsBoardPickTarget();
+  assert.equal(target.id, 'sessions-board:a');
+  assert.notEqual(target.object, kanbanLikeTarget.object, 'the sessions pick target is not the issues board');
+  assert.ok(target.resolve, 'resolves a row, rather than selecting the board mesh itself');
+
+  missionRoom.updateSessions([
+    { id: 'agent-1', name: 'Amelia', extras: { stuck: true } },
+    { id: 'agent-2', name: 'Quinn', extras: {} },
+  ]);
+  const hitAt = (v: number) => ({ uv: new THREE.Vector2(0.5, v) }) as THREE.Intersection;
+  // The top half of the board is the kanban section: never a session, whatever v is.
+  assert.equal(target.resolve!(hitAt(0.9)), null);
+  // The bottom half's own title band ("Sessions"), just under the kanban/sessions divider.
+  assert.equal(target.resolve!(hitAt(0.45)), null);
+  // Row 0 (blocked ranks first) and row 1.
+  assert.equal(target.resolve!(hitAt(0.35)), 'agent-1');
+  assert.equal(target.resolve!(hitAt(0.25)), 'agent-2');
+  // Past the last drawn row: no stale selection.
+  assert.equal(target.resolve!(hitAt(0.05)), null);
+});
+
+test('issue #223: no live sessions resolves to no selection anywhere on the board', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.updateSessions([]);
+  const target = missionRoom.sessionsBoardPickTarget();
+  for (const v of [0.9, 0.45, 0.35, 0.25, 0.05]) {
+    assert.equal(target.resolve!({ uv: new THREE.Vector2(0.5, v) } as THREE.Intersection), null, `v=${v}`);
+  }
+});
+
 // --- Issue #123 review (blocking defect 1): RoomFrame used a fixed ROOM_SIZE depth
 // regardless of door orientation, and the war room's own rect kept WAR_ROOM_WIDTH on the
 // wrong axis once the corridor fix moved the door to the east/west wall — together, these put

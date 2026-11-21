@@ -401,6 +401,33 @@ test('agents of a mission work in its war room, their helpers stand near them, a
   assert.doesNotMatch(late.key, /^mission/);
 });
 
+// --- Issue #223: the display wall's live-sessions list, through the real BuildingLayout ---
+
+test('the sessions board picks up a mission\'s own live agents on the next tick, by agent.extras.room', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  layout.seatFor(agent('blocked-one', 'implementing', { room: 'room-1', stuck: true }), null);
+  layout.seatFor(agent('working-one', 'researching', { room: 'room-1' }), null);
+  tick(0);
+
+  const [target] = layout.sessionsBoardPickTargets();
+  assert.ok(target, 'one war room, one sessions board target');
+  // Row 0 is "blocked" (ranked first); row 1 is "working" (the only other state present).
+  const hitAt = (v: number) => target.resolve!({ uv: new THREE.Vector2(0.5, v) } as THREE.Intersection);
+  assert.equal(hitAt(0.35), 'blocked-one');
+  assert.equal(hitAt(0.25), 'working-one');
+});
+
+test('an idle session still shows on its mission\'s sessions board, even though it physically sits in the lounge', () => {
+  const { layout, agent, tick } = setup();
+  layout.syncWorldRooms([missionRoom()]);
+  layout.seatFor(agent('idler', 'idle', { room: 'room-1' }), null);
+  tick(0);
+
+  const [target] = layout.sessionsBoardPickTargets();
+  assert.equal(target.resolve!({ uv: new THREE.Vector2(0.5, 0.35) } as THREE.Intersection), 'idler');
+});
+
 // --- Issue #191: a floor shows only its own mission war rooms ---
 
 /** The title text actually drawn on a built mission room's own label, by its scene index

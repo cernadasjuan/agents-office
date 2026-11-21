@@ -10,6 +10,7 @@ import { ROOM_SIZE, type Door, type Rect, type RoomSlot, type Side } from './Roo
 import { buildCeiling, buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
 import { sceneOf, setTombstoneName, tombstoneNameBatchFor, tombstoneNameplate } from './tombstoneNames.js';
 import { furnishWarRoom, WAR_ROOM_WIDTH, type WarRoomCounts } from './warRoomFurnishing.js';
+import { MAX_SESSION_ROWS, sessionLines, sessionRows, type SessionEntry, type SessionRow } from './displayWall.js';
 
 /**
  * The mission wing: war rooms north of the hall, behind its back wall, two columns either
@@ -120,6 +121,46 @@ export function canvasBoard(width: number, height: number): { mesh: THREE.Mesh; 
 }
 
 /**
+ * A board split into equal horizontal sections, each its own title and lines (issue #223): the
+ * kanban board also carries the live-sessions list, on the same mesh, so the display wall adds
+ * no new per-room draw call (the growth-rate guard in
+ * `tests/mission-corridor-render-budget.test.ts` polices exactly that cost; a canvas board's
+ * material cannot merge into `StaticMerge`'s batch, so every extra board mesh is a real,
+ * permanent cost per war room). Top to bottom, the same reading order `canvasBoard` uses.
+ */
+export function canvasBoardSections(width: number, height: number): { mesh: THREE.Mesh; draw: (sections: Array<{ title: string; lines: string[] }>) => void } {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = Math.round(512 * (height / width));
+  const texture = new THREE.CanvasTexture(canvas);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: texture }));
+  const draw = (sections: Array<{ title: string; lines: string[] }>) => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx || sections.length === 0) return;
+    ctx.fillStyle = '#f7f3ea';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const sectionHeight = canvas.height / sections.length;
+    sections.forEach((section, i) => {
+      const top = i * sectionHeight;
+      if (i > 0) {
+        ctx.strokeStyle = '#cfc8b8';
+        ctx.beginPath();
+        ctx.moveTo(10, top);
+        ctx.lineTo(canvas.width - 10, top);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#2a2a3e';
+      ctx.font = 'bold 26px system-ui, sans-serif';
+      ctx.fillText(section.title.slice(0, 34), 16, top + 30);
+      ctx.font = '19px system-ui, sans-serif';
+      section.lines.slice(0, Math.floor((sectionHeight - 44) / 24)).forEach((line, j) => ctx.fillText(line.slice(0, 44), 16, top + 60 + j * 24));
+    });
+    texture.needsUpdate = true;
+  };
+  return { mesh, draw };
+}
+
+/**
  * A war room sign. It is a detail sign: the label controller shows it only when
  * the camera is close or the pointer is over its room (`hoverOnly`: hover only).
  */
@@ -159,6 +200,18 @@ export interface MissionRoom {
   tombstonePickTargets(): PickTarget[];
   /** This room's issue board, pickable by a click (issue #146): opens the real-link list. */
   issuesBoardPickTarget(): PickTarget;
+  /**
+   * The live sessions board (issue #223 AC3): who works this mission right now, and whether
+   * each one works, waits or is blocked. Refreshed on the agent poll (3 s), not the slower
+   * world poll `update()` answers to — a mission's statement and issues barely change
+   * minute to minute, but who is in the room does.
+   */
+  updateSessions(entries: SessionEntry[]): void;
+  /** The sessions board, pickable by a click (issue #223 AC4): `resolve` turns the row the ray
+   * hit into that session's own real agent id, so the click opens the normal agent card — no
+   * new card type, the same selection every figure and triage row already drives, and no new
+   * mesh per row either (the draw-call budget's growth-rate guard would catch exactly that). */
+  sessionsBoardPickTarget(): PickTarget;
 }
 
 const FLOOR_OPEN = 0x6f7f9a;
@@ -215,12 +268,23 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
     stations.set(key(TABLE_SEATS + i), { type, position, lookAt: center.clone().setY(1.2), occupied: false, posture: 'standing' });
   }
 
-  // Wall boards: the statement on the far wall, docs and issues beside it, the kanban on a side wall
+  // Wall boards: the statement on the far wall, docs and issues beside it, the kanban on a
+  // side wall. Issue #223: the live-sessions list shares the kanban board's own mesh, as a
+  // second section on the same canvas (`canvasBoardSections`), rather than a mesh of its own —
+  // a canvas board's material cannot merge into `StaticMerge`'s batch, so a 5th board would be
+  // a real, permanent extra draw call in every war room, the exact thing
+  // `tests/mission-corridor-render-budget.test.ts`'s growth-rate guard exists to catch. This
+  // wall (a = doorWallLength / 2, opposite the tombstones) carries no floor furniture at all,
+  // so nothing ever stands in front of it, the "no furniture in front" rule (AC1) without
+  // needing a new wall-finding seam for a rectangle room: a war room's four walls are already
+  // fixed roles (door, far, tombstones, kanban+sessions). The far wall's own
+  // clock/whiteboard/bookshelf moved clear of its own board row for the same reason
+  // (`warRoomFurnishing.ts`).
   const boards = {
     statement: canvasBoard(3.6, 1.6),
     docs: canvasBoard(2.4, 1.6),
     issues: canvasBoard(2.4, 1.6),
-    kanban: canvasBoard(3.6, 1.8),
+    kanban: canvasBoardSections(3.6, 1.8),
   };
   const mount = (mesh: THREE.Mesh, a: number, d: number, y: number, rotationY: number) => {
     mesh.position.copy(frame.point(a, d, y));
@@ -235,6 +299,32 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   // the east/west wall, the door-wall's real length became the rect's z-span instead, and the
   // board floated 3+ meters off the side wall it is meant to sit flush against.
   mount(boards.kanban.mesh, doorWallLength / 2 - 0.12, 6, 1.7, frame.faceDoor - Math.PI / 2);
+
+  // Issue #223: the kanban board's own two sections, top to bottom — kanban columns, then
+  // live sessions. Each half redraws independently (`update()` on the slower world poll,
+  // `updateSessions()` on the 3 s agent poll), so both share one `redrawKanban` that always
+  // repaints from the latest of each, never half-stale.
+  let lastKanbanLines: string[] = [];
+  let currentSessionRows: SessionRow[] = [];
+  const redrawKanban = () => boards.kanban.draw([
+    { title: 'Kanban', lines: lastKanbanLines },
+    { title: 'Sessions', lines: sessionLines(currentSessionRows) },
+  ]);
+
+  // Issue #223 AC4: which session a click on the board landed on, from the ray hit's own UV
+  // (`PickTarget.resolve`, `scene/Selection.ts`) — not an extra mesh per row. The sessions
+  // section is the bottom half of the board (v in [0, 0.5), `PlaneGeometry`'s v = 1 at the
+  // top); a hit in the kanban half, in the section's own title band, or past the last row
+  // actually drawn resolves to no selection (not the nearest row) — a stale row position must
+  // never pretend to be the session that used to be there.
+  const resolveSessionRow = (hit: THREE.Intersection): string | null => {
+    if (!hit.uv || hit.uv.y >= 0.5) return null;
+    const localV = hit.uv.y / 0.5;
+    const band = 1 / (MAX_SESSION_ROWS + 1);
+    if (localV > 1 - band) return null; // the "Sessions" section title
+    const rowIndex = Math.floor((1 - band - localV) / band);
+    return currentSessionRows[rowIndex]?.id ?? null;
+  };
 
   // Issue #124: the title and lock signs sit on the far wall, over the statement board, not
   // near the door frame (the narration: "they are in the door frames so it's kind of weird").
@@ -322,6 +412,11 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
     },
     tombstonePickTargets: () => [...tombstones].map(([id, { object }]) => ({ id, object })),
     issuesBoardPickTarget: () => ({ id: `issues:${room.id}`, object: boards.issues.mesh }),
+    updateSessions(entries: SessionEntry[]) {
+      currentSessionRows = sessionRows(entries);
+      redrawKanban();
+    },
+    sessionsBoardPickTarget: () => ({ id: `sessions-board:${room.id}`, object: boards.kanban.mesh, resolve: resolveSessionRow }),
     update(next: WorldRoom) {
       result.locked = next.state === 'locked';
       result.title = next.title;
@@ -334,8 +429,9 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
       boards.statement.draw('Mission', (next.walls.statement ?? '').match(/.{1,44}(\s|$)/g)?.map((line) => line.trim()) ?? []);
       boards.docs.draw('Documents', next.walls.docs ?? []);
       boards.issues.draw('Issues', (next.walls.issues ?? []).map((issue) => `${issue.state === 'closed' ? '✓' : '○'} #${issue.number} ${issue.title}`));
-      boards.kanban.draw('Kanban', (next.walls.kanban ?? []).flatMap((column) =>
-        [`${column.column} (${column.cards.length})`, ...column.cards.slice(0, 3).map((card) => `  T-${card.number} ${card.title}`)]));
+      lastKanbanLines = (next.walls.kanban ?? []).flatMap((column) =>
+        [`${column.column} (${column.cards.length})`, ...column.cards.slice(0, 3).map((card) => `  T-${card.number} ${card.title}`)]);
+      redrawKanban();
       // One tombstone per ended session, shown up to the cap; a session no longer in the list
       // (it returned, or scrolled past the cap) removes by id, never by trimming the oldest.
       const sleepers = next.sleepers ?? [];
@@ -384,5 +480,6 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
     },
   };
   result.update(room);
+  result.updateSessions([]);
   return result;
 }

@@ -20,6 +20,7 @@ import {
 } from './missionRooms.js';
 import { tombstoneNameBatchFor } from './tombstoneNames.js';
 import type { WarRoomCounts } from './warRoomFurnishing.js';
+import type { SessionEntry } from './displayWall.js';
 import type { WorldRoom } from '../../extensions.js';
 import { matchesFloor } from '../../floors/FloorRegistry.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
@@ -259,6 +260,11 @@ export class BuildingLayout implements LayoutStrategy {
     return [...this.missionRooms.values()].map((room) => room.issuesBoardPickTarget());
   }
 
+  /** Every war room's live-sessions board, one pick target per session row shown (issue #223 AC4). */
+  sessionsBoardPickTargets(): PickTarget[] {
+    return [...this.missionRooms.values()].map((room) => room.sessionsBoardPickTarget());
+  }
+
   /**
    * Where the camera should go to show a named room (issue #89, `#room=`). A room kind
    * ("office": always the first one, "Your office", never a later overflow waiting room;
@@ -442,14 +448,27 @@ export class BuildingLayout implements LayoutStrategy {
   private growMissionFurniture(): void {
     if (this.missionRooms.size === 0) return;
     const counts = new Map<string, WarRoomCounts>();
+    // Issue #223: the display wall's own live-sessions list, by `agent.extras.room` (the
+    // mission a session belongs to) rather than `state.target` (where it is routed right
+    // now): an idle session still "works the mission" and should still show on its wall, even
+    // though issue #209 sends it to the lounge rather than leaving it seated in the room.
+    const sessions = new Map<string, SessionEntry[]>();
     for (const state of this.agents.values()) {
       const roomId = state.target?.startsWith('room:') ? state.target.slice('room:'.length) : null;
-      if (!roomId || !this.missionRooms.has(roomId)) continue;
-      const entry = counts.get(roomId) ?? { deskLike: 0, debugging: 0 };
-      if (state.agent.activity === 'debugging') entry.debugging++;
-      else if (WAR_ROOM_DESK_LIKE.has(state.agent.activity)) entry.deskLike++;
-      counts.set(roomId, entry);
+      if (roomId && this.missionRooms.has(roomId)) {
+        const entry = counts.get(roomId) ?? { deskLike: 0, debugging: 0 };
+        if (state.agent.activity === 'debugging') entry.debugging++;
+        else if (WAR_ROOM_DESK_LIKE.has(state.agent.activity)) entry.deskLike++;
+        counts.set(roomId, entry);
+      }
+      const missionId = state.agent.extras?.room;
+      if (missionId && this.missionRooms.has(missionId)) {
+        const list = sessions.get(missionId) ?? [];
+        list.push({ id: state.agent.id, name: state.agent.name ?? state.agent.id, extras: state.agent.extras });
+        sessions.set(missionId, list);
+      }
     }
+    for (const [id, room] of this.missionRooms) room.updateSessions(sessions.get(id) ?? []);
     let grew = false;
     for (const [id, room] of this.missionRooms) {
       const before = room.peakCounts;
