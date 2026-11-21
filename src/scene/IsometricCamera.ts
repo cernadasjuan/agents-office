@@ -98,6 +98,19 @@ export class IsometricController {
   /** How far the near/far planes reach past the framed bounds; read by `applyIsometricState` so the far plane always covers them. */
   reach = 40;
   private bounds = new THREE.Box3(new THREE.Vector3(-15, 0, -13), new THREE.Vector3(15, 0, 13));
+  /**
+   * Issue #242 review: the bounds of an explicit room flight (`#room=`, a room double-click)
+   * that sat outside the default overview bounds (the hex structure, built deliberately clear
+   * of the rect building so it never widens the overview's own default zoom — see
+   * `HexRooms.ts`). While set, every position clamp below (`retrack`, `pan`, `shiftTarget`)
+   * widens to `bounds.union(pinnedBounds)` instead of `bounds` alone — so landing on the hex
+   * structure, then panning or zooming to look around it, never snaps back to the rect
+   * building (review round 2: the first wheel tick or drag used to do exactly that, because
+   * `pan`/`shiftTarget` clamped to the plain default bounds regardless of any pin). Cleared
+   * automatically once the target actually leaves this box — a user who pans away for good
+   * returns to the plain default clamp, the same as before this existed.
+   */
+  private pinnedBounds: THREE.Box3 | null = null;
 
   /** Center the box and zoom so that every corner is on screen: the one-shot framing a fresh entry into the view uses. */
   frame(bounds: THREE.Box3, aspect: number): void {
@@ -108,20 +121,64 @@ export class IsometricController {
     this.applyBounds(box, aspect);
   }
 
+  /** Keeps every position clamp below from snapping `target` back out of this box (issue #242 review). */
+  pinBounds(bounds: THREE.Box3): void {
+    this.pinnedBounds = bounds.clone();
+  }
+
+  /** Explicitly drops the pin (issue #242 review): the normal bounds clamp alone applies again. */
+  clearPin(): void {
+    this.pinnedBounds = null;
+  }
+
+  /** The box every position clamp below uses: the default bounds, widened to include the
+   * pinned room while the target is still inside it (issue #242 review). */
+  private clampBox(): THREE.Box3 {
+    return this.pinnedBounds ? this.bounds.clone().union(this.pinnedBounds) : this.bounds;
+  }
+
+  /** Clamps `target` into `clampBox()` (used by `retrack`: a scene change or resize, never a
+   * reason to drop the pin on its own — the camera may not even be inside the room yet). */
+  private clampTarget(): void {
+    const box = this.clampBox();
+    this.target.x = THREE.MathUtils.clamp(this.target.x, box.min.x, box.max.x);
+    this.target.z = THREE.MathUtils.clamp(this.target.z, box.min.z, box.max.z);
+  }
+
+  /** Same clamp as `clampTarget`, but also drops the pin once `target` is no longer inside it
+   * — used only by the user's own pan/zoom, so panning away from a pinned room for good
+   * narrows back to the plain default bounds, the same bounds every other layout's overview
+   * ever had (issue #242 review). Never called from `retrack`: a scene change alone must
+   * never un-pin a room the user has not actually panned away from. */
+  private clampTargetAndUnpinIfLeft(): void {
+    this.clampTarget();
+    if (this.pinnedBounds && !this.pinnedBounds.containsPoint(this.target)) {
+      this.pinnedBounds = null;
+      // Review round 3: dropping the pin narrows `clampBox()` back to the plain default
+      // bounds. Re-clamp now, in the same call, so the drag/zoom that left the room never
+      // leaves `target` sitting outside the new (narrower) box until some later input or
+      // scene poll snaps it back unexpectedly.
+      this.clampTarget();
+    }
+  }
+
   /**
    * Issue #113: re-derive the pan/zoom limits for new bounds or a new aspect (a room added or
    * removed, a window resize), without moving `target`/`halfHeight` unless the current goal now
    * falls outside the new limits. Only the goal is clamped here — the live camera the follower
    * is chasing is never touched directly, so a bounds change alone never jumps it; the follower
    * simply eases toward wherever the reclamped goal now sits.
+   *
+   * The default clamp box is untouched by a pin (issue #242 review): `maxHalfHeight` and
+   * `reach` still derive from `bounds` alone, so the default zoom-out limit for ordinary
+   * panning/zooming never changes. Only the position clamp (`clampTarget`) widens.
    */
   retrack(bounds: THREE.Box3, aspect: number): void {
     const box = bounds.clone();
     box.max.y = Math.max(box.max.y, box.min.y + MIN_FRAME_HEIGHT);
     this.applyBounds(box, aspect);
     this.halfHeight = THREE.MathUtils.clamp(this.halfHeight, this.minHalfHeight, this.maxHalfHeight);
-    this.target.x = THREE.MathUtils.clamp(this.target.x, this.bounds.min.x, this.bounds.max.x);
-    this.target.z = THREE.MathUtils.clamp(this.target.z, this.bounds.min.z, this.bounds.max.z);
+    this.clampTarget();
   }
 
   private applyBounds(box: THREE.Box3, aspect: number): void {
@@ -147,14 +204,14 @@ export class IsometricController {
     const forwardOnFloor = new THREE.Vector3(-back.x, 0, -back.z).normalize();
     const rightOnFloor = new THREE.Vector3(-forwardOnFloor.z, 0, forwardOnFloor.x);
     this.target.addScaledVector(rightOnFloor, right).addScaledVector(forwardOnFloor, forward);
-    this.target.x = THREE.MathUtils.clamp(this.target.x, this.bounds.min.x, this.bounds.max.x);
-    this.target.z = THREE.MathUtils.clamp(this.target.z, this.bounds.min.z, this.bounds.max.z);
+    this.clampTargetAndUnpinIfLeft();
   }
 
   /** Move the target by a world-space offset on the floor (x, z), clamped like `pan`. */
   shiftTarget(dx: number, dz: number): void {
-    this.target.x = THREE.MathUtils.clamp(this.target.x + dx, this.bounds.min.x, this.bounds.max.x);
-    this.target.z = THREE.MathUtils.clamp(this.target.z + dz, this.bounds.min.z, this.bounds.max.z);
+    this.target.x += dx;
+    this.target.z += dz;
+    this.clampTargetAndUnpinIfLeft();
   }
 
   focusOn(point: THREE.Vector3): void {

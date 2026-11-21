@@ -767,6 +767,28 @@ test('roomView returns null for a kind that is not yet open and for any unknown 
   assert.equal(layout.roomView(''), null);
 });
 
+// --- roomView: the hex Hub and Office (issue #218 steps 2/3 review, #room=hub/#room=hex-office) ---
+
+test('roomView("hub") and roomView("hex-office") frame the new hex rooms, "office" still frames the rect one', () => {
+  const { layout } = setup();
+  const hub = layout.roomView('hub')!;
+  const hexOffice = layout.roomView('hex-office')!;
+  assert.ok(hub, 'the hub always exists');
+  assert.ok(hexOffice, 'the hex office always exists');
+  assert.ok(hub.bounds.max.y > hub.bounds.min.y, 'has floor-to-wall height');
+  assert.ok(hexOffice.bounds.max.y > hexOffice.bounds.min.y, 'has floor-to-wall height');
+  // The hex office and the rect office are two different rooms: #room=office must keep
+  // resolving to the rect room, unchanged by the hex structure's own existence.
+  const rectOffice = layout.roomView('office')!;
+  assert.notDeepEqual(rectOffice.bounds, hexOffice.bounds);
+});
+
+test('roomView("hub")/("hex-office") is case-insensitive and trims whitespace, like every other roomView name', () => {
+  const { layout } = setup();
+  assert.deepEqual(layout.roomView('HUB'), layout.roomView('hub'));
+  assert.deepEqual(layout.roomView('  Hex-Office  '), layout.roomView('hex-office'));
+});
+
 test('roomView matches a mission room by its slugified title or its public id — through the real projectWorld projection (review fix 2)', () => {
   const { layout } = setup();
   assert.equal(layout.roomView('media-plan-q1'), null, 'not open yet');
@@ -933,6 +955,30 @@ test('roomAt finds a mission room by its own rect, not just building rooms', () 
   const hit = layout.roomAt(centerX, centerZ)!;
   assert.ok(hit, 'a point inside the mission room rect finds it');
   assert.deepEqual([hit.bounds.min.x, hit.bounds.max.x, hit.bounds.min.z, hit.bounds.max.z], [rect.minX, rect.maxX, rect.minZ, rect.maxZ]);
+});
+
+// --- roomAt over the hex structure (issue #249: a double-click in isometric over the Hub or
+// Office did nothing — roomAt only ever scanned the rect rooms above) ---
+
+test('roomAt finds the hex Hub and Office too, not just the rect rooms', () => {
+  const { layout } = setup();
+  const hubCenter = layout.roomView('hub')!.bounds.getCenter(new THREE.Vector3());
+  const hub = layout.roomAt(hubCenter.x, hubCenter.z);
+  assert.ok(hub, 'a point inside the hub finds it');
+  assert.deepEqual(hub, layout.roomView('hub'));
+
+  const officeCenter = layout.roomView('hex-office')!.bounds.getCenter(new THREE.Vector3());
+  const hexOffice = layout.roomAt(officeCenter.x, officeCenter.z);
+  assert.ok(hexOffice, 'a point inside the hex office finds it');
+  assert.deepEqual(hexOffice, layout.roomView('hex-office'));
+});
+
+test('roomAt between the hub and the hex office (on the walkway, not inside either hex) still returns null', () => {
+  const { layout } = setup();
+  const hubCenter = layout.roomView('hub')!.bounds.getCenter(new THREE.Vector3());
+  const officeCenter = layout.roomView('hex-office')!.bounds.getCenter(new THREE.Vector3());
+  const midpoint = hubCenter.clone().add(officeCenter).multiplyScalar(0.5);
+  assert.equal(layout.roomAt(midpoint.x, midpoint.z), null, 'between the two hex rooms is not inside either');
 });
 
 // --- Library and librarians ---

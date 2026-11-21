@@ -194,7 +194,20 @@ test('with 5 issue cards on each of the 40 agents the frame stays under the draw
   // add to the margin left by the last one. 3 points of headroom remain against the 430 cap
   // — the next addition should still trim an existing item kind before asking for more
   // budget (Gabriel: raise the cap only after measuring his own laptop).
-  assert.ok(after.total <= 408, `worst case ${after.total} exceeds the pinned baseline (405) + 3`);
+  //
+  // Issue #218 steps 2/3: the hex Hub and Office (always built, not opt-in, side by side with
+  // this fixture's own rect rooms) add 4 more merged draw calls — hex walls (1 material), both
+  // hex floors sharing one material (review: a two-tone split was purely cosmetic, not worth
+  // a 5th call), the walkway deck plus both stair ramps (1 material), and the Hub's placeholder
+  // elevator/kitchen/play corner (1 material). None of the new geometry casts a shadow, so
+  // this is a main-pass-only cost. Applied on top of the 405 baseline (#244's board merge and
+  // #165 round 7's hair-bucket recovery, see above), landing it at 409. New pin: 412, 3 points
+  // of headroom left against the 430 cap — not free money: the budget rule from issue #217 is
+  // that every later step which adds hex geometry pays for itself by deleting the rect-building
+  // code it replaces in the same PR (step 4 deletes the rect library's room path, step 5
+  // deletes the mission corridor), so this never needs a cap raise before step 7 deletes the
+  // legacy rect system outright.
+  assert.ok(after.total <= 412, `worst case ${after.total} exceeds the pinned baseline (409, issue #218 steps 2/3) + 3`);
 });
 
 test('the worst case measures the same total every run: the fixture\'s one random draw is seeded (issue #128 review round 2)', () => {
@@ -226,10 +239,13 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // (this fixture's 9 war rooms' statement/docs/kanban boards merged into one mesh each, 2
   // canvas draw calls per room instead of 3; see the baseline comment above), landing it at
   // 406. Round 7's hair-bucket recovery (#165, see the baseline comment above) then drops it
-  // one further, to 405. Still exactly one value across all 8 runs — the fixture's own seeded
-  // names (`tests/real-size-office.ts`) never change which hair style, face state or equipped
-  // item an agent lands on between runs, and the tool crib is one fixed static piece.
-  assert.deepEqual([...totals], [405], `expected every one of 8 runs to measure 405, got ${[...totals]}`);
+  // one further, to 405. Issue #218 steps 2/3 then adds 4 (the hex Hub and Office build
+  // unconditionally, not behind a flag, so this fixture's own scene carries them too — see
+  // the baseline comment in the test above for the breakdown), landing it at 409. Still
+  // exactly one value across all 8 runs — the fixture's own seeded names
+  // (`tests/real-size-office.ts`) never change which hair style, face state or equipped item
+  // an agent lands on between runs, and the tool crib is one fixed static piece.
+  assert.deepEqual([...totals], [409], `expected every one of 8 runs to measure 409, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

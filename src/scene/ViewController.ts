@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
-import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, setWallColliders, updateFreeCamera } from './FreeCamera.js';
+import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, setSurfaceHeightProvider, setWallColliders, updateFreeCamera } from './FreeCamera.js';
 import { DIRECT_FOLLOW_RATES, FLIGHT_FOLLOW_RATES, IsometricController, applyIsometricState, followIsometric, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricFollowRates, type IsometricState } from './IsometricCamera.js';
 import { PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
 import type { RoomView, WallRect } from '../layout/LayoutStrategy.js';
@@ -68,6 +68,8 @@ export interface ViewControllerOptions {
   idleTimeoutSeconds?: number;
   /** Issue #194: every wall in the active layout, as a flat 2D collision list, so first-person ground-walk stops at a wall instead of walking through it. Without it, walls stay unobstructed — the old behavior. */
   wallColliders?: () => WallRect[];
+  /** Issue #218 step 3: the walking height at a ground position, from the active layout. Without it, first person keeps the old flat floor at `y = 0`. */
+  surfaceHeightAt?: (x: number, z: number) => number | null;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -257,7 +259,16 @@ export class ViewController {
    */
   private applyStartRoom(room: RoomView, flight: boolean): void {
     if (this.currentMode === 'isometric') {
-      this.isometric.target.copy(room.bounds.getCenter(new THREE.Vector3()));
+      const target = room.bounds.getCenter(new THREE.Vector3());
+      this.isometric.target.copy(target);
+      // Issue #242 review: a room can sit outside the default overview bounds (the hex
+      // structure, deliberately clear of the rect building). Without this, the very next
+      // `retrack()` (fired by the first agent poll's `sceneChanged()`, moments after this
+      // framing) would clamp `target` straight back to the rect building, undoing the flight.
+      // Review round 2: pins the room's own bounds, not just its center point — a wheel tick
+      // or a drag right after landing here must still clamp to this room, not the plain
+      // default bounds (`pan`/`shiftTarget` read the same pin `retrack` does).
+      this.isometric.pinBounds(room.bounds);
       this.isometric.halfHeight = THREE.MathUtils.clamp(
         framedHalfHeight(room.bounds, this.aspect()),
         this.isometric.minHalfHeight,
@@ -267,6 +278,19 @@ export class ViewController {
         // PR #200 review round: a start parameter is a flight from the view's own default
         // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
         // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
+        //
+        // Issue #242 review found this ease unacceptably slow for a room far outside the
+        // default overview bounds (the hex structure, deliberately clear of the rect
+        // building): the flight-ease rate scales with the current half-height, small for a
+        // fresh/empty default framing, so a 300-unit hop crawled (a live screenshot of
+        // `#room=hub` 4 seconds after load still showed the camera a fifth of the way there).
+        // `pinBounds` above (not the follow rate) is this file's actual fix for that: the
+        // pinned bounds widen the position clamp immediately, and `update()`'s own per-frame
+        // easing is what closes the remaining visual distance — still an ease, but against the
+        // room's own pinned target from the first frame on, not fighting a stale clamp. This
+        // test suite deliberately does not re-assert the easing *speed* itself (see
+        // isometric-view.test.ts's own #242 review comment); only the pending-room path below
+        // (no default framing ever shown) gets the harder instant-cut guarantee.
         this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
       } else {
         this.flight = null;
@@ -435,7 +459,23 @@ export class ViewController {
           // when the flight was built: crouching or standing up during the 0.6 s flight would
           // otherwise leave the landing height stale, popping to the live one a frame later,
           // the same class of bug this round's own fix already closed for the common case.
-          this.flight.end.position.y = currentEyeHeight();
+          // Issue #249: that eye height alone assumed the floor is always `y = 0` — true
+          // everywhere before the hex walkway/deck existed, false now. Toggling desk view (H)
+          // while standing on the elevated deck, then leaving desk mode, used to land at
+          // `currentEyeHeight()` with no floor offset at all, well below the deck. Adding the
+          // surface height at the landing x/z (the same source `FreeCamera`'s own per-frame
+          // easing reads) fixes it for the deck and for every future elevated surface, not
+          // just this one case.
+          //
+          // `setFreeCameraLook` itself re-derives the floor height, but from `FreeCamera`'s
+          // own module-level provider, which the ground-walk branch below only ever syncs —
+          // never run yet on the very first flight of a session (straight into a flight, no
+          // ground-walk frame before it). Sync it here first, so the snap below is correct in
+          // one step instead of landing on a stale floor height and visibly re-easing toward
+          // the right one over the next second.
+          setSurfaceHeightProvider(this.options.surfaceHeightAt ?? null);
+          const floor = this.options.surfaceHeightAt?.(this.flight.end.position.x, this.flight.end.position.z) ?? 0;
+          this.flight.end.position.y = floor + currentEyeHeight();
           setFreeCameraLook(camera, this.flight.end.position, this.flight.end.lookAt);
         }
         this.flight = null;
@@ -452,6 +492,7 @@ export class ViewController {
       // miss any wall added after it. Cheap: a flat array the layout already keeps, not a
       // scene walk.
       setWallColliders(this.options.wallColliders?.() ?? []);
+      setSurfaceHeightProvider(this.options.surfaceHeightAt ?? null);
       updateFreeCamera(camera, delta);
     }
 
