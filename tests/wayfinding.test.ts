@@ -17,13 +17,13 @@ const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout } = await import('../src/addons/building/BuildingLayout.js');
 const {
   buildRoom, buildCeiling, roomFloorColor, roomTitle, roomLabelLines, compactLabelLines, middleEllipsis, roomLabelPose, roomLabelBatchFor, WALL_HEIGHT, FIRST_PERSON_LABEL_Y, FIRST_PERSON_LABEL_HEIGHT,
-  OVERVIEW_DOOR_HEIGHT, ISOMETRIC_LABEL_BOTTOM,
+  OVERVIEW_DOOR_HEIGHT, ISOMETRIC_LABEL_BOTTOM, CEILING_ZONE_NAME,
 } = await import('../src/addons/building/rooms.js');
 const { buildRealSizeOffice } = await import('./real-size-office.js');
 const { IsometricController } = await import('../src/scene/IsometricCamera.js');
 const { overviewBounds } = await import('../src/scene/OverviewCamera.js');
 const { buildMissionRoom } = await import('../src/addons/building/missionRooms.js');
-const { applyCutaway, OVERVIEW_WALL_HEIGHT } = await import('../src/scene/Cutaway.js');
+const { applyCutaway, applyCeilingCut, OVERVIEW_WALL_HEIGHT } = await import('../src/scene/Cutaway.js');
 const { StaticBatch, STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
 const { FrameLoop } = await import('../src/scene/FrameLoop.js');
 const { addLighting } = await import('../src/scene/SceneSetup.js');
@@ -450,36 +450,35 @@ test('issue #176: a room\'s walls (office, library, every other kind) are as tal
   for (const wall of walls) assert.ok(Math.abs(topOf(wall) - OFFICE.height) < 1e-6, `${wall.parent?.name ?? 'wall'} top at ${topOf(wall)}, expected ${OFFICE.height}`);
 });
 
-test('buildCeiling() makes a ceiling mesh at the given height, marked dynamic (review, #184)', () => {
+test('buildCeiling() makes a ceiling mesh at the given height, merged into the shared ceiling zone (review, #184 round 2)', () => {
   const rect = slotFor(1).rect;
   const ceiling = buildCeiling(rect);
-  assert.equal(ceiling.userData.ceiling, true, 'findCeilings/applyCeilingCut can find it');
-  assert.equal(ceiling.userData.dynamic, true, 'excluded from any merge, like the main room\'s own ceiling');
   assert.ok(Math.abs(ceiling.position.y - WALL_HEIGHT) < 1e-6, `ceiling at ${ceiling.position.y}, expected ${WALL_HEIGHT}`);
   assert.ok(Math.abs(ceiling.position.x - (rect.minX + rect.maxX) / 2) < 1e-6 && Math.abs(ceiling.position.z - (rect.minZ + rect.maxZ) / 2) < 1e-6, 'centered over the room');
   const custom = buildCeiling(rect, 9);
   assert.equal(custom.position.y, 9, 'a given height overrides the main room\'s own constant');
 });
 
-test('a room\'s own ceiling (buildRoom) never merges, so a view switch does not eject it from a batch for a frame (review, #184)', () => {
-  const slot = slotFor(1);
-  const room = buildRoom('library', slot, 1, []);
+test('every room\'s ceiling merges into one mesh, and toggling that merged mesh triggers no rebuild and ejects nothing (review, #184 round 2)', () => {
   const scene = new THREE.Scene();
-  scene.add(room.group);
-  const ceiling = room.group.children.find((child) => child.userData.ceiling) as THREE.Mesh;
-  assert.ok(ceiling, 'buildRoom added a ceiling');
+  const library = buildRoom('library', slotFor(1), 1, []);
+  const desks = buildRoom('desks', slotFor(2), 2, []);
+  scene.add(library.group, desks.group);
 
   const statics = new StaticBatch(scene);
   statics.update();
-  assert.equal(ceiling.layers.isEnabled(STATIC_SOURCE_LAYER), false, 'never moved onto the merged-source layer');
-  assert.equal(ceiling.layers.isEnabled(0), true, 'draws itself, on the default camera layer');
+  const merged = scene.getObjectByName(CEILING_ZONE_NAME);
+  assert.ok(merged, 'the two rooms\' ceilings merged into one zone mesh');
+  assert.equal(merged!.children.length, 1, 'one merged ceiling mesh for both rooms together');
 
-  // Flipping visible is exactly what applyCeilingCut does on every first-person/isometric
-  // switch. A merged source doing this would change the room's own wall-batch signature and
-  // force a rebuild; a dynamic mesh never joins that batch, so nothing here should rebuild.
-  ceiling.visible = false;
-  assert.equal(statics.update(), false, 'hiding the ceiling triggers no batch rebuild');
-  ceiling.visible = true;
+  // Toggling the merged mesh's own visible, the way applyCeilingCut does on every view switch,
+  // never touches a source's own visible: nothing about the batch's signature changes, so
+  // neither a direct rebuild call nor the frame loop's own update should ever rebuild it.
+  assert.equal(applyCeilingCut(scene, [], true), true, 'the merged ceiling mesh hides');
+  assert.equal(merged!.visible, false);
+  assert.equal(statics.update(), false, 'hiding the merged ceiling triggers no batch rebuild');
+  assert.equal(applyCeilingCut(scene, [], false), true, 'the merged ceiling mesh shows again');
+  assert.equal(merged!.visible, true);
   assert.equal(statics.update(), false, 'showing it again triggers no batch rebuild either');
 });
 

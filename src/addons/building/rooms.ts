@@ -162,14 +162,21 @@ export function buildWalls(rect: Rect, doors: Door[], height = WALL_HEIGHT, hide
   return group;
 }
 
+/** The zone every room's ceiling shares, so they merge into one mesh (review, #184 round 2). */
+export const CEILING_ZONE = 'room-ceilings';
+/** The merged ceiling zone's own name in the scene (`StaticMerge.ts`'s `static-batch-${zone}`), so `FrameLoop` can find and toggle it without caching a reference that a rebuild could orphan. */
+export const CEILING_ZONE_NAME = `static-batch-${CEILING_ZONE}`;
+
 /**
  * A room's ceiling, at the main room's wall height (issue #176: first person gets it back).
- * Marked `dynamic`, the same way the main room's own ceiling (`Walls.ts`) already is (review,
- * #184): toggling `visible` on a merged source changes the merge signature and forces a batch
- * rebuild, so a merged ceiling would drop out of its batch for one frame on every view switch
- * before the next static-merge pass puts it back. `dynamic` keeps each ceiling out of any
- * merge in the first place (its room's own zone, `rooms` or `missions`), so there is nothing
- * to eject: the toggle is just a `visible` flip, free every frame, not only on a rebuild.
+ * Merged into the shared `CEILING_ZONE`, the one zone every room's ceiling belongs to (review,
+ * #184 round 2): a first attempt toggled each ceiling's own `visible`, which changes a merged
+ * source's signature and forces a batch rebuild, ejecting it for one frame on every view
+ * switch. Marking each one `dynamic` instead (the round before this one) fixed that, at the
+ * cost of a draw call per room, permanently. Merging them all into one zone and toggling the
+ * *merged* mesh's own `visible` (`FrameLoop`, by `CEILING_ZONE_NAME`) costs one draw call for
+ * every room's ceiling together, with nothing to eject: the zone container is not one of the
+ * signature's own sources, so changing its `visible` never triggers a rebuild.
  */
 export function buildCeiling(rect: Rect, height: number = WALL_HEIGHT): THREE.Mesh {
   const ceiling = new THREE.Mesh(
@@ -180,8 +187,7 @@ export function buildCeiling(rect: Rect, height: number = WALL_HEIGHT): THREE.Me
   ceiling.position.set((rect.minX + rect.maxX) / 2, height, (rect.minZ + rect.maxZ) / 2);
   ceiling.receiveShadow = true;
   ceiling.name = 'room-ceiling';
-  ceiling.userData.ceiling = true;
-  ceiling.userData.dynamic = true;
+  markStatic(ceiling, { zone: CEILING_ZONE, castShadow: false });
   return ceiling;
 }
 

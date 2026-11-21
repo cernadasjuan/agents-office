@@ -117,7 +117,7 @@ export class FrameLoop {
     const rebuilt = this.staticBatch.update();
     const cut = applyCutaway(scene, fromAbove);
     this.ceilings ??= findCeilings(scene);
-    const ceilingChanged = applyCeilingCut(this.ceilings, fromAbove);
+    const ceilingChanged = applyCeilingCut(scene, this.ceilings, fromAbove);
     const figures = this.figureBatch.sync(this.options.figures());
     camera.updateMatrixWorld();
     const cameraMoved = !this.lastView.equals(camera.matrixWorld) || !this.lastProjection.equals(camera.projectionMatrix);

@@ -20,6 +20,8 @@ const { chooseViewMode, rememberViewMode, viewStatusText, VIEW_STORAGE_KEY } = a
 const { applyCeilingCut, findCeilings } = await import('../src/scene/Cutaway.js');
 const { createWalls } = await import('../src/furniture/Walls.js');
 const { FrameLoop } = await import('../src/scene/FrameLoop.js');
+const { buildRoom, CEILING_ZONE_NAME } = await import('../src/addons/building/rooms.js');
+const { slotFor } = await import('../src/addons/building/RoomPlanner.js');
 const registry = await import('../src/layout/registry.js');
 after(() => {
   dom.window.close();
@@ -264,12 +266,13 @@ test('the ceiling is its own marked mesh so it can hide without a static merge r
 });
 
 test('the ceiling always shows in first person; it hides only in the isometric view', () => {
+  const scene = new THREE.Scene();
   const ceilings = findCeilings(createWalls());
-  assert.equal(applyCeilingCut(ceilings, false), false, 'nothing changes: already shown');
+  assert.equal(applyCeilingCut(scene, ceilings, false), false, 'nothing changes: already shown');
   assert.equal(ceilings[0].visible, true);
-  assert.equal(applyCeilingCut(ceilings, true), true);
+  assert.equal(applyCeilingCut(scene, ceilings, true), true);
   assert.equal(ceilings[0].visible, false);
-  assert.equal(applyCeilingCut(ceilings, false), true);
+  assert.equal(applyCeilingCut(scene, ceilings, false), true);
   assert.equal(ceilings[0].visible, true);
 });
 
@@ -305,6 +308,33 @@ test('the frame loop shows the ceiling in first person and hides it in the isome
   loop.frame(300);
   assert.equal(ceiling.visible, true);
   assert.equal(renders, before + 1);
+});
+
+test('a room\'s own (merged) ceiling also shows in first person and hides in isometric, through a real frame loop (review, #184 round 2)', () => {
+  const scene = new THREE.Scene();
+  scene.add(createWalls());
+  scene.add(buildRoom('library', slotFor(1), 1, []).group);
+  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 100);
+  camera.position.set(0, 1.7, 5);
+  const renderer = {
+    render: () => undefined, info: { render: { calls: 0, triangles: 0 }, reset: () => undefined },
+    shadowMap: { needsUpdate: false, type: THREE.PCFSoftShadowMap }, getPixelRatio: () => 1, setPixelRatio: () => undefined,
+  };
+  let mode: 'first-person' | 'isometric' = 'first-person';
+  const loop = new FrameLoop({
+    scene, camera, renderer: renderer as never, labelRenderer: { render: () => undefined },
+    update: () => undefined, figures: () => [], mode: () => mode,
+  });
+  loop.frame(0);
+  const merged = scene.getObjectByName(CEILING_ZONE_NAME);
+  assert.ok(merged, 'the room ceiling merged into its shared zone on the first frame');
+  assert.equal(merged!.visible, true, 'first person: the merged room ceiling shows');
+  mode = 'isometric';
+  loop.frame(100);
+  assert.equal(merged!.visible, false, 'isometric: the merged room ceiling hides');
+  mode = 'first-person';
+  loop.frame(200);
+  assert.equal(merged!.visible, true, 'back in first person: it shows again');
 });
 
 test('a ceiling change alone, with a still camera, makes the frame loop render', () => {
