@@ -86,6 +86,21 @@ test('with peek on, the card shows the pinned question, Recent, Assets and Equip
   for (const item of ['tdd', 'crit:crit', 'amelia', 'agents-office']) assert.ok(equipment.includes(item), item);
 });
 
+test('AC5: "Show 100 lines" asks with &lines=100, stays in tail mode, and the button goes away', async (t) => {
+  const { calls, fetchFn } = fakeFetch({ [alpha.id]: peekBody });
+  const { card, selection, root } = setup(t, new PeekPanel({ fetch: fetchFn, isOn: () => true }));
+  card.render([alpha]);
+  selection.select(alpha.id);
+  await flush();
+  const button = () => root().querySelector<HTMLButtonElement>('.peek-tail-button');
+  assert.equal(button()?.textContent, 'Show 100 lines');
+  button()!.click();
+  await flush();
+  assert.deepEqual(calls, [`${PEEK_URL}?agent=${alpha.id}`, `${PEEK_URL}?agent=${alpha.id}&lines=100`]);
+  assert.equal(button(), null, 'the button is gone once tail mode is on');
+  assert.equal(root().querySelector('.peek-recent h4')?.textContent, 'Recent (last 100)');
+});
+
 test('with peek off, the card has no peek sections and sends no request', async (t) => {
   const { calls, fetchFn } = fakeFetch({ [alpha.id]: peekBody });
   const { card, selection, root } = setup(t, new PeekPanel({ fetch: fetchFn, isOn: () => false }));

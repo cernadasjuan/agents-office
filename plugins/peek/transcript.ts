@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { displayText, type Observation, type PeekInput } from '../../server/seam.js';
-import { maskedLine } from '../../server/secrets.js';
+import { displayText, type BubbleReply, type Observation, type PeekInput } from '../../server/seam.js';
+import { cutBeforePlaceholder, maskedLine } from '../../server/secrets.js';
 
 /**
  * Peek reader: the last lines, the assets (links) and the equipment (skills,
@@ -9,11 +9,22 @@ import { maskedLine } from '../../server/secrets.js';
  * calls count. A tool call shows its name and a short safe summary, never its
  * raw input. Text collapses, then is masked, then cut (`maskedLine`), so a cut
  * never leaves part of a token.
+ *
+ * `bubble()` (issue #81) reuses the same incremental cache: a fresh new line
+ * since the last call (a counter on the state, not an index, since `addLine`
+ * shifts the window) becomes a short speech-bubble event. Without new content
+ * since the last call, it returns nothing — the caller (the bubble feed) never
+ * sees the same line twice.
  */
 
 export const PEEK_MAX_LINES = 10;
+/** The card's "Show 100 lines" tail (issue #81 AC5): the cache itself keeps this many lines,
+ * so the tail is already warm the moment the button is pressed. */
+export const PEEK_TAIL_LINES = 100;
 export const PEEK_LINE_MAX = 200;
 export const PEEK_MAX_ASSETS = 10;
+/** A bubble's "last words" (issue #81 AC1, SBE-2: locked at 40 characters). */
+export const BUBBLE_TEXT_MAX = 40;
 const MAX_EQUIPMENT = 10;
 const TAIL_BYTES = 2 * 1024 * 1024;
 const MAX_BYTES_PER_READ = 4 * 1024 * 1024;
@@ -60,10 +71,16 @@ interface FileState {
   assets: Asset[];
   skills: string[];
   repos: string[];
+  /** Every line ever appended, never reduced by the window `addLine` keeps (issue #81): the
+   * only way to tell "a new line arrived" from "the same window as last time", since `lines`
+   * itself shifts older entries out. */
+  totalLines: number;
+  /** How many of `totalLines` the bubble feed has already reported. */
+  bubbleSeen: number;
 }
 
 function freshState(offset = 0): FileState {
-  return { offset, carry: '', skipFirst: offset > 0, decoder: new TextDecoder('utf-8'), lines: [], assets: [], skills: [], repos: [] };
+  return { offset, carry: '', skipFirst: offset > 0, decoder: new TextDecoder('utf-8'), lines: [], assets: [], skills: [], repos: [], totalLines: 0, bubbleSeen: 0 };
 }
 
 const TOKEN = /^[A-Za-z0-9:_.-]{1,64}$/;
@@ -212,7 +229,10 @@ export class PeekReader {
     this.tailBytes = options.tailBytes ?? TAIL_BYTES;
   }
 
-  read(agent: Observation): PeekInput {
+  /** `maxLines`: how many of the cached lines to return (default 10, the card's "Recent"; up to
+   * `PEEK_TAIL_LINES` for the "Show 100 lines" tail, issue #81 AC5). The cache itself always
+   * keeps `PEEK_TAIL_LINES`, so asking for more costs no extra read. */
+  read(agent: Observation, maxLines = PEEK_MAX_LINES): PeekInput {
     const file = agent.internal.transcriptPath;
     const empty: PeekInput = { lines: [], assets: [], skills: [], repos: [] };
     if (typeof file !== 'string' || !file.endsWith('.jsonl')) return empty;
@@ -221,13 +241,36 @@ export class PeekReader {
     if (!state) return empty;
     const newest = state.lines[state.lines.length - 1];
     const waits = agent.display?.attention === 'waiting' || agent.display?.attention === 'your-turn';
+    // An out-of-range request (negative, not a whole number) falls back to the normal default,
+    // the same rule `projectPeek` applies on the way out: a route-level guess is never trusted
+    // over the view's own sane default.
+    const limit = Number.isInteger(maxLines) && maxLines >= 1 ? maxLines : PEEK_MAX_LINES;
     return {
-      lines: state.lines.slice(),
+      lines: state.lines.slice(-limit),
       assets: state.assets.slice(),
       skills: state.skills.slice(),
       repos: state.repos.slice(),
       ...(waits && newest?.kind === 'text' ? { question: newest.text } : {}),
     };
+  }
+
+  /**
+   * A speech-bubble event (issue #81 AC1): the newest line, only the first time it is seen
+   * since the last call for this agent. Shares `update()`'s cache with `read()`, so a card
+   * open on the same agent costs nothing extra. `undefined` when nothing new arrived (AC3's
+   * rate limit itself lives in the browser, not here — this just reports "is there anything
+   * new at all", every poll).
+   */
+  bubble(agent: Observation): BubbleReply | undefined {
+    const file = agent.internal.transcriptPath;
+    if (typeof file !== 'string' || !file.endsWith('.jsonl')) return undefined;
+    const cwd = typeof agent.internal.cwd === 'string' ? agent.internal.cwd : undefined;
+    const state = this.update(file, cwd);
+    if (!state || state.totalLines <= state.bubbleSeen) return undefined;
+    state.bubbleSeen = state.totalLines;
+    const newest = state.lines[state.lines.length - 1];
+    if (!newest) return undefined;
+    return { kind: newest.kind, text: cutBeforePlaceholder(newest.text, BUBBLE_TEXT_MAX) };
   }
 
   private update(file: string, cwd: string | undefined): FileState | undefined {
@@ -298,7 +341,8 @@ export class PeekReader {
 
   private addLine(state: FileState, line: Line): void {
     state.lines.push(line);
-    if (state.lines.length > PEEK_MAX_LINES) state.lines.shift();
+    state.totalLines++;
+    if (state.lines.length > PEEK_TAIL_LINES) state.lines.shift();
   }
 
   private takeTool(state: FileState, name: string, input: Record<string, unknown>, cwd: string | undefined): void {

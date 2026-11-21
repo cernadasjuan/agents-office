@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Observation } from '../server/seam.js';
-import { DEFAULT_JIRA_SITES, parseJiraSites, PeekReader, PEEK_LINE_MAX, PEEK_MAX_LINES } from '../plugins/peek/transcript.js';
+import { BUBBLE_TEXT_MAX, DEFAULT_JIRA_SITES, parseJiraSites, PeekReader, PEEK_LINE_MAX, PEEK_MAX_LINES, PEEK_TAIL_LINES } from '../plugins/peek/transcript.js';
 
 // Synthetic transcripts in a temp folder. No test reads the user's ~/.claude.
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-peek-'));
@@ -173,4 +173,39 @@ test('Recent: white space before a token does not push part of it past the raw c
   assert.equal(JSON.stringify(peek).includes('ghp_'), false);
   assert.equal(peek.lines[0].text, '[secret] tail');
   assert.doesNotMatch(peek.lines[1].text, /\[[a-z]*$/);
+});
+
+test('the tail: read(agent, 100) answers up to PEEK_TAIL_LINES, the cache keeps that many', () => {
+  const lines = Array.from({ length: 120 }, (_, i) => text(`line ${i}`));
+  const file = transcript(lines);
+  const reader = new PeekReader();
+  const tail = reader.read(agent(file), PEEK_TAIL_LINES);
+  assert.equal(tail.lines.length, PEEK_TAIL_LINES);
+  assert.equal(tail.lines[0].text, 'line 20');
+  assert.equal(tail.lines[PEEK_TAIL_LINES - 1].text, 'line 119');
+  // The default (no argument) still answers the short "Recent" window, from the same cache.
+  assert.equal(reader.read(agent(file)).lines.length, PEEK_MAX_LINES);
+});
+
+test('bubble(): a new line since the last call for this agent, once, masked and cut to 40 characters', () => {
+  const file = transcript([text('hello there, this is a much longer line than forty characters')]);
+  const reader = new PeekReader();
+  const first = reader.bubble(agent(file));
+  assert.deepEqual(first, { kind: 'text', text: 'hello there, this is a much longer line' });
+  assert.ok((first?.text.length ?? 0) <= BUBBLE_TEXT_MAX);
+  // Nothing new since: undefined, not the same line again.
+  assert.equal(reader.bubble(agent(file)), undefined);
+  fs.appendFileSync(file, JSON.stringify(tool('Bash', { command: 'git commit -m "secret plan"' })) + '\n');
+  assert.deepEqual(reader.bubble(agent(file)), { kind: 'tool', text: 'Bash · git commit' });
+  assert.equal(reader.bubble(agent(file)), undefined, 'still nothing new after being asked once');
+});
+
+test('bubble(): secrets are masked the same as Recent, and a transcript with nothing new gives undefined', () => {
+  const file = transcript([text(`token ${FAKE_GHP}`)]);
+  const reader = new PeekReader();
+  const bubble = reader.bubble(agent(file));
+  assert.equal(bubble?.text.includes(FAKE_GHP), false);
+  for (const transcriptPath of [undefined, path.join(root, 'missing.jsonl'), path.join(root, 'x.txt')]) {
+    assert.equal(new PeekReader().bubble(agent(transcriptPath)), undefined);
+  }
 });
