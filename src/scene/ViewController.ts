@@ -238,7 +238,14 @@ export class ViewController {
       const pose = this.flight.tween.advance(delta);
       this.applyPose(pose);
       if (this.flight.tween.done) {
-        if (this.currentMode === 'first-person') setFreeCameraLook(camera, this.flight.end.position, this.flight.end.lookAt);
+        if (this.currentMode === 'first-person') {
+          // Re-read the live eye height on arrival (re-review, round 2), not the one baked in
+          // when the flight was built: crouching or standing up during the 0.6 s flight would
+          // otherwise leave the landing height stale, popping to the live one a frame later,
+          // the same class of bug this round's own fix already closed for the common case.
+          this.flight.end.position.y = currentEyeHeight();
+          setFreeCameraLook(camera, this.flight.end.position, this.flight.end.lookAt);
+        }
         this.flight = null;
       }
     } else if (this.currentMode === 'overview') {

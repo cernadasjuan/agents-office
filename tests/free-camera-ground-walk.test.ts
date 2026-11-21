@@ -93,6 +93,11 @@ test('Space jumps again once grounded', () => {
 });
 
 test('review #185: standing up mid-air (releasing crouch while still rising) never falsely cancels the jump', () => {
+  // A single "y went up" check (the original version of this test) cannot tell the fix apart
+  // from the bug it guards against: the old bug's false landing snaps the camera UP to
+  // standing height, which is also greater than the pre-release value. The real signature of
+  // a genuine, still-airborne jump is that y keeps changing frame to frame; a false landing
+  // freezes it flat the instant it fires (re-review, round 2).
   const { camera } = setup();
   press('ShiftLeft'); // crouch first
   updateFreeCamera(camera, 1 / 60);
@@ -106,6 +111,10 @@ test('review #185: standing up mid-air (releasing crouch while still rising) nev
   // The old bug: the camera (still low, from the crouch launch) was now below the new, higher
   // target, so the landing check fired immediately and zeroed the jump instead of continuing it.
   assert.ok(camera.position.y > risingFromCrouch, `still rising after standing up mid-air, not snapped to a landed height (${camera.position.y} vs ${risingFromCrouch})`);
+  const y1 = camera.position.y;
+  updateFreeCamera(camera, 1 / 60);
+  const y2 = camera.position.y;
+  assert.notEqual(y1, y2, `a genuine jump keeps moving frame to frame; y stuck at ${y1} means it was falsely landed by the posture change`);
   tick(camera, 2); // let it land for real
   assert.equal(camera.position.y, EYE_HEIGHT, 'eventually lands at the (now standing) target height');
 });
@@ -251,13 +260,22 @@ test('issue #174 (desk mode, #161): movement can be disabled without touching lo
   // Review #185: the old version of this test never exercised mouse-look, so a change that
   // broke look-while-disabled would not be caught. Simulate pointer lock (the same pattern as
   // tests/view-controller.test.ts), then move the mouse and confirm the camera still rotates.
+  // (Re-review, round 2: JSDOM's MouseEvent constructor ignores movementX/movementY passed in
+  // its init dict, so they come through undefined and the quaternion below went to NaN,
+  // passing `notDeepEqual` for the wrong reason. `Object.defineProperty` on the dispatched
+  // event itself is the one way JSDOM actually honors these two fields.)
   const canvas = dom.window.document.getElementById('c') as unknown as HTMLCanvasElement;
   Object.defineProperty(dom.window.document, 'pointerLockElement', { value: canvas, configurable: true });
   dom.window.document.dispatchEvent(new dom.window.Event('pointerlockchange'));
   const beforeQuaternion = camera.quaternion.clone();
-  dom.window.document.dispatchEvent(new dom.window.MouseEvent('mousemove', { movementX: 200, movementY: 0 } as MouseEventInit));
+  const mouseMove = new dom.window.MouseEvent('mousemove');
+  Object.defineProperty(mouseMove, 'movementX', { value: 200, configurable: true });
+  Object.defineProperty(mouseMove, 'movementY', { value: 0, configurable: true });
+  dom.window.document.dispatchEvent(mouseMove);
   updateFreeCamera(camera, 1 / 60);
-  assert.notDeepEqual(camera.quaternion.toArray(), beforeQuaternion.toArray(), 'look still rotates the camera while movement is disabled');
+  const afterQuaternion = camera.quaternion.toArray();
+  assert.ok(afterQuaternion.every((component) => Number.isFinite(component)), `the rotated quaternion must be finite, not NaN from an unapplied mouse move (${afterQuaternion})`);
+  assert.notDeepEqual(afterQuaternion, beforeQuaternion.toArray(), 'look still rotates the camera while movement is disabled');
 
   Object.defineProperty(dom.window.document, 'pointerLockElement', { value: null, configurable: true });
   dom.window.document.dispatchEvent(new dom.window.Event('pointerlockchange'));
