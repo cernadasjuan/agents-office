@@ -20,9 +20,9 @@ const HAND_RADIUS = 0.052; // was a 0.06 box; a mitten reads rounder at a slight
 /** ~20% shorter than the old 0.4 upper/lower leg segments (round 1 "chibi" direction, folded into Hero). */
 const LEG_SEGMENT = 0.32;
 /** Keeps the old ~0.1 ground margin above the now-shorter legs (2 * LEG_SEGMENT), same ratio as 0.9 above 2 * 0.4. */
-const HIP_HEIGHT = 0.74;
+export const HIP_HEIGHT = 0.74;
 /** Body-space y of the shoulders: hips plus the torso's own height, the same relationship the old 1.5 = 0.9 + 0.6 kept. */
-const SHOULDERS_Y = HIP_HEIGHT + TORSO_HEIGHT;
+export const SHOULDERS_Y = HIP_HEIGHT + TORSO_HEIGHT;
 /** The gap between the shoulders and the neck joint, same as the old 1.6 - 1.5. */
 const NECK_MARGIN = 0.1;
 export const NECK_HEIGHT = SHOULDERS_Y + NECK_MARGIN;

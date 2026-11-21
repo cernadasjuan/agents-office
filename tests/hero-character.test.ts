@@ -10,9 +10,10 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   get: () => () => undefined,
   set: () => true,
 })) as never;
-const { buildSkeleton, setMouthState, FIGURE_EYE_HEIGHT, NECK_HEIGHT, HEAD_OFFSET } = await import('../src/characters/StickFigureParts.js');
+const { buildSkeleton, setMouthState, FIGURE_EYE_HEIGHT, NECK_HEIGHT, HEAD_OFFSET, HIP_HEIGHT, SHOULDERS_Y } = await import('../src/characters/StickFigureParts.js');
 const { hairStyleFor, bodyScaleFor } = await import('../src/characters/HeroVariety.js');
 const { StickFigure } = await import('../src/characters/StickFigure.js');
+const { animateActivity } = await import('../src/agents/ActivityAnimations.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -105,4 +106,24 @@ test('body width is a root scale (x and z only); FIGURE_EYE_HEIGHT stays true fo
   const scale = figure.joints.root.scale;
   assert.equal(scale.y, 1, 'height never varies per agent, only width/depth');
   assert.equal(scale.x, scale.z, 'width and depth scale together, so the figure never looks squashed from one side');
+  // The two checks above alone pass even with the feature removed entirely (an untouched
+  // THREE.Group's default scale is already (1, 1, 1)). Pin the root scale to the exact
+  // seeded value, and that two different names actually produce two different widths, so
+  // a regression that silently drops the body-width feature fails this test.
+  assert.equal(scale.x, bodyScaleFor('width-test'), 'root x/z scale must equal the name-seeded width, not an untouched default');
+  const widths = new Set(['f0', 'f1', 'f2', 'f3'].map((name) => new StickFigure(name, RED).joints.root.scale.x));
+  assert.ok(widths.size > 1, 'a handful of names should not all produce the same body width');
+});
+
+test('idle, standing, and walking all settle the hips/shoulders/neck at the Hero body\'s own height, not the old pre-Hero constants', () => {
+  // Regression: ActivityAnimations.ts's base-pose functions used to hardcode the
+  // pre-Hero absolute joint heights (0.9/1.5/1.6). Building a figure at the Hero's
+  // shorter HIP_HEIGHT/SHOULDERS_Y/NECK_HEIGHT only set the *initial* position; every
+  // following idle/standing/walking frame then pulled the rig back up to the old,
+  // taller values, floating the feet off the ground within under a second.
+  const joints = buildSkeleton(RED);
+  for (let i = 0; i < 300; i++) animateActivity(joints, 'idle', i * 0.016, 0.016);
+  assert.ok(Math.abs(joints.hips.position.y - HIP_HEIGHT) < 0.01, `hips drifted to ${joints.hips.position.y}, expected ~${HIP_HEIGHT}`);
+  assert.ok(Math.abs(joints.shoulders.position.y - SHOULDERS_Y) < 0.01, `shoulders drifted to ${joints.shoulders.position.y}, expected ~${SHOULDERS_Y}`);
+  assert.ok(Math.abs(joints.neck.position.y - NECK_HEIGHT) < 0.01, `neck drifted to ${joints.neck.position.y}, expected ~${NECK_HEIGHT}`);
 });

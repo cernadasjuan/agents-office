@@ -71,7 +71,10 @@ export class AgentManager {
     const parentId = info.extras?.parentId;
     const [accent, second] = this.colorsFor(info);
     const figure = new StickFigure(info.name, accent, second);
-    if (parentId) figure.group.scale.setScalar(SUBAGENT_SCALE);
+    // A multiply, not a `setScalar` overwrite: the constructor already seeded a per-agent
+    // x/z body width (issue #165 round 2); overwriting it would make every subagent the
+    // same width regardless of name, losing the crowd-variety feature for that whole group.
+    if (parentId) figure.group.scale.multiplyScalar(SUBAGENT_SCALE);
     figure.setSubagent(parentId !== undefined);
     figure.setTag(info.extras?.provider);
     figure.setId(shortAgentId(info.id));

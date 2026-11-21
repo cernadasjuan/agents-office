@@ -1,6 +1,17 @@
 import * as THREE from 'three';
-import { Joints } from '../characters/StickFigureParts.js';
+import { HIP_HEIGHT, SHOULDERS_Y, NECK_HEIGHT, Joints } from '../characters/StickFigureParts.js';
 import type { Posture } from '../layout/LayoutStrategy.js';
+
+/**
+ * The seated rig drops by this much from standing, at every proportion (issue #165's
+ * Hero body changed HIP_HEIGHT/SHOULDERS_Y/NECK_HEIGHT; this drop is a chair-seat
+ * relationship, not a body one, so it stays a fixed offset rather than scaling with
+ * the figure).
+ */
+const SEATED_DROP = 0.4;
+const SEATED_HIP_HEIGHT = HIP_HEIGHT - SEATED_DROP;
+const SEATED_SHOULDERS_Y = SHOULDERS_Y - SEATED_DROP;
+const SEATED_NECK_HEIGHT = NECK_HEIGHT - SEATED_DROP;
 
 export type Activity =
   | 'idle'
@@ -172,12 +183,12 @@ function applyStandingBase(j: Joints, dt: number): void {
 }
 
 // Seated pose: hips, shoulders, neck all drop together
-// Standing: hips=0.9, shoulders=1.5, neck=1.6
-// Seated:   hips=0.5, shoulders=1.1, neck=1.2  (all -0.4)
+// Standing: hips=HIP_HEIGHT, shoulders=SHOULDERS_Y, neck=NECK_HEIGHT
+// Seated: each minus SEATED_DROP
 function applySeatedBase(j: Joints, dt: number): void {
-  j.hips.position.y = approachY(j.hips.position.y, 0.5, dt);
-  j.shoulders.position.y = approachY(j.shoulders.position.y, 1.1, dt);
-  j.neck.position.y = approachY(j.neck.position.y, 1.2, dt);
+  j.hips.position.y = approachY(j.hips.position.y, SEATED_HIP_HEIGHT, dt);
+  j.shoulders.position.y = approachY(j.shoulders.position.y, SEATED_SHOULDERS_Y, dt);
+  j.neck.position.y = approachY(j.neck.position.y, SEATED_NECK_HEIGHT, dt);
 
   j.leftUpperLeg.rotation.x = approach(j.leftUpperLeg.rotation.x, -1.5, dt);
   j.leftLowerLeg.rotation.x = approach(j.leftLowerLeg.rotation.x, 1.5, dt);
@@ -186,9 +197,9 @@ function applySeatedBase(j: Joints, dt: number): void {
 }
 
 function applyUprightBase(j: Joints, dt: number): void {
-  j.hips.position.y = approachY(j.hips.position.y, 0.9, dt);
-  j.shoulders.position.y = approachY(j.shoulders.position.y, 1.5, dt);
-  j.neck.position.y = approachY(j.neck.position.y, 1.6, dt);
+  j.hips.position.y = approachY(j.hips.position.y, HIP_HEIGHT, dt);
+  j.shoulders.position.y = approachY(j.shoulders.position.y, SHOULDERS_Y, dt);
+  j.neck.position.y = approachY(j.neck.position.y, NECK_HEIGHT, dt);
 
   j.leftUpperLeg.rotation.x = approach(j.leftUpperLeg.rotation.x, 0, dt);
   j.leftLowerLeg.rotation.x = approach(j.leftLowerLeg.rotation.x, 0, dt);
@@ -221,9 +232,9 @@ export function animateWalking(j: Joints, elapsed: number, dt: number): void {
 
   // Subtle body bounce
   const bounce = Math.abs(Math.sin(walkCycle)) * 0.03;
-  j.hips.position.y = approachY(j.hips.position.y, 0.9 + bounce, dt, 15);
-  j.shoulders.position.y = approachY(j.shoulders.position.y, 1.5 + bounce, dt, 15);
-  j.neck.position.y = approachY(j.neck.position.y, 1.6 + bounce, dt, 15);
+  j.hips.position.y = approachY(j.hips.position.y, HIP_HEIGHT + bounce, dt, 15);
+  j.shoulders.position.y = approachY(j.shoulders.position.y, SHOULDERS_Y + bounce, dt, 15);
+  j.neck.position.y = approachY(j.neck.position.y, NECK_HEIGHT + bounce, dt, 15);
 }
 
 /**
@@ -556,9 +567,9 @@ function animateWritingDocs(j: Joints, t: number, dt: number): void {
 // --- DEPLOYING: Hands up, jumping, celebrating ---
 function animateDeploying(j: Joints, t: number, dt: number): void {
   const jumpPhase = Math.abs(Math.sin(t * 3));
-  j.hips.position.y = approachY(j.hips.position.y, 0.9 + jumpPhase * 0.3, dt, 12);
-  j.shoulders.position.y = approachY(j.shoulders.position.y, 1.5 + jumpPhase * 0.3, dt, 12);
-  j.neck.position.y = approachY(j.neck.position.y, 1.6 + jumpPhase * 0.3, dt, 12);
+  j.hips.position.y = approachY(j.hips.position.y, HIP_HEIGHT + jumpPhase * 0.3, dt, 12);
+  j.shoulders.position.y = approachY(j.shoulders.position.y, SHOULDERS_Y + jumpPhase * 0.3, dt, 12);
+  j.neck.position.y = approachY(j.neck.position.y, NECK_HEIGHT + jumpPhase * 0.3, dt, 12);
 
   j.leftUpperArm.rotation.x = approach(j.leftUpperArm.rotation.x, -3.0, dt, 12);
   j.leftUpperArm.rotation.z = approach(j.leftUpperArm.rotation.z, 0.3 + Math.sin(t * 6) * 0.2, dt, 12);
