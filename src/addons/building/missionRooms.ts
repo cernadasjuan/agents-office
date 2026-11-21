@@ -17,14 +17,28 @@ import { furnishWarRoom, WAR_ROOM_WIDTH, type WarRoomCounts } from './warRoomFur
  *
  * Issue #193: a war room's door-wall width is `WAR_ROOM_WIDTH` (18), wider than a generic
  * room's `ROOM_SIZE` (12, which stays its depth), so the desk grid fits 6-8 desks instead of
- * 4. The two columns grow outward from the shared boundary at x = -2 (the old touching edge
- * nudged out by 1 on each side, so they still tile with no gap and no overlap), each door
- * kept at roughly the same offset from its own column's center the old 12-wide columns used
- * (col 0: -1, col 1: -3; both already exercised by the fuzz tests below).
+ * 4. Review of #196 PR 196: the first version grew both columns outward from their old
+ * shared boundary, which pushed column 1's east edge past x = 15 — straight into the
+ * east-side rented ring (`RoomPlanner.ts`'s `slotFor`, ring 0 index 2 and every ring beyond
+ * it, all at that same x >= 15, z in [-18, -6] band, for any room count) — and moved its
+ * door into the hall's own second whiteboard (`Office.ts`, `wb2` at x = 5).
+ *
+ * Fixed by growing away from the hall instead: column 1's east edge stays pinned at x = 9,
+ * the same value the original, un-widened design used (margin 6 from the rented ring's own
+ * x = 15 start, for any ring count — the east and west rented rings never move closer to the
+ * hall than their ring-0 positions, so a fixed margin here is permanent, not size-dependent).
+ * Column 0 grows entirely westward from the shared boundary at x = -9. Its own far edge
+ * (x = -27) lands exactly on the west-side rented ring's own x = -27, but that ring sits at
+ * z in [-11, 13] (always; its own rings shift only in x), never overlapping a war room's
+ * z <= -13 — safe at any room count by construction, not because of a chosen margin. Column
+ * 0's door moves out from -10 to -13.5 to clear its own column's much-wider new middle: still
+ * inside the hall's own wall (-15..15, margin 1.5) and clear of its whiteboard (`wb1`, x = -5).
+ * Column 1's door goes back to x = 0 (its original position, centered in the new column too),
+ * clear of both whiteboards with room to spare.
  */
 const WING_COLUMNS = [
-  { minX: -2 - WAR_ROOM_WIDTH, maxX: -2, door: -12 },
-  { minX: -2, maxX: -2 + WAR_ROOM_WIDTH, door: 4 },
+  { minX: -9 - WAR_ROOM_WIDTH, maxX: -9, door: -13.5 },
+  { minX: -9, maxX: -9 + WAR_ROOM_WIDTH, door: 0 },
 ];
 
 export function missionSlot(index: number): RoomSlot {

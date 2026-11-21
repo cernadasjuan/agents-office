@@ -86,16 +86,29 @@ test('a door (a gap in the wall rect list) stays passable', () => {
 
 test('hitting a wall while moving diagonally slides along it instead of sticking', () => {
   // A wall ahead (blocks forward/-z) but nothing to the side (blocks no x movement). Wide
-  // enough that a 2-second slide at walk speed never slides past its x-extent.
+  // enough that the slide below never reaches past its x-extent.
   setWallColliders([{ minX: -50, maxX: 50, minZ: -4, maxZ: -3.9 }]);
   const { camera } = setup();
   press('KeyW');
   press('KeyD'); // forward + right
-  tick(camera, 2);
+  // Review of #196 (PR comment): a camera that stops dead on first contact with the wall,
+  // never sliding at all, could still pass a test that only checks a final x position past a
+  // threshold reached before contact. Tick in two parts instead: first, just long enough to
+  // reach the wall and stop (z settles); second, several more frames once contact is made,
+  // and assert x keeps increasing frame to frame through that second part — the real
+  // signature of sliding, not merely "ended up somewhere to the right".
+  tick(camera, 1); // reaches the wall and stops; well past contact, since the wall sits 4 m ahead
+  const zAtContact = camera.position.z;
+  assert.ok(zAtContact > -4, `camera passed through the wall ahead (z = ${zAtContact})`);
+  let x = camera.position.x;
+  for (let i = 0; i < 30; i++) {
+    updateFreeCamera(camera, 1 / 60);
+    assert.ok(camera.position.x > x, `x should keep increasing while sliding along the wall (frame ${i}: ${camera.position.x} vs ${x})`);
+    assert.equal(camera.position.z, zAtContact, `z must stay pinned at the wall, not drift (frame ${i})`);
+    x = camera.position.x;
+  }
   release('KeyW');
   release('KeyD');
-  assert.ok(camera.position.z > -4, `camera passed through the wall ahead (z = ${camera.position.z})`);
-  assert.ok(camera.position.x > 0.5, `camera should have kept sliding sideways along the wall (x = ${camera.position.x})`);
   setWallColliders([]);
 });
 

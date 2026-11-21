@@ -183,9 +183,12 @@ test('AC1: a new war room has its must-have furniture from the start, built from
 });
 
 test('desk-like furniture grows with the peak live count and never shrinks back', () => {
-  // Index 0 sits in the first ring's first wing column, whose door is 1 m off the room's
-  // own center (`missionSlot`'s `WING_COLUMNS`); that drops this room's `a = -2.4` slot
-  // (in the door's path), shrinking its physical fit from MAX_DESK_SLOTS (8, issue #193) to 7.
+  // Index 0 sits in the first ring's first wing column. Its door sits 4.5 m off the room's
+  // own center (`missionSlot`'s `WING_COLUMNS`, issue #193 review: column 0 grows much wider
+  // than column 1 to keep the whole wing clear of the rented ring and the hall's whiteboard,
+  // which pushes its door further from center than column 1's). That drops the `a = 2.4` and
+  // both `a = 4.6` slots (all in the door's path), shrinking this room's physical fit from
+  // MAX_DESK_SLOTS (8) to 5.
   const missionRoom = buildMissionRoom(room('a', 'open'), 0);
   const countOf = (name: string) => {
     let n = 0;
@@ -203,9 +206,9 @@ test('desk-like furniture grows with the peak live count and never shrinks back'
   assert.equal(countOf('desk'), 2);
   assert.equal(countOf('debugStation'), 1);
 
-  // A later, bigger peak grows it further, up to this room's own physical fit (7 slots)
+  // A later, bigger peak grows it further, up to this room's own physical fit (5 slots)
   missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
-  assert.equal(countOf('desk'), 5);
+  assert.equal(countOf('desk'), 3);
   assert.equal(countOf('debugStation'), 2);
 });
 
