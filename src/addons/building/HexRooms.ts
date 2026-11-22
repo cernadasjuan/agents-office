@@ -29,6 +29,7 @@ import { markStatic } from '../../scene/StaticMerge.js';
 import type { WallRect } from '../../layout/LayoutStrategy.js';
 import {
   buildHexOfficeLayout,
+  buildHexWorld,
   hexWallSegments,
   hexWallColliders,
   hexSurfaceHeightAt,
@@ -36,6 +37,7 @@ import {
   pointInPolygon,
   type HexOfficeLayout,
   type HexRoomGeometry,
+  type HexWorldCounts,
   HEX_WALL_HEIGHT,
   HEX_WALL_THICKNESS,
   WALKWAY_HEIGHT,
@@ -210,11 +212,14 @@ export interface BuiltHexOffice {
 /** Builds the Hub and Office hex rooms and the walkway/stair between them, merged into one
  * static batch per shared material (4 draw calls total: walls, floors, walkway, Hub accents).
  * Pure placement comes from `buildHexOfficeLayout()` — deterministic, same every call. */
-export function buildHexOffice(): BuiltHexOffice {
-  const layout = buildHexOfficeLayout();
+export function buildHexOffice(counts?: HexWorldCounts): BuiltHexOffice {
+  const layout = counts ? buildHexWorld(counts) : buildHexOfficeLayout();
   const group = new THREE.Group();
   group.name = 'hex-office';
 
+  // Issue #258 steps 5/6: every claimed room (`layout.rooms`), not just the 3 named ones —
+  // a component wing's war rooms share these same 3 zones, so a wing of any size still costs
+  // exactly these 3 draw calls, never one more per room (the render-budget note above).
   const wallMaterial = getToonMaterial(HEX_WALL_COLOR);
   const walls = new THREE.Group();
   walls.name = 'hex-walls';
@@ -222,31 +227,26 @@ export function buildHexOffice(): BuiltHexOffice {
   // walls stay full height in isometric overview and occlude the Hub furniture behind them —
   // the same `overviewLower: WALL_HEIGHT` every rect room's walls already carry.
   markStatic(walls, { zone: 'hex-walls', castShadow: false, overviewLower: HEX_WALL_HEIGHT });
-  for (const wall of [...buildHexWalls(layout.hub, wallMaterial), ...buildHexWalls(layout.office, wallMaterial), ...buildHexWalls(layout.library, wallMaterial)]) {
-    walls.add(wall);
+  for (const room of layout.rooms) {
+    for (const wall of buildHexWalls(room, wallMaterial)) walls.add(wall);
   }
   group.add(walls);
 
   const floors = new THREE.Group();
   floors.name = 'hex-floors';
   markStatic(floors, { zone: 'hex-floors', castShadow: false });
-  floors.add(buildHexFloor(layout.hub, HEX_FLOOR_COLOR));
-  floors.add(buildHexFloor(layout.office, HEX_FLOOR_COLOR));
-  floors.add(buildHexFloor(layout.library, HEX_FLOOR_COLOR));
+  for (const room of layout.rooms) floors.add(buildHexFloor(room, HEX_FLOOR_COLOR));
   group.add(floors);
 
   const walkwayMaterial = getToonMaterial(WALKWAY_COLOR);
   const walkway = new THREE.Group();
   walkway.name = 'hex-walkway';
   markStatic(walkway, { zone: 'hex-walkway', castShadow: false });
-  walkway.add(orientedBox(v3(layout.hubRamp.from, 0), v3(layout.hubRamp.to, WALKWAY_HEIGHT), WALKWAY_DECK_THICKNESS, WALKWAY_WIDTH, walkwayMaterial));
-  walkway.add(orientedBox(v3(layout.officeRamp.from, 0), v3(layout.officeRamp.to, WALKWAY_HEIGHT), WALKWAY_DECK_THICKNESS, WALKWAY_WIDTH, walkwayMaterial));
-  walkway.add(orientedBox(v3(layout.hubRamp.to, WALKWAY_HEIGHT), v3(layout.officeRamp.to, WALKWAY_HEIGHT), WALKWAY_DECK_THICKNESS, WALKWAY_WIDTH, walkwayMaterial));
-  // Issue #258: the library's own stair and deck, behind the office — same material, same
-  // zone, so it still costs nothing beyond the one walkway draw call above.
-  walkway.add(orientedBox(v3(layout.officeLibraryRamp.from, 0), v3(layout.officeLibraryRamp.to, WALKWAY_HEIGHT), WALKWAY_DECK_THICKNESS, WALKWAY_WIDTH, walkwayMaterial));
-  walkway.add(orientedBox(v3(layout.libraryRamp.from, 0), v3(layout.libraryRamp.to, WALKWAY_HEIGHT), WALKWAY_DECK_THICKNESS, WALKWAY_WIDTH, walkwayMaterial));
-  walkway.add(orientedBox(v3(layout.officeLibraryRamp.to, WALKWAY_HEIGHT), v3(layout.libraryRamp.to, WALKWAY_HEIGHT), WALKWAY_DECK_THICKNESS, WALKWAY_WIDTH, walkwayMaterial));
+  for (const connection of layout.connections) {
+    walkway.add(orientedBox(v3(connection.parentRamp.from, 0), v3(connection.parentRamp.to, WALKWAY_HEIGHT), WALKWAY_DECK_THICKNESS, WALKWAY_WIDTH, walkwayMaterial));
+    walkway.add(orientedBox(v3(connection.childRamp.from, 0), v3(connection.childRamp.to, WALKWAY_HEIGHT), WALKWAY_DECK_THICKNESS, WALKWAY_WIDTH, walkwayMaterial));
+    walkway.add(orientedBox(v3(connection.parentRamp.to, WALKWAY_HEIGHT), v3(connection.childRamp.to, WALKWAY_HEIGHT), WALKWAY_DECK_THICKNESS, WALKWAY_WIDTH, walkwayMaterial));
+  }
   group.add(walkway);
 
   const accents = new THREE.Group();
