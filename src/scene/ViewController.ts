@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ManagedAgent } from '../agents/AgentManager.js';
-import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, setWallColliders, updateFreeCamera } from './FreeCamera.js';
+import { currentEyeHeight, focusPosition, freeCameraLook, setFreeCameraLook, setMovementEnabled, setPointerLockFilter, setSurfaceHeightProvider, setWallColliders, updateFreeCamera } from './FreeCamera.js';
 import { DIRECT_FOLLOW_RATES, FLIGHT_FOLLOW_RATES, IsometricController, applyIsometricState, followIsometric, framedHalfHeight, zoomTowardCursor as zoomIsometricTowardCursor, type IsometricFollowRates, type IsometricState } from './IsometricCamera.js';
 import { PoseTween, floorUnder, overviewBounds, type CameraPose } from './OverviewCamera.js';
 import type { RoomView, WallRect } from '../layout/LayoutStrategy.js';
@@ -68,6 +68,28 @@ export interface ViewControllerOptions {
   idleTimeoutSeconds?: number;
   /** Issue #194: every wall in the active layout, as a flat 2D collision list, so first-person ground-walk stops at a wall instead of walking through it. Without it, walls stay unobstructed — the old behavior. */
   wallColliders?: () => WallRect[];
+  /** Issue #218 step 3: the walking height at a ground position, from the active layout. Without it, first person keeps the old flat floor at `y = 0`. */
+  surfaceHeightAt?: (x: number, z: number) => number | null;
+  /**
+   * Issue #239: double-clicking the library room in the isometric view calls this instead of
+   * the normal first-person teleport `setMode` does for every other room kind — the library
+   * stopped being a room inside this scene; it is its own scene now (Gabriel's "different
+   * dimension" idea). Without it, double-clicking the library room does nothing (graceful
+   * degradation, the same as before `roomAt` existed at all).
+   */
+  onEnterLibrary?: () => void;
+  /**
+   * Issue #245 round 3 review: `#room=library` (the library's own back door, `officeReturnUrl`)
+   * lands first person standing INSIDE the library room's own bounds, facing its main wall —
+   * the same generic `#room=` framing every other room kind gets. The per-frame `roomAt` check
+   * below used to read that as "just walked in" on the very first frame it ran, bouncing
+   * straight back into the library a few hundred milliseconds after arriving. True exactly
+   * when the camera starts already standing inside the library room (so the first frame is a
+   * known position, not a walk-in to detect); false otherwise, including every ordinary office
+   * boot. Without it, the first frame is never treated as already-inside — the original
+   * behavior, before this edge-triggered check existed.
+   */
+  startedInLibraryRoom?: boolean;
 }
 
 function isFormField(target: EventTarget | null): boolean {
@@ -131,8 +153,14 @@ export class ViewController {
   /** Issue #252: a `#room=` target that did not resolve at construction (a mission room, not yet created by the first world poll) — re-checked by `checkPendingRoom` on every `sceneChanged()`, until it resolves or `pendingRoomAttempts` reaches `PENDING_ROOM_MAX_ATTEMPTS`. Null once resolved, given up on, or never requested. */
   private pendingRoomName: string | null = null;
   private pendingRoomAttempts = 0;
+  /** Issue #245 round 3 review: edge-triggered state for `onEnterLibrary` — true while the
+   * last frame's own `roomAt` check already reported the library, so the per-frame check below
+   * only fires on the transition into it, never on an arrival that already starts there
+   * (`startedInLibraryRoom`, the library's own back door). */
+  private wasInLibraryRoom: boolean;
 
   constructor(private options: ViewControllerOptions) {
+    this.wasInLibraryRoom = options.startedInLibraryRoom ?? false;
     this.selection = options.selection ?? officeSelection();
     this.isometricCamera = options.isometricCamera ?? new THREE.OrthographicCamera();
     this.marker = new SelectionMarker(options.scene);
@@ -257,7 +285,16 @@ export class ViewController {
    */
   private applyStartRoom(room: RoomView, flight: boolean): void {
     if (this.currentMode === 'isometric') {
-      this.isometric.target.copy(room.bounds.getCenter(new THREE.Vector3()));
+      const target = room.bounds.getCenter(new THREE.Vector3());
+      this.isometric.target.copy(target);
+      // Issue #242 review: a room can sit outside the default overview bounds (the hex
+      // structure, deliberately clear of the rect building). Without this, the very next
+      // `retrack()` (fired by the first agent poll's `sceneChanged()`, moments after this
+      // framing) would clamp `target` straight back to the rect building, undoing the flight.
+      // Review round 2: pins the room's own bounds, not just its center point — a wheel tick
+      // or a drag right after landing here must still clamp to this room, not the plain
+      // default bounds (`pan`/`shiftTarget` read the same pin `retrack` does).
+      this.isometric.pinBounds(room.bounds);
       this.isometric.halfHeight = THREE.MathUtils.clamp(
         framedHalfHeight(room.bounds, this.aspect()),
         this.isometric.minHalfHeight,
@@ -267,6 +304,19 @@ export class ViewController {
         // PR #200 review round: a start parameter is a flight from the view's own default
         // framing, not a cut — only the camera-kind change itself (the fresh framing `setMode`
         // just did) is a cut. `update()` reads the rate fresh next frame, so this is enough.
+        //
+        // Issue #242 review found this ease unacceptably slow for a room far outside the
+        // default overview bounds (the hex structure, deliberately clear of the rect
+        // building): the flight-ease rate scales with the current half-height, small for a
+        // fresh/empty default framing, so a 300-unit hop crawled (a live screenshot of
+        // `#room=hub` 4 seconds after load still showed the camera a fifth of the way there).
+        // `pinBounds` above (not the follow rate) is this file's actual fix for that: the
+        // pinned bounds widen the position clamp immediately, and `update()`'s own per-frame
+        // easing is what closes the remaining visual distance — still an ease, but against the
+        // room's own pinned target from the first frame on, not fighting a stale clamp. This
+        // test suite deliberately does not re-assert the easing *speed* itself (see
+        // isometric-view.test.ts's own #242 review comment); only the pending-room path below
+        // (no default framing ever shown) gets the harder instant-cut guarantee.
         this.isometricFollowRates = FLIGHT_FOLLOW_RATES;
       } else {
         this.flight = null;
@@ -435,7 +485,23 @@ export class ViewController {
           // when the flight was built: crouching or standing up during the 0.6 s flight would
           // otherwise leave the landing height stale, popping to the live one a frame later,
           // the same class of bug this round's own fix already closed for the common case.
-          this.flight.end.position.y = currentEyeHeight();
+          // Issue #249: that eye height alone assumed the floor is always `y = 0` — true
+          // everywhere before the hex walkway/deck existed, false now. Toggling desk view (H)
+          // while standing on the elevated deck, then leaving desk mode, used to land at
+          // `currentEyeHeight()` with no floor offset at all, well below the deck. Adding the
+          // surface height at the landing x/z (the same source `FreeCamera`'s own per-frame
+          // easing reads) fixes it for the deck and for every future elevated surface, not
+          // just this one case.
+          //
+          // `setFreeCameraLook` itself re-derives the floor height, but from `FreeCamera`'s
+          // own module-level provider, which the ground-walk branch below only ever syncs —
+          // never run yet on the very first flight of a session (straight into a flight, no
+          // ground-walk frame before it). Sync it here first, so the snap below is correct in
+          // one step instead of landing on a stale floor height and visibly re-easing toward
+          // the right one over the next second.
+          setSurfaceHeightProvider(this.options.surfaceHeightAt ?? null);
+          const floor = this.options.surfaceHeightAt?.(this.flight.end.position.x, this.flight.end.position.z) ?? 0;
+          this.flight.end.position.y = floor + currentEyeHeight();
           setFreeCameraLook(camera, this.flight.end.position, this.flight.end.lookAt);
         }
         this.flight = null;
@@ -452,7 +518,24 @@ export class ViewController {
       // miss any wall added after it. Cheap: a flat array the layout already keeps, not a
       // scene walk.
       setWallColliders(this.options.wallColliders?.() ?? []);
+      setSurfaceHeightProvider(this.options.surfaceHeightAt ?? null);
       updateFreeCamera(camera, delta);
+      // Issue #245 review: walking into the library room in first person used to do nothing —
+      // only the isometric double-click (above) ever called `onEnterLibrary`, so the room
+      // existed in this scene for exactly one interaction path. Checked every frame, the same
+      // way the wall colliders just above are: walking through the doorway (not only
+      // double-clicking it from above) now swaps to the library's own scene too.
+      //
+      // Issue #245 round 3 review: edge-triggered on purpose (fires only on the false-to-true
+      // transition, never while `inLibraryRoom` just stays true) — a level-triggered check fired
+      // again on the very first frame after returning from the library, since `#room=library`
+      // already lands the camera inside the room's own bounds. `wasInLibraryRoom` starts matching
+      // reality (`startedInLibraryRoom`), so an arrival that already starts inside is never read
+      // as a fresh walk-in; a genuine walk from outside into it (including the ordinary
+      // first-person-boot case, which starts `false`) still fires exactly once.
+      const inLibraryRoom = this.options.roomAt?.(camera.position.x, camera.position.z)?.kind === 'library';
+      if (inLibraryRoom && !this.wasInLibraryRoom) this.options.onEnterLibrary?.();
+      this.wasInLibraryRoom = inLibraryRoom;
     }
 
     // Idle default (issue #161): any camera input resets this in `listen()`; without one for
@@ -600,6 +683,9 @@ export class ViewController {
       if (!room) return;
       this.markActive();
       this.dismissPendingRoom(); // issue #252 review round 2: picking a different room is user intent
+      // Issue #239: the library is no longer a room to stand inside of this scene; it is its
+      // own scene, entered through `onEnterLibrary` instead of the normal teleport.
+      if (room.kind === 'library') { this.options.onEnterLibrary?.(); return; }
       this.setMode('first-person', false, room.standing);
     });
     canvas.addEventListener('wheel', (event) => {

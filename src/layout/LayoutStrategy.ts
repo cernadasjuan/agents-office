@@ -24,6 +24,12 @@ export type Posture = 'seated' | 'standing';
 export interface RoomView {
   bounds: THREE.Box3;
   standing: { position: THREE.Vector3; lookAt: THREE.Vector3 };
+  /** The room's own kind (`'library'`, `'office'`, ...), when the layout tracks one (issue
+   * #239): lets a caller special-case a room kind (the library door swaps to its own scene
+   * instead of a first-person teleport) without the caller needing to know building-specific
+   * room-kind types itself. Absent for a layout, or a room, that carries no kind (a mission
+   * room, the flat activity layout). */
+  kind?: string;
 }
 
 /** A seat change the layout decides on its own, applied by the manager. */
@@ -37,6 +43,11 @@ export interface LayoutAgent {
   id: string;
   activity: Activity;
   extras?: AgentExtras;
+  /** The caller (`AgentManager`) always passes the full `AgentInfo`, which has a name; declared
+   * optional here only because a layout's own seat-choosing logic has never needed it before
+   * issue #223's display wall, which reads it off the same object `BuildingLayout` already
+   * tracks per agent, rather than carry a second, parallel agent list just for a name. */
+  name?: string;
 }
 
 /**
@@ -85,6 +96,15 @@ export interface LayoutStrategy {
    * other optional method here.
    */
   wallColliders?(): WallRect[];
+  /**
+   * The walking height at a ground position (issue #218 step 3): a room floor, a walkway
+   * deck, a stair's ramp, or `null` off any surface. Without it (a layout that implements no
+   * `surfaceHeightAt`), `FreeCamera` keeps the old flat floor at `y = 0` — the same graceful
+   * degradation every other optional method here follows. `null` is a safety fallback for a
+   * position walls should already keep the camera out of, not a normal case: `FreeCamera`
+   * holds its last known height there rather than snapping to 0.
+   */
+  surfaceHeightAt?(x: number, z: number): number | null;
 }
 
 /** A wall's 2D floor footprint, world space (issue #194). The same shape `FreeCamera`'s own `WallRect` and `BuildingLayout`'s `wallRects` use; kept here too so a layout can implement `wallColliders` without importing an addon module. */

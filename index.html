@@ -139,6 +139,22 @@
       border-radius: 4px;
       padding: 2px 4px;
     }
+    /* Issue #231: a small, quiet alternative to the footer's keyboard hint for the camera
+       mode, in the same header row the floor switch already lives in. */
+    .view-switch { display: flex; gap: 2px; margin-top: 4px; }
+    .view-switch-button {
+      background: none;
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 4px;
+      color: #a8b8ff;
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .view-switch-button.active { color: #fff; background: rgba(120, 120, 255, 0.25); border-color: rgba(168, 184, 255, 0.6); }
     .panel-buttons { display: flex; gap: 4px; }
     .panel-button {
       background: none;
@@ -173,6 +189,84 @@
       color: #ffb020;
       font-size: 11px;
       pointer-events: none;
+    }
+    /* Issue #239: the short loading transition between the office scene and the library's
+       own scene. Plain and quiet on purpose (round 7 north star: simplicity and beauty, never
+       complexity for its own sake) — a dark cover and one line of text, nothing to parse. */
+    .scene-transition {
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #14121c;
+      color: #d8d0ff;
+      font: 15px/1.4 'Segoe UI', system-ui, sans-serif;
+      letter-spacing: 0.02em;
+    }
+    /* Issue #245 review: the room title, the wall index and the door back to the office used
+       to be three CSS2D objects stacked at the same world position — they overlapped at any
+       real viewing distance (a CSS2D label never shrinks with distance; the *gap* between two
+       labels does). A fixed on-screen panel, the same pattern `#ui-panel` already uses, has no
+       such distance at all, and gives the index a real, bounded, scrollable height — it scales
+       to the server's own 100-section cap without ever running off-screen. */
+    #library-panel {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      background: rgba(20, 20, 40, 0.9);
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 12px;
+      padding: 16px;
+      color: #e0e0ff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      min-width: 240px;
+      max-width: 320px;
+      backdrop-filter: blur(8px);
+      z-index: 100;
+    }
+    #library-panel h2 { font-size: 16px; color: #fff; margin-bottom: 8px; }
+    .library-index {
+      max-height: 40vh;
+      overflow-y: auto;
+      margin-bottom: 10px;
+    }
+    .library-index-line {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      border-radius: 4px;
+      padding: 4px 6px;
+      color: #e0e0ff;
+      font: inherit;
+      cursor: pointer;
+    }
+    .library-index-line:hover { background: rgba(120, 120, 255, 0.18); }
+    .library-back-door {
+      display: block;
+      width: 100%;
+      background: rgba(58, 111, 90, 0.9);
+      color: #f5f0e8;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font: 600 13px system-ui, sans-serif;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    /* A section room's own name tag (issue #245 review: the only CSS2D label left in this
+       scene — one per room, so it never shares a world position with anything else). */
+    .library-plaque {
+      background: rgba(90, 74, 58, 0.9);
+      color: #f5f0e8;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font: 600 13px system-ui, sans-serif;
+      white-space: nowrap;
     }
     #legend {
       position: fixed;
@@ -277,7 +371,7 @@
     .agent-badge { color: #d0c0ff; }
     /* Issue #192: the lobby queue's cross-floor tag, a different color from a persona badge so it never reads as one. */
     .agent-floor { color: #ffd68a; }
-    #agent-inspector, #tombstone-inspector, #mission-issues-inspector {
+    #agent-inspector, #tombstone-inspector, #mission-issues-inspector, #library-inspector {
       position: fixed;
       top: 16px;
       right: 352px;
@@ -293,7 +387,7 @@
       backdrop-filter: blur(8px);
       z-index: 100;
     }
-    #agent-inspector[hidden], #tombstone-inspector[hidden], #mission-issues-inspector[hidden] { display: none; }
+    #agent-inspector[hidden], #tombstone-inspector[hidden], #mission-issues-inspector[hidden], #library-inspector[hidden] { display: none; }
     .inspector-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
     .inspector-title { min-width: 0; }
     .inspector-name { font-size: 15px; color: #fff; overflow-wrap: anywhere; }
@@ -335,11 +429,31 @@
     .inspector-section li.skill::before { content: '⚙ '; opacity: 0.7; }
     .inspector-section p { color: #8888aa; }
     .inspector-section a { color: #a8b8ff; }
+    /*
+     * Equipment table (Sally's round 7 review): Persona, Skills and Repos side by side, each
+     * its own column with its own icon, growing top to bottom independently — `align-items:
+     * flex-start` so an empty column never stretches to another column's height (AC2). No
+     * wrapping inside a cell (column rule 3): overflow hidden + ellipsis, full label still
+     * reachable through the native `title` attribute set in AgentCard.ts.
+     */
+    .equip-columns { display: flex; gap: 8px; align-items: flex-start; }
+    .equip-col { flex: 1 1 0; min-width: 0; }
+    .equip-col h4 { display: flex; align-items: center; gap: 4px; }
+    .equip-col ul { list-style: none; }
+    .equip-col li {
+      padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .equip-col li.skill { color: #9fe0c0; }
+    .equip-col li.skill::before { content: '⚙ '; opacity: 0.7; }
+    /* "+N more" (column rule: a cap, never silent overflow) reads as muted text, same weight as
+     * the per-column empty state, never a link or badge. */
+    .equip-col li.equip-more, .equip-col p.equip-empty { color: #8888aa; }
+    .skill-mark { font-size: 11px; opacity: 0.85; }
     .peek-question {
       margin-top: 6px; padding: 4px 6px; border-radius: 4px; overflow-wrap: anywhere;
       color: #ffe2a8; background: rgba(232, 197, 71, 0.12); border: 1px solid #e8c547;
     }
-    .peek-question[hidden], .peek-recent[hidden], .peek-assets[hidden], .peek-equipment[hidden] { display: none; }
+    .peek-question[hidden], .peek-recent[hidden], .peek-links[hidden] { display: none; }
     .peek-recent li.peek-tool { color: #8888ff; font-size: 11px; }
     /* AC5: the live 100-line tail scrolls inside the card rather than growing it unbounded. */
     .peek-tail-list { max-height: 240px; overflow-y: auto; }
@@ -355,6 +469,9 @@
       cursor: pointer;
     }
     .peek-tail-button:hover { background: rgba(120, 120, 255, 0.15); }
+    /* "Links" (peek assets) reads apart from the card's own "Issues" section (round 7 review
+     * AC5): a distinct accent color, so the two lists never look like one continuous dump. */
+    .peek-links h4 { color: #a8b8ff; }
     .inspector-link {
       background: none; border: none; padding: 0; color: #a8b8ff; font: inherit;
       cursor: pointer; text-align: left; text-decoration: underline;
@@ -461,6 +578,7 @@
         <h2>Agents Office <span id="label-mode" class="label-mode"></span></h2>
         <div id="view-status" class="view-status"></div>
         <div id="floor-switch-container" class="floor-switch-container" hidden></div>
+        <div id="view-switch-container"></div>
       </div>
       <div class="panel-buttons">
         <button type="button" id="legend-button" class="panel-button">?</button>

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import * as THREE from 'three';
-import type { Seat, LayoutStrategy } from '../src/layout/LayoutStrategy.js';
+import type { RoomView, Seat, LayoutStrategy } from '../src/layout/LayoutStrategy.js';
 
 // Toon materials paint a gradient on a canvas at import time.
 const dom = new JSDOM('<!doctype html><html><body><div id="pointer-hint"></div></body></html>');
@@ -242,7 +242,7 @@ const fixedLayout: LayoutStrategy = {
   release: () => undefined,
 };
 
-function setup(hash = '', options: { figureShiftPx?: () => number; view?: 'first-person' | 'isometric' } = {}) {
+function setup(hash = '', options: { figureShiftPx?: () => number; view?: 'first-person' | 'isometric'; roomView?: (name: string) => RoomView | null } = {}) {
   const document = dom.window.document;
   const scene = new THREE.Scene();
   const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
@@ -551,6 +551,118 @@ test('issue #113: a room added grows the pan/zoom bounds without moving the came
   view.sceneChanged();
   view.update(1, 1 / 60);
   assert.ok(camera.position.distanceTo(before) < 1e-6, 'growing the bounds alone never moves a camera that is still within them');
+});
+
+test('issue #242 review: #room= to a target outside the default bounds (the hex structure) survives the retrack a poll triggers', () => {
+  const farRoom: RoomView = {
+    bounds: new THREE.Box3(new THREE.Vector3(295, 0, -5), new THREE.Vector3(305, 6, 5)),
+    standing: { position: new THREE.Vector3(300, EYE_HEIGHT, 0), lookAt: new THREE.Vector3(296, EYE_HEIGHT, 0) },
+  };
+  const { view, scene } = setup('#view=iso&room=hub', { roomView: (name) => (name === 'hub' ? farRoom : null) });
+  addBaseFloor(scene); // the only tagged floor: default bounds stay the small rect building, far from x=300
+  // The GOAL (not the eased live camera, whose follow speed scales with the on-screen frame
+  // size — unrelated to this fix, and unrealistically slow to settle from a near-empty test
+  // scene's tiny default framing): `applyStartRoom` already set this synchronously.
+  const iso = (view as unknown as { isometric: { target: THREE.Vector3 } }).isometric;
+  const goalAfterConstruction = iso.target.clone();
+  assert.ok(goalAfterConstruction.x > 100, 'framed on the far room, not the default small bounds, right after construction');
+
+  // `main.ts`'s `buildUI()` calls `view.sceneChanged()` on every agent poll, including the
+  // very first one, moments after page load — exactly the sequence that silently undid this
+  // flight before `IsometricController.pinBounds`/`retrack` existed.
+  view.sceneChanged();
+  view.update(1, 1 / 60);
+  assert.ok(iso.target.distanceTo(goalAfterConstruction) < 1e-6, 'the pinned room target survives the retrack a poll triggers');
+});
+
+test('issue #242 review: retrack with a pinned target only widens the position clamp, never maxHalfHeight/reach — the default zoom-out limit is untouched', () => {
+  const bounds = BUILDING;
+  const iso = new IsometricController();
+  iso.frame(bounds, 16 / 9);
+  const maxBefore = iso.maxHalfHeight;
+  const reachBefore = iso.reach;
+
+  iso.pinBounds(new THREE.Box3(new THREE.Vector3(295, 0, -5), new THREE.Vector3(305, 6, 5)));
+  iso.retrack(bounds, 16 / 9); // same bounds as frame(): only the pin should change anything
+  assert.equal(iso.maxHalfHeight, maxBefore, 'maxHalfHeight derives only from bounds, never the pin');
+  assert.equal(iso.reach, reachBefore, 'reach derives only from bounds, never the pin');
+
+  // The target itself is allowed past the normal bounds while pinned...
+  iso.target.set(300, 0, 0);
+  iso.retrack(bounds, 16 / 9);
+  assert.ok(Math.abs(iso.target.x - 300) < 1e-6, 'the pinned target is not clamped back');
+
+  // ...but clearing the pin restores the ordinary bounds clamp on the very next retrack.
+  iso.clearPin();
+  iso.retrack(bounds, 16 / 9);
+  assert.ok(iso.target.x <= bounds.max.x + 1e-6, 'without a pin, retrack clamps to the default bounds again');
+});
+
+test('issue #242 review: panning far enough to leave the pinned room clears the pin — a later retrack clamps normally again', () => {
+  const farRoom: RoomView = {
+    bounds: new THREE.Box3(new THREE.Vector3(295, 0, -5), new THREE.Vector3(305, 6, 5)),
+    standing: { position: new THREE.Vector3(300, EYE_HEIGHT, 0), lookAt: new THREE.Vector3(296, EYE_HEIGHT, 0) },
+  };
+  const { view, scene, canvas } = setup('#view=iso&room=hub', { roomView: (name) => (name === 'hub' ? farRoom : null) });
+  addBaseFloor(scene);
+  const iso = (view as unknown as { isometric: { target: THREE.Vector3 } }).isometric;
+  assert.ok(iso.target.x > 100, 'starts pinned on the far room');
+
+  // A real drag, far enough to carry the target clean out of the pinned room's own 10-unit
+  // width — a small drag that stays inside it must NOT clear the pin (the next test).
+  canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { clientX: 1200, clientY: 450, button: 0 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 0, clientY: 450 }));
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('pointerup', { clientX: 0, clientY: 450 }));
+  view.update(2, 1 / 60);
+
+  view.sceneChanged();
+  view.update(10, 1 / 60);
+  assert.ok(iso.target.x < 100, 'once the pin is cleared, the next retrack clamps the goal back to the default (small) bounds, not the old room target');
+});
+
+test('issue #249: a wheel tick or a small drag that stays inside the pinned room never snaps the camera back to the default bounds', () => {
+  // The reported bug: `pan`/`shiftTarget` clamped straight to the plain default bounds,
+  // ignoring any pin, so the very first wheel tick or drag after `#room=hub` undid the
+  // flight — only `retrack` (fired by a poll, not by the user's own input) ever honored it.
+  const bounds = BUILDING;
+  const iso = new IsometricController();
+  iso.frame(bounds, 16 / 9);
+  const farRoomBounds = new THREE.Box3(new THREE.Vector3(295, 0, -5), new THREE.Vector3(305, 6, 5));
+  iso.target.set(300, 0, 0);
+  iso.pinBounds(farRoomBounds);
+
+  iso.pan(0.5, 0); // a tiny pan, well within the room's own 10-unit width
+  assert.ok(iso.target.x > 100, 'a small pan inside the pinned room must not clamp back to the default bounds');
+
+  iso.shiftTarget(0.2, 0); // the wheel's own cursor-shift path (zoomTowardCursor)
+  assert.ok(iso.target.x > 100, 'a small cursor-zoom shift inside the pinned room must not clamp back either');
+});
+
+test('issue #249: panning far enough to leave the pinned room (via pan(), not just retrack) clears the pin', () => {
+  const bounds = BUILDING;
+  const iso = new IsometricController();
+  iso.frame(bounds, 16 / 9);
+  iso.target.set(300, 0, 0);
+  iso.pinBounds(new THREE.Box3(new THREE.Vector3(295, 0, -5), new THREE.Vector3(305, 6, 5)));
+
+  iso.pan(-1000, 0); // well past the pinned room's own width, and past the default bounds too
+  assert.ok(iso.target.x <= bounds.max.x + 1e-6, 'pan() itself clamps to the default bounds once the pin is left behind');
+});
+
+test('issue #249 review round 3: a shift that lands just past the pinned room, but still short of the default bounds, clamps into the default bounds in the same call — not on some later input or scene poll', () => {
+  // Reproduces the review finding: the old clampTargetAndUnpinIfLeft() clamped against the
+  // widened (pin-union) box, found the result no longer inside the pin, and cleared the pin
+  // — but never re-clamped against the now-narrower default-only box. A target between the
+  // pinned room's edge (x=295) and the default bounds' own edge (x=30) was left stranded
+  // there, outside the active bounds, until a later pan/retrack silently snapped it back.
+  const bounds = BUILDING; // default bounds: x in [-30, 30]
+  const iso = new IsometricController();
+  iso.frame(bounds, 16 / 9);
+  iso.target.set(300, 0, 0);
+  iso.pinBounds(new THREE.Box3(new THREE.Vector3(295, 0, -5), new THREE.Vector3(305, 6, 5)));
+
+  iso.shiftTarget(-6, 0); // target.x -> 294: past the pinned room's min.x, nowhere near default bounds
+  assert.ok(iso.target.x <= bounds.max.x + 1e-6, 'the pin-clearing shift must itself land the target back inside the default bounds, not just outside the pin');
 });
 
 test('a settled isometric view stops moving the camera: the follower is at rest once the goal and the live pose match', () => {

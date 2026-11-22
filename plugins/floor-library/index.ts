@@ -21,13 +21,23 @@ export function parseRoots(list: string | undefined): string[] {
 
 /** One root's own library input, or nothing without a `documentation/bibliotheque/` there, or
  * with one that resolved to zero usable sections. `resolver` is injectable for tests, the same
- * narrow shape `plugins/missions` would use if it needed one of its own. */
-export function readLibraries(roots: string[], resolver: Pick<FloorResolver, 'resolve'>): LibraryInput[] {
+ * narrow shape `plugins/missions` would use if it needed one of its own. `remoteRepo` (issue
+ * #221 review) is resolved separately from `repo`: the latter is `resolve()`'s own floor name
+ * (a directory-name fallback when there is no git remote), the former is only ever a real git
+ * remote's own `owner/repo` — `server/seam.ts` builds a GitHub link from `remoteRepo` alone,
+ * never `repo`, so the fallback can never be mistaken for a real GitHub repo. */
+export function readLibraries(roots: string[], resolver: Pick<FloorResolver, 'resolve' | 'resolveRemoteOwnerRepo'>): LibraryInput[] {
   return roots.flatMap((root) => {
     const read = readBibliotheque(root);
     if (!read || read.sections.length === 0) return [];
     const floor = resolver.resolve(root);
-    return [{ key: root, sections: read.sections, ...(floor !== GENERAL_FLOOR ? { repo: floor } : {}) }];
+    const remoteRepo = resolver.resolveRemoteOwnerRepo(root);
+    return [{
+      key: root,
+      sections: read.sections,
+      ...(floor !== GENERAL_FLOOR ? { repo: floor } : {}),
+      ...(remoteRepo ? { remoteRepo } : {}),
+    }];
   });
 }
 

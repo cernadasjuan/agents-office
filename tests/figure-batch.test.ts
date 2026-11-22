@@ -44,18 +44,21 @@ test('all figures draw in one call per part shape and color, each part where its
   const all = figures(scene, [RED, RED, BLUE]);
   scene.updateMatrixWorld();
   // 17 body + face parts (head, torso, 2 hands, 2 feet, 8 limbs, 2 eyes, 1 mouth) per
-  // figure, plus hair (issue #165 round 2): f0 seeds 'cap' (1 piece), f1 and f2 both seed
-  // 'spiky' (5 cones each) — 3 * 17 + 1 + 5 + 5 = 62.
-  assert.equal(countDrawCalls(scene).main, 62);
+  // figure, plus hair (issue #165 round 2; round 7 replaced 'cap' with 'tufts', 2 cones
+  // reusing the 'spiky' shape, not 1 — a round 7 follow-up dropped the middle tuft and
+  // scaled the remaining 2 up, so it no longer reads as floating dots): f0 seeds 'tufts'
+  // (2 pieces), f1 and f2 both seed 'spiky' (5 cones each) — 3 * 17 + 2 + 5 + 5 = 63.
+  assert.equal(countDrawCalls(scene).main, 63);
 
   const batch = new FigureBatch(scene);
   batch.sync(all.map((figure) => figure.group));
 
   // head, hand, foot, leg, arm and torso shapes (two torso colors) = 7, plus the Hero
   // face/hair additions: eyes (1, shared by every figure), the mouth's one shape (all
-  // three start idle, so all three share the 'neutral' bucket), and 2 hair buckets
-  // ('cap' and 'spiky' — the two spiky wearers share one bucket, not one each) = 11.
-  assert.equal(countDrawCalls(scene).main, 11);
+  // three start idle, so all three share the 'neutral' bucket), and 1 hair bucket (round
+  // 7: 'tufts' reuses the 'spiky' cone shape, so both styles share the one 'hair:spike'
+  // bucket instead of costing one each) = 10.
+  assert.equal(countDrawCalls(scene).main, 10);
   for (const figure of all) for (const part of partsOf(figure)) assert.equal(part.layers.isEnabled(0), false);
   const heads = batch.meshes.find((mesh) => mesh.geometry === all[0].joints.head.geometry)!;
   assert.equal(heads.count, 3);

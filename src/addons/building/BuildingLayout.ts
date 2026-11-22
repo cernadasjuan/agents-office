@@ -20,6 +20,7 @@ import {
 } from './missionRooms.js';
 import { tombstoneNameBatchFor } from './tombstoneNames.js';
 import type { WarRoomCounts } from './warRoomFurnishing.js';
+import type { SessionEntry } from './displayWall.js';
 import type { WorldRoom } from '../../extensions.js';
 import { matchesFloor } from '../../floors/FloorRegistry.js';
 import { attentionBand, compareWaits, queuesForYou } from '../../ui/attention.js';
@@ -28,6 +29,7 @@ import { createStool } from '../../furniture/Stool.js';
 import type { PickTarget } from '../../scene/Selection.js';
 import { FIGURE_EYE_HEIGHT } from '../../characters/StickFigureParts.js';
 import { createMissionsBoard, placeMissionsBoard, type MissionBoardEntry } from './missionsBoard.js';
+import { buildHexOffice } from './HexRooms.js';
 
 /**
  * Work that happens at the agent's own desk. Everything else is a trip. Planning,
@@ -179,8 +181,12 @@ export class BuildingLayout implements LayoutStrategy {
   private lastMissionsBoardRefresh = -Infinity;
   private missionBoardEntries: MissionBoardEntry[] = [];
   private missionsBoard = createMissionsBoard();
+  /** Issue #218 steps 2/3: the hex Hub and Office, built side by side with the rect rooms
+   * above, which keep working unconverted until a later step migrates them. */
+  private hexOffice = buildHexOffice();
 
   constructor(private scene: THREE.Scene, private stations: Map<string, Station>, options: BuildingOptions = {}) {
+    this.scene.add(this.hexOffice.group);
     this.now = options.now ?? (() => performance.now());
     this.wallClock = options.wallClock ?? (() => Date.now());
     this.dwellMs = options.dwellMs ?? DEFAULT_DWELL_MS;
@@ -259,6 +265,11 @@ export class BuildingLayout implements LayoutStrategy {
     return [...this.missionRooms.values()].map((room) => room.issuesBoardPickTarget());
   }
 
+  /** Every war room's live-sessions board, one pick target per session row shown (issue #223 AC4). */
+  sessionsBoardPickTargets(): PickTarget[] {
+    return [...this.missionRooms.values()].map((room) => room.sessionsBoardPickTarget());
+  }
+
   /**
    * Where the camera should go to show a named room (issue #89, `#room=`). A room kind
    * ("office": always the first one, "Your office", never a later overflow waiting room;
@@ -291,7 +302,12 @@ export class BuildingLayout implements LayoutStrategy {
         else if (byTitle.length > 1) console.debug(`roomView("${name}") matches more than one mission room by title; none resolved`);
       }
     }
-    return slot ? roomViewFromSlot(slot) : null;
+    if (slot) return roomViewFromSlot(slot);
+    // Issue #218 step 2/3 review: `#room=hub` / `#room=hex-office` frame the new hex rooms,
+    // the same way `#room=office` already frames the rect one. Checked last so none of the
+    // names above (`office` included: the rect room keeps that name, see `HexRooms.ts`) ever
+    // resolve differently than before.
+    return this.hexOffice.roomView(query);
   }
 
   /**
@@ -362,12 +378,17 @@ export class BuildingLayout implements LayoutStrategy {
     const inside = (rect: Rect) => x >= rect.minX && x <= rect.maxX && z >= rect.minZ && z <= rect.maxZ;
     for (const record of this.rooms) {
       const slot = slotFor(record.index);
-      if (inside(slot.rect)) return roomViewFromSlot(slot);
+      // `kind` (issue #239): lets a caller special-case the library door (it swaps to the
+      // library's own scene) without this layout needing to know what a "scene swap" is.
+      if (inside(slot.rect)) return { ...roomViewFromSlot(slot), kind: record.kind };
     }
     for (const room of this.missionRooms.values()) {
       if (inside(room.slot.rect)) return roomViewFromSlot(room.slot);
     }
-    return null;
+    // Issue #249: a double-click in isometric over the hex structure (Hub or Office) did
+    // nothing — this only ever scanned the rect rooms above. Checked last, so it never changes
+    // which room a point inside a rect room resolves to.
+    return this.hexOffice.roomAt(x, z);
   }
 
   /**
@@ -397,7 +418,18 @@ export class BuildingLayout implements LayoutStrategy {
     if (this.missionRooms.size > 0) {
       colliders.push(...wallRects(missionCorridorRect(this.missionRooms.size), this.missionCorridorDoors()));
     }
+    colliders.push(...this.hexOffice.wallColliders);
     return colliders;
+  }
+
+  /**
+   * Issue #218 step 3: the walking height at a ground position. The rect building's own
+   * floor is always flat (`0`); the hex Hub/Office/walkway/stair (`hexOffice`) is the one
+   * part of the building that is not, so it gets first say — `null` there falls through to
+   * the rect building's flat floor rather than `FreeCamera`'s own last-known-height fallback.
+   */
+  surfaceHeightAt(x: number, z: number): number {
+    return this.hexOffice.surfaceHeightAt(x, z) ?? 0;
   }
 
   seatFor(agent: LayoutAgent, previous: Activity | null): Seat | null {
@@ -458,14 +490,27 @@ export class BuildingLayout implements LayoutStrategy {
   private growMissionFurniture(): void {
     if (this.missionRooms.size === 0) return;
     const counts = new Map<string, WarRoomCounts>();
+    // Issue #223: the display wall's own live-sessions list, by `agent.extras.room` (the
+    // mission a session belongs to) rather than `state.target` (where it is routed right
+    // now): an idle session still "works the mission" and should still show on its wall, even
+    // though issue #209 sends it to the lounge rather than leaving it seated in the room.
+    const sessions = new Map<string, SessionEntry[]>();
     for (const state of this.agents.values()) {
       const roomId = state.target?.startsWith('room:') ? state.target.slice('room:'.length) : null;
-      if (!roomId || !this.missionRooms.has(roomId)) continue;
-      const entry = counts.get(roomId) ?? { deskLike: 0, debugging: 0 };
-      if (state.agent.activity === 'debugging') entry.debugging++;
-      else if (WAR_ROOM_DESK_LIKE.has(state.agent.activity)) entry.deskLike++;
-      counts.set(roomId, entry);
+      if (roomId && this.missionRooms.has(roomId)) {
+        const entry = counts.get(roomId) ?? { deskLike: 0, debugging: 0 };
+        if (state.agent.activity === 'debugging') entry.debugging++;
+        else if (WAR_ROOM_DESK_LIKE.has(state.agent.activity)) entry.deskLike++;
+        counts.set(roomId, entry);
+      }
+      const missionId = state.agent.extras?.room;
+      if (missionId && this.missionRooms.has(missionId)) {
+        const list = sessions.get(missionId) ?? [];
+        list.push({ id: state.agent.id, name: state.agent.name ?? state.agent.id, extras: state.agent.extras });
+        sessions.set(missionId, list);
+      }
     }
+    for (const [id, room] of this.missionRooms) room.updateSessions(sessions.get(id) ?? []);
     let grew = false;
     for (const [id, room] of this.missionRooms) {
       const before = room.peakCounts;

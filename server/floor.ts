@@ -120,6 +120,15 @@ export class FloorResolver {
    * (issue #191 revision): several sessions, and several directories inside one of them, share
    * one repo root, and must not each pay their own `.git/config` read for the same answer. */
   private remoteCache = new Map<string, string | undefined>();
+  /** The directory walk's own cache (review #249 round 2), keyed by the directory
+   * `repoDirOf` is asked about. `remoteCache` above only covers the lookup *after* a repo
+   * root is already known; the walk that finds that root was never cached at all, so
+   * `remoteOwnerRepoOf` — called once per matching transcript tool call, not once per
+   * session poll like `resolve` — re-walked the filesystem with `lstatSync` from scratch for
+   * every single Edit, even a thousand Edits in the same directory in one transcript.
+   * Capped and cleared the same way the other two caches are; a miss (no repo at this
+   * directory) caches too, same as a hit. */
+  private repoDirCache = new Map<string, string | undefined>();
 
   resolve(cwd: string | undefined): string {
     if (!cwd) return GENERAL_FLOOR;
@@ -131,23 +140,73 @@ export class FloorResolver {
     return floor;
   }
 
+  /**
+   * The floor's own real git remote `owner/repo` (issue #221 review): distinct from
+   * `resolve()`'s own floor name, which falls back to a bare `parent-dir/repo-dir` pair when
+   * there is no remote at all (`qualifiedFloorName`'s own fallback) — a fallback pair reads
+   * exactly like a real `owner/repo` and must never be mistaken for one, e.g. to build a
+   * GitHub link to a repo of the same name that is not actually this one. Undefined for a
+   * relative `cwd`, a `cwd` outside any repo, or a real repo with no `origin` remote at all.
+   */
+  resolveRemoteOwnerRepo(cwd: string | undefined): string | undefined {
+    if (!cwd) return undefined;
+    const repoDir = this.repoDirOf(cwd);
+    return repoDir ? this.cachedRemoteOwnerRepo(repoDir) : undefined;
+  }
+
   private resolveUncached(cwd: string): string {
-    if (!path.isAbsolute(cwd)) return GENERAL_FLOOR;
-    let current = path.resolve(cwd);
+    const repoDir = this.repoDirOf(cwd);
+    return repoDir ? this.qualifiedFloorName(repoDir) : GENERAL_FLOOR;
+  }
+
+  /**
+   * The repo directory that holds `dir` (a worktree resolves to its main repository),
+   * walking up at most `MAX_WALK_DEPTH` directories. Undefined for a non-absolute `dir`, one
+   * with no repository, or an unreadable or malformed worktree `.git` file — never the
+   * worktree's own directory as a fallback (review: `resolveUncached`'s own earlier bug).
+   * The one piece of the walk `resolve()`, `remoteOwnerRepoOf()` and `resolveRemoteOwnerRepo()`
+   * all share, so the three never disagree about which directory answers for a given `cwd`.
+   */
+  private repoDirOf(dir: string): string | undefined {
+    if (!path.isAbsolute(dir)) return undefined;
+    const resolved = path.resolve(dir);
+    if (this.repoDirCache.has(resolved)) return this.repoDirCache.get(resolved);
+    const result = this.repoDirOfUncached(resolved);
+    if (this.repoDirCache.size >= MAX_CACHED_DIRS) this.repoDirCache.clear();
+    this.repoDirCache.set(resolved, result);
+    return result;
+  }
+
+  private repoDirOfUncached(dir: string): string | undefined {
+    let current = dir;
     for (let depth = 0; depth < MAX_WALK_DEPTH; depth++) {
       const git = path.join(current, '.git');
       try {
         const stat = fs.lstatSync(git);
-        if (!stat.isFile()) return this.qualifiedFloorName(current);
-        const mainDir = worktreeMainDir(git, current);
-        return mainDir ? this.qualifiedFloorName(mainDir) : GENERAL_FLOOR;
+        if (!stat.isFile()) return current;
+        return worktreeMainDir(git, current);
       } catch {
         const parent = path.dirname(current);
-        if (parent === current) return GENERAL_FLOOR;
+        if (parent === current) return undefined;
         current = parent;
       }
     }
-    return GENERAL_FLOOR;
+    return undefined;
+  }
+
+  /**
+   * A directory's own real git remote owner/repo (issue #249: the Repos column's
+   * transcript-derived entries — a session's edits or git commands reaching into a second
+   * repo, a worktree sibling most often). Real remotes only, unlike the floor name itself
+   * (`qualifiedFloorName`): a worktree's bare directory name is a believable *floor* (the one
+   * repo a session's own `cwd` sits in, already disambiguated by that context), but is not a
+   * trustworthy *second* repo signal on its own — two unrelated directories named the same
+   * thing would otherwise collapse into one false "same repo" entry. Undefined on the general
+   * floor (no repository at all) or a repository with no resolvable origin remote.
+   */
+  remoteOwnerRepoOf(dir: string): string | undefined {
+    const repoDir = this.repoDirOf(dir);
+    return repoDir ? this.cachedRemoteOwnerRepo(repoDir) : undefined;
   }
 
   /** `remoteOwnerRepo(repoDir)`, cached per repo root, capped and cleared the same way `cache` is. */
@@ -184,12 +243,22 @@ export class FloorResolver {
  * shares its parent's `internal.cwd` (`server/agentDetector.ts`'s `detectSubagents`), so it
  * always resolves to the same floor as its parent with no special case here. A missing
  * `internal.cwd` (an unusual source) lands on the general floor, never breaks the pipeline.
+ *
+ * Also sets `display.repos` (issue #216): the agent card's Repos column needs the same
+ * remote-derived token synchronously, at the same instant as Persona and Skills, rather than
+ * behind the peek plugin's async per-agent fetch. Reuses the floor this same pass already
+ * resolved — no second filesystem walk — as a one-entry list, empty on the shared general
+ * floor (there is no real repo to show).
  */
 export function floorEnricher(resolver: FloorResolver = new FloorResolver()): Enricher {
   return {
     id: 'floor',
     enrich(observations) {
-      for (const agent of observations) agent.display.floor = resolver.resolve(agent.internal.cwd);
+      for (const agent of observations) {
+        const floor = resolver.resolve(agent.internal.cwd);
+        agent.display.floor = floor;
+        agent.display.repos = floor === GENERAL_FLOOR ? [] : [floor];
+      }
     },
   };
 }

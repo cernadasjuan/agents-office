@@ -13,6 +13,7 @@ import { LabelDetailController } from './ui/LabelDetail.js';
 import { AgentCard } from './ui/AgentCard.js';
 import { TombstoneCard } from './ui/TombstoneCard.js';
 import { MissionIssuesCard } from './ui/MissionIssuesCard.js';
+import { LibraryCard } from './ui/LibraryCard.js';
 import { OffscreenMarkers } from './ui/OffscreenMarkers.js';
 import { FrameLoop } from './scene/FrameLoop.js';
 import { FrameStats, isDebugMode } from './scene/RenderScheduler.js';
@@ -20,11 +21,34 @@ import { FreshnessFooter } from './ui/freshness.js';
 import { Legend } from './ui/Legend.js';
 import { handleTriageKey } from './ui/TriageKeys.js';
 import { FloorSwitch } from './ui/FloorSwitch.js';
+import { ViewSwitch } from './ui/ViewSwitch.js';
 import { ALL_FLOORS, defaultFloor, floorsWithStoredRooms, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
 import { focusedFloor, setFocusedFloor } from './floors/floorState.js';
+import { isLibrarySceneSearch, libraryEntryUrl } from './library/sceneNav.js';
+import { consumeReturningFromLibrary, navigateAfterTransition, removeTransition, showTransition } from './library/transition.js';
+
+/**
+ * Issue #239: the library stopped being a room inside this scene; it is its own scene now
+ * (Gabriel's "different dimension" idea). `?scene=library` in the URL is the one seam
+ * (`src/library/sceneNav.ts`) that decides which of the two boots runs; this file's own
+ * office bootstrap (everything below) is otherwise unchanged from before that scene existed.
+ */
+function bootOffice(): void {
 
 // Setup scene
 const { scene, camera, renderer, labelRenderer } = createScene();
+
+// Issue #239: a brief "welcome back" overlay, shown only right after the library's own back
+// door navigated here (`consumeReturningFromLibrary` clears the flag so an ordinary reload
+// never replays it) — never added to every ordinary office load. Issue #245 round 3 review:
+// the same flag also tells `ViewController` the camera is starting out already standing
+// inside the library room (`#room=library`, this door's own landing hash) rather than having
+// just walked into it, so it never bounces straight back in on arrival.
+const returningFromLibrary = consumeReturningFromLibrary();
+if (returningFromLibrary) {
+  const overlay = showTransition('Welcome back.');
+  window.setTimeout(() => removeTransition(overlay), 420);
+}
 
 // Build office and get stations
 const stations = createOffice(scene);
@@ -73,6 +97,9 @@ const agentCard = new AgentCard(document.body, { anchor: document.getElementById
 const tombstoneCard = new TombstoneCard(document.body, { anchor: document.getElementById('ui-panel')! });
 // Mission issues card (issue #146): same dock spot and selection, a click on a war room's issue board opens it.
 const missionIssuesCard = new MissionIssuesCard(document.body, { anchor: document.getElementById('ui-panel')! });
+// Library card (issue #221): same dock spot and selection, a click on a shelf entry or a
+// section label (`plugins/floor-library/client.ts`'s own pick targets) opens it.
+const libraryCard = new LibraryCard(document.body, { anchor: document.getElementById('ui-panel')! });
 
 // Camera mode (key I toggles first person and the isometric view) and click to select.
 // Start view: `#view=first-person|iso|desk`, then the last view, then the layout default.
@@ -81,6 +108,11 @@ const missionIssuesCard = new MissionIssuesCard(document.body, { anchor: documen
 // from the active layout (issue #89); a layout with no rooms, or an unknown name, is a no-op.
 // The panel header shows the layout and the view.
 const viewStatus = document.getElementById('view-status');
+// Issue #231: the view switch is constructed after `view` (its buttons call straight into it),
+// so this starts null and the first `modeChanged` call (always fired once, during the
+// ViewController constructor below) is a no-op; `viewSwitch.setActive(view.mode)` right after
+// construction catches that one up.
+let viewSwitch: ViewSwitch | null = null;
 const view = new ViewController({
   camera,
   canvas: renderer.domElement,
@@ -91,6 +123,7 @@ const view = new ViewController({
   deskView: () => layout.deskView?.() ?? null,
   roomAt: (x, z) => layout.roomAt?.(x, z) ?? null,
   wallColliders: () => layout.wallColliders?.() ?? [],
+  surfaceHeightAt: (x, z) => layout.surfaceHeightAt?.(x, z) ?? null,
   keys: window,
   hint: document.getElementById('pointer-hint'),
   crosshair: document.getElementById('crosshair-dot'),
@@ -104,9 +137,42 @@ const view = new ViewController({
     // Issue #243: the desk-view camera sits close enough to the user's own chair that it
     // otherwise fills the bottom of the frame; hidden only while actually sitting at the desk.
     layout.setDeskChairVisible?.(mode !== 'desk');
+    viewSwitch?.setActive(mode);
   },
   figureShiftPx: () => agentCard.cameraShiftPx(),
+  // Issue #239/#245: double-clicking the library room in isometric, or simply walking into it
+  // in first person (`ViewController.ts`'s own per-frame `roomAt` check), both swap to its own
+  // scene instead of the normal first-person teleport every other room kind gets. Walking in
+  // fires every frame the camera stands inside the room, not just once — the `entering` guard
+  // keeps a held-down W key from stacking a second transition overlay and a second navigation
+  // on top of the first one already in flight.
+  onEnterLibrary: (() => {
+    let entering = false;
+    return () => {
+      if (entering) return;
+      entering = true;
+      navigateAfterTransition('Entering the library…', () => {
+        // Issue #245 review: the library scene's own catalog must follow the active floor,
+        // not always the first configured library — `focusFloor` is already the office's own
+        // normalized "a real floor, or nothing for ALL_FLOORS" value (`defaultFloor`, above).
+        window.location.assign(libraryEntryUrl(window.location, focusFloor));
+      });
+    };
+  })(),
+  startedInLibraryRoom: returningFromLibrary,
 });
+
+// View switch (issue #231): a small, visible alternative to the footer's keyboard hint. Each
+// button calls the exact method its matching key already calls, never a new transition of its
+// own; `ViewSwitch` itself works out the first-person button's "which toggle gets back there" case.
+const viewSwitchContainer = document.getElementById('view-switch-container');
+if (viewSwitchContainer) {
+  viewSwitch = new ViewSwitch(viewSwitchContainer, view.mode, {
+    isometric: () => view.toggleIsometric(),
+    desk: () => view.toggleDesk(),
+  });
+  viewSwitch.setActive(view.mode);
+}
 
 // --- Triage list (side panel) ---
 // `?demo=1` adds the prototype activity menu to each row. Live polls overwrite a choice.
@@ -260,6 +326,7 @@ async function pollWorld(): Promise<void> {
     for (const extension of activeExtensions(scene)) extension.worldChanged?.(world);
     tombstoneCard.render(world.rooms.flatMap((room) => room.sleepers ?? []));
     missionIssuesCard.render(world.rooms.map((room) => ({ id: room.id, title: room.title, issues: room.walls.issues ?? [] })));
+    libraryCard.render(world.libraries ?? []);
     view.sceneChanged();
     labelDetail.sceneChanged();
     frameLoop.sceneChanged();
@@ -319,3 +386,10 @@ const frameLoop = new FrameLoop({
 });
 if (stats) Object.assign(window, { __officeStats: Object.assign(stats, { drawCalls: () => frameLoop.drawCalls(), cameraPosition: () => view.activeCamera.position.toArray(), viewMode: () => view.mode }) });
 frameLoop.start((callback) => requestAnimationFrame(callback));
+}
+
+if (isLibrarySceneSearch(window.location.search)) {
+  void import('./library/bootLibrary.js').then((module) => module.bootLibraryScene());
+} else {
+  bootOffice();
+}

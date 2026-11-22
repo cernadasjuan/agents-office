@@ -15,6 +15,7 @@ const { FrameLoop } = await import('../src/scene/FrameLoop.js');
 const { isAnimationAsleep, setAnimationAsleep, ANIMATION_DISTANCE } = await import('../src/scene/AnimationSleep.js');
 const { FrameStats } = await import('../src/scene/RenderScheduler.js');
 const { HIP_HEIGHT } = await import('../src/characters/StickFigureParts.js');
+const { SEATED_HIP_HEIGHT } = await import('../src/agents/ActivityAnimations.js');
 after(() => {
   dom.window.close();
   Reflect.deleteProperty(globalThis, 'document');
@@ -133,7 +134,10 @@ function sleeper(activity: 'implementing' | 'idle' = 'implementing') {
 }
 
 // Issue #165's Hero body shortened the legs, moving these off the pre-Hero 0.5/0.9.
-const SEATED_HIPS = HIP_HEIGHT - 0.4;
+// Round 7 re-tuned the seated drop so hips land on the seat, not below it
+// (ActivityAnimations.ts's SEATED_HIP_HEIGHT) — read the real constant, not a second
+// hardcoded copy of it.
+const SEATED_HIPS = SEATED_HIP_HEIGHT;
 const STANDING_HIPS = HIP_HEIGHT;
 const RAISED_ARM = -2.9;
 

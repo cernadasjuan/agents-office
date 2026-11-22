@@ -50,10 +50,15 @@ export interface WorldBoard {
 }
 
 /** One entry on a library shelf (issue #191 AC1, #119). `archived` is Prospero's rule: a
- * superseded or archived entry still shows, with a visible mark, never silently dropped. */
+ * superseded or archived entry still shows, with a visible mark, never silently dropped.
+ * `githubUrl` (issue #221 AC2/AC3) is the only way this card ever points at the real file: a
+ * fully-built `server/seam.ts` link, never a local path. */
 export interface WorldLibraryEntry {
   title: string;
   archived?: boolean;
+  summary?: string;
+  lastChanged?: string;
+  githubUrl?: string;
 }
 
 /** One section's own shelf, built from that section's own `INDEX.md`, never a raw folder walk. */
