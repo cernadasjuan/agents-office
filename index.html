@@ -210,7 +210,10 @@
        real viewing distance (a CSS2D label never shrinks with distance; the *gap* between two
        labels does). A fixed on-screen panel, the same pattern `#ui-panel` already uses, has no
        such distance at all, and gives the index a real, bounded, scrollable height — it scales
-       to the server's own 100-section cap without ever running off-screen. */
+       to the server's own 100-section cap without ever running off-screen. The librarian's own
+       "ask" button (issue #248) is a real DOM element too, inside the CSS2D layer
+       (`SceneSetup.ts` sets that whole layer's own `pointer-events: none`) — re-enabled here on
+       purpose, since clicking it is the entire point. */
     #library-panel {
       position: fixed;
       top: 16px;
@@ -226,6 +229,9 @@
       max-width: 320px;
       backdrop-filter: blur(8px);
       z-index: 100;
+    }
+    .library-ask-librarian {
+      pointer-events: auto;
     }
     #library-panel h2 { font-size: 16px; color: #fff; margin-bottom: 8px; }
     .library-index {
@@ -246,9 +252,7 @@
       cursor: pointer;
     }
     .library-index-line:hover { background: rgba(120, 120, 255, 0.18); }
-    .library-back-door {
-      display: block;
-      width: 100%;
+    .library-back-door, .library-ask-librarian {
       background: rgba(58, 111, 90, 0.9);
       color: #f5f0e8;
       border: none;
@@ -257,6 +261,13 @@
       font: 600 13px system-ui, sans-serif;
       cursor: pointer;
       white-space: nowrap;
+    }
+    /* `.library-back-door` lives inside `#library-panel`'s own flow (issue #245 review); fill
+       its width there. `.library-ask-librarian` is its own freestanding CSS2D object in the
+       3D world (issue #248, beside the NPC), never inside that panel — sized to its own text. */
+    .library-back-door {
+      display: block;
+      width: 100%;
     }
     /* A section room's own name tag (issue #245 review: the only CSS2D label left in this
        scene — one per room, so it never shares a world position with anything else). */
@@ -267,6 +278,12 @@
       border-radius: 4px;
       font: 600 13px system-ui, sans-serif;
       white-space: nowrap;
+    }
+    /* Issue #248: a brief highlight when the librarian NPC points back at the wall index,
+       instead of opening a second copy of the same catalog in its own card. */
+    .library-index-highlight {
+      box-shadow: 0 0 0 3px rgba(58, 111, 90, 0.85);
+      transition: box-shadow 0.2s ease-out;
     }
     #legend {
       position: fixed;
