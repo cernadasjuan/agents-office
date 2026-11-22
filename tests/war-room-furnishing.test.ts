@@ -150,6 +150,44 @@ test('the desk grid caps at the physical fit; extra agents do not get an extra d
   assert.equal(deskPieces.filter((p) => p.piece.name === 'debugStation').length, 4);
 });
 
+// --- Round 7 (#214): no desk beside the door, every desk faces the room center ---
+
+test('#214: no desk slot sits inside the old door-flanking lane (a = ±2.4)', () => {
+  const plan = furnishWarRoom('mission-no-door-desk', { deskLike: MAX_DESK_SLOTS, debugging: 0 });
+  const deskPieces = plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation');
+  for (const p of deskPieces) assert.ok(Math.abs(p.a) > 4, `desk at a=${p.a} is still beside the door, not a corner or side wall`);
+});
+
+test('#214: every desk and debug station turns to face the room center, not the door', () => {
+  const plan = furnishWarRoom('mission-face-center', { deskLike: MAX_DESK_SLOTS, debugging: 0 });
+  const deskPieces = plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation');
+  for (const p of deskPieces) {
+    const turn = p.turn ?? 0;
+    if (p.a < 0) assert.ok(turn > 0, `left-wall desk at a=${p.a} should turn toward +a (center), got turn=${turn}`);
+    else assert.ok(turn < 0, `right-wall desk at a=${p.a} should turn toward -a (center), got turn=${turn}`);
+  }
+});
+
+// --- Round 7 (#214) review fix: the seated station must land in the piece's own built-in chair ---
+
+test('#214 review: a desk or debug station seats its agent in the chair the piece actually renders, not across the room from it', async () => {
+  const { RoomFrame } = await import('../src/addons/building/rooms.js');
+  const { missionSlot } = await import('../src/addons/building/missionRooms.js');
+  const slot = missionSlot(0);
+  const frame = new RoomFrame(slot.rect, slot.door);
+  const plan = furnishWarRoom('mission-seat-alignment', { deskLike: MAX_DESK_SLOTS, debugging: 2 });
+  const deskPieces = plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation');
+  for (const [i, p] of deskPieces.entries()) {
+    const station = plan.stations[i];
+    const deskCenter = frame.point(p.a, p.d);
+    const chairLocal = new THREE.Vector3(0, 0, 0.7).applyAxisAngle(new THREE.Vector3(0, 1, 0), frame.faceDoor + (p.turn ?? 0));
+    const chairWorld = deskCenter.clone().add(chairLocal);
+    const stationWorld = frame.point(station.a, station.d);
+    const gap = chairWorld.distanceTo(stationWorld);
+    assert.ok(gap < 0.5, `station ${i} sits ${gap.toFixed(2)} m from its chair, should be seated in it`);
+  }
+});
+
 // --- Could-haves unlock by tier ---
 
 test('could-haves unlock only at medium and large tiers', () => {
@@ -201,12 +239,14 @@ function deskPieceCount(doorAlong: number): number {
   return plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation').length;
 }
 
-test('the door clearance drops a slot exactly at DOOR_PATH_CLEARANCE, keeps one just past it', () => {
+test('the door clearance drops the nearest lane exactly at DOOR_PATH_CLEARANCE, keeps it just past it', () => {
   assert.equal(DOOR_PATH_CLEARANCE, 2.3);
-  // The slot at a = 2.4: at doorAlong = 0.11 it is 2.29 away (just inside clearance, dropped);
-  // at doorAlong = 0.09 it is 2.31 away (just outside, kept). Neither other slot is affected.
-  assert.equal(deskPieceCount(0.11), MAX_DESK_SLOTS - 1, 'the a = 2.4 slot is dropped just inside the threshold');
-  assert.equal(deskPieceCount(0.09), MAX_DESK_SLOTS, 'the a = 2.4 slot is kept just outside the threshold');
+  // Round 7 (#214) dropped the two door-flanking slots (a = ±2.4); the nearest lane left is
+  // a = 4.6, which `clearsDoor` filters by `a` alone, so all three of its depth rows drop
+  // together. At doorAlong = 2.31 the lane is 2.29 away (just inside clearance, all 3 dropped);
+  // at doorAlong = 2.29 it is 2.31 away (just outside, all 3 kept). No other lane is affected.
+  assert.equal(deskPieceCount(2.31), MAX_DESK_SLOTS - 3, 'the a = 4.6 lane (3 rows) is dropped just inside the threshold');
+  assert.equal(deskPieceCount(2.29), MAX_DESK_SLOTS, 'the a = 4.6 lane is kept just outside the threshold');
 });
 
 // --- No two floor-standing pieces overlap, at the full desk cap, over many seeds (issue

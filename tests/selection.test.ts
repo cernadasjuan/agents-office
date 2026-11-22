@@ -107,6 +107,28 @@ test('a ray through a figure picks its agent, a ray past it picks nothing', () =
   assert.equal(pickAgent(hit, []), null);
 });
 
+test('issue #223: a target with `resolve` turns the ray hit into its own id, not the target id', () => {
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+  plane.position.set(0, 0, 0);
+  const scene = new THREE.Scene();
+  scene.add(plane);
+  scene.updateMatrixWorld(true);
+  const resolved: Array<THREE.Vector2 | undefined> = [];
+  const targets = [{
+    id: 'board',
+    object: plane,
+    resolve: (hit: THREE.Intersection) => { resolved.push(hit.uv); return hit.uv && hit.uv.y > 0.5 ? 'row-a' : null; },
+  }];
+
+  const top = new THREE.Raycaster(new THREE.Vector3(0.2, 0.6, 5), new THREE.Vector3(0, 0, -1));
+  assert.equal(pickAgent(top, targets), 'row-a');
+
+  const bottom = new THREE.Raycaster(new THREE.Vector3(0.2, -0.6, 5), new THREE.Vector3(0, 0, -1));
+  assert.equal(pickAgent(bottom, targets), null, 'resolve returning null is "no selection", not the target id');
+
+  assert.ok(resolved.every((uv) => uv !== undefined), 'the hit carried a uv for resolve to read');
+});
+
 test('a press and release close together is a click, a drag is not', () => {
   assert.equal(isClick({ x: 10, y: 10 }, { x: 12, y: 13 }), true);
   assert.equal(isClick({ x: 10, y: 10 }, { x: 40, y: 10 }), false);

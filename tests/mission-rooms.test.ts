@@ -10,7 +10,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   get: () => () => undefined,
   set: () => true,
 })) as never;
-const { buildMissionRoom, MAX_TOMBSTONES } = await import('../src/addons/building/missionRooms.js');
+const { buildMissionRoom, MAX_TOMBSTONES, canvasBoard, combinedBoard } = await import('../src/addons/building/missionRooms.js');
 const { MAX_DESK_SLOTS } = await import('../src/addons/building/warRoomFurnishing.js');
 const { tombstoneNameBatchFor } = await import('../src/addons/building/tombstoneNames.js');
 
@@ -276,6 +276,85 @@ test('the issue board is pickable, and its pick id points at this room', () => {
   assert.ok(target.object instanceof THREE.Object3D);
 });
 
+// uv values ground-truthed against `drawSectionedBoardContent`'s own pixel layout for the
+// kanban region (2 equal 128 px sections, flipY texture; title at `top + 30`, rows at
+// `top + 60 + j * 19`, review fix: tightened from 24 px so all 4 `MAX_SESSION_ROWS` fit).
+// Review fix (issue #223): the original uv values here (0.45, 0.35, 0.25, 0.05) were picked to
+// match `resolveSessionRow`'s own (wrong) even-split assumption, not the actual rendered
+// position of the title and each row, so this test could not have caught the bug it
+// introduced — every drawn row resolved to the session listed one slot below it, and a click
+// on the "Sessions" title resolved to the first row instead of nothing.
+//
+// Issue #223 vs #244: the kanban board lives inside `combinedBoard`'s shared canvas (its own
+// region, index 2 — statement, docs, kanban, `buildMissionRoom`'s own call), not a dedicated
+// 512x256 canvas of its own, so a hit's `uv.y` is in the shared canvas's full UV space, not a
+// region-local [0, 1]. `kanbanRegion` below (the same 3 specs `buildMissionRoom` passes to
+// `combinedBoard`, only `width`/`height` affect a region's own bounds) gives this test the real
+// region bounds to convert a region-local canvas-Y pixel position into that full UV space,
+// instead of assuming the region is the whole canvas.
+const kanbanRegion = combinedBoard([
+  { width: 3.6, height: 1.6, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 2.4, height: 1.6, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 3.6, height: 1.8, position: new THREE.Vector3(), rotationY: 0 },
+]).regionOf(2);
+const SECTION_TOP_PX = kanbanRegion.h / 2; // this region, 2 equal sections
+const uvForCanvasY = (y: number) => kanbanRegion.vBottom + (1 - y / kanbanRegion.h) * (kanbanRegion.vTop - kanbanRegion.vBottom);
+
+test('issue #223: the sessions board shares the kanban mesh (no extra draw call) and its `resolve` reaches the clicked session', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const kanbanLikeTarget = missionRoom.issuesBoardPickTarget(); // a different mesh, for the identity check below
+  const target = missionRoom.sessionsBoardPickTarget();
+  assert.equal(target.id, 'sessions-board:a');
+  assert.notEqual(target.object, kanbanLikeTarget.object, 'the sessions pick target is not the issues board');
+  assert.ok(target.resolve, 'resolves a row, rather than selecting the board mesh itself');
+
+  missionRoom.updateSessions([
+    { id: 'agent-1', name: 'Amelia', extras: { stuck: true } },
+    { id: 'agent-2', name: 'Quinn', extras: {} },
+  ]);
+  const hitAt = (v: number) => ({ uv: new THREE.Vector2(0.5, v) }) as THREE.Intersection;
+  // The top half of the board is the kanban section: never a session, whatever v is.
+  assert.equal(target.resolve!(hitAt(0.9)), null);
+  // The "Sessions" title text itself, drawn at `top + 30` (`canvasBoardSections`' draw()).
+  assert.equal(target.resolve!(hitAt(uvForCanvasY(SECTION_TOP_PX + 30))), null);
+  // Row 0 (blocked ranks first, drawn at `top + 60`) and row 1 (`top + 79`).
+  assert.equal(target.resolve!(hitAt(uvForCanvasY(SECTION_TOP_PX + 60))), 'agent-1');
+  assert.equal(target.resolve!(hitAt(uvForCanvasY(SECTION_TOP_PX + 79))), 'agent-2');
+  // Past the last drawn row (`top + 98`, a 3rd row that was never provided): no stale selection.
+  assert.equal(target.resolve!(hitAt(uvForCanvasY(SECTION_TOP_PX + 98))), null);
+});
+
+test('issue #223: no live sessions resolves to no selection anywhere on the board', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  missionRoom.updateSessions([]);
+  const target = missionRoom.sessionsBoardPickTarget();
+  const vs = [0.9, uvForCanvasY(SECTION_TOP_PX + 30), uvForCanvasY(SECTION_TOP_PX + 60), uvForCanvasY(SECTION_TOP_PX + 79), uvForCanvasY(SECTION_TOP_PX + 98)];
+  for (const v of vs) {
+    assert.equal(target.resolve!({ uv: new THREE.Vector2(0.5, v) } as THREE.Intersection), null, `v=${v}`);
+  }
+});
+
+// Review fix: `BuildingLayout.update()` calls `updateSessions()` every animation frame, not
+// only on the slower agent poll — redrawing (and re-uploading the texture) on every one of
+// those calls regardless of whether the sessions actually changed broke the render-on-change
+// rule every other board redraw in this file follows. `THREE.Texture.version` only increments
+// when `needsUpdate` is set to `true`, so it stands in for "did a redraw actually happen".
+test('issue #223: the sessions board redraws only when the sessions actually change, not on every tick', () => {
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const texture = (missionRoom.sessionsBoardPickTarget().object as THREE.Mesh & { material: THREE.MeshBasicMaterial }).material.map!;
+
+  missionRoom.updateSessions([{ id: 'agent-1', name: 'Amelia', extras: {} }]);
+  const versionAfterFirstDraw = texture.version;
+
+  // Same session, same state, called again (as a per-frame poll would): no new redraw.
+  missionRoom.updateSessions([{ id: 'agent-1', name: 'Amelia', extras: {} }]);
+  assert.equal(texture.version, versionAfterFirstDraw, 'an unchanged sessions list must not redraw');
+
+  // The same session's state actually changes: this must redraw.
+  missionRoom.updateSessions([{ id: 'agent-1', name: 'Amelia', extras: { stuck: true } }]);
+  assert.equal(texture.version, versionAfterFirstDraw + 1, 'a changed sessions list must redraw');
+});
+
 // --- Issue #123 review (blocking defect 1): RoomFrame used a fixed ROOM_SIZE depth
 // regardless of door orientation, and the war room's own rect kept WAR_ROOM_WIDTH on the
 // wrong axis once the corridor fix moved the door to the east/west wall — together, these put
@@ -314,24 +393,90 @@ test('issue #123 review: every mesh of a built war room stays inside its own roo
 // so once the corridor fix put war room doors on the east/west wall, the board floated meters
 // off the side wall it is meant to sit flush against, instead of touching it. ---
 
+/**
+ * Issue #244: statement, docs and kanban now share one merged mesh (`combinedBoard`), each at
+ * its own `geometry.groups` entry, in the order they were passed in (statement, docs, kanban —
+ * `buildMissionRoom`'s own call) — `mergeGeometries(geometries, true)`'s own documented
+ * behavior, one group per input geometry. Recovers one board's own world-space footprint from
+ * the merged index/position buffers, rather than assuming a fixed vertex count per plane.
+ */
+function combinedBoardWorldCenter(mesh: THREE.Mesh, groupIndex: number): THREE.Vector3 {
+  const geometry = mesh.geometry;
+  const group = geometry.groups[groupIndex];
+  if (!group) throw new Error(`no geometry group ${groupIndex} on the combined board mesh`);
+  const index = geometry.index;
+  if (!index) throw new Error('the combined board mesh has no index buffer');
+  const position = geometry.attributes.position;
+  const box = new THREE.Box3();
+  const vertex = new THREE.Vector3();
+  for (let i = group.start; i < group.start + group.count; i++) {
+    vertex.fromBufferAttribute(position, index.getX(i));
+    box.expandByPoint(vertex);
+  }
+  mesh.updateMatrixWorld(true);
+  box.min.applyMatrix4(mesh.matrixWorld);
+  box.max.applyMatrix4(mesh.matrixWorld);
+  return box.getCenter(new THREE.Vector3());
+}
+
 test('issue #123 review round 2: the kanban board sits flush against a side wall, in both wing columns', () => {
   for (const index of [0, 1]) {
     const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index);
     missionRoom.group.updateMatrixWorld(true);
     const { rect, door } = missionRoom.slot;
     assert.ok(door.side === 'east' || door.side === 'west', `expected an east/west door, got ${door.side}`);
-    let kanban: THREE.Mesh | undefined;
+    let combinedBoardMesh: THREE.Mesh | undefined;
     missionRoom.group.traverse((object) => {
       const mesh = object as THREE.Mesh;
-      const geometry = mesh.geometry as THREE.PlaneGeometry | undefined;
-      if (mesh.isMesh && geometry?.parameters?.width === 3.6 && geometry?.parameters?.height === 1.8) kanban = mesh;
+      // `mesh.geometry.groups.length === 3` alone is not unique: a plain `CylinderGeometry`
+      // (chair poles, desk legs, plant pots) always carries 3 built-in groups (top, bottom,
+      // side) of its own. The combined board mesh is the only `MeshBasicMaterial` with a
+      // canvas-texture map in this room — everything else here is a toon material.
+      const material = mesh.material as THREE.MeshBasicMaterial | undefined;
+      if (mesh.isMesh && (mesh.geometry.groups?.length ?? 0) === 3 && material?.isMeshBasicMaterial && material.map) combinedBoardMesh = mesh;
     });
-    if (!kanban) throw new Error(`room ${index}: kanban board mesh not found`);
-    const position = kanban.getWorldPosition(new THREE.Vector3());
+    if (!combinedBoardMesh) throw new Error(`room ${index}: combined board mesh (statement/docs/kanban) not found`);
+    // `buildMissionRoom` passes statement, docs, kanban to `combinedBoard` in that order (group 2 = kanban).
+    const position = combinedBoardWorldCenter(combinedBoardMesh, 2);
     // A side wall runs the room's full depth at the rect's own z-extremes (the door wall's
     // east/west rows run along z); flush against one of them means within wall thickness of
     // minZ or maxZ, never floating meters toward the room's own z-center.
     const distanceToNearestWall = Math.min(Math.abs(position.z - rect.minZ), Math.abs(position.z - rect.maxZ));
     assert.ok(distanceToNearestWall < 0.2, `room ${index}: kanban board at z=${position.z} is ${distanceToNearestWall.toFixed(2)}m from the nearest side wall (rect ${JSON.stringify(rect)})`);
   }
+});
+
+// --- combinedBoard preserves each spec's own resolution (review, #244 round 2) ---
+
+test('combinedBoard gives each spec canvasBoard\'s own pixel sizing, not one shared density — a narrower board (docs) keeps its old line capacity', () => {
+  // Same specs buildMissionRoom passes: statement (3.6x1.6), docs (2.4x1.6), kanban (3.6x1.8).
+  const specs = [
+    { width: 3.6, height: 1.6, position: new THREE.Vector3(0, 1.7, 0), rotationY: 0 },
+    { width: 2.4, height: 1.6, position: new THREE.Vector3(0, 1.7, 0), rotationY: 0 },
+    { width: 3.6, height: 1.8, position: new THREE.Vector3(0, 1.7, 0), rotationY: 0 },
+  ];
+  const combined = combinedBoard(specs);
+  const atlas = (combined.mesh.material as THREE.MeshBasicMaterial).map!.image as HTMLCanvasElement;
+  // Each spec's own canvasBoard would be 512 wide, height round(512 * h/w): 228, 341, 256 — a
+  // shared PX_PER_UNIT (the first version of this fix) instead packed every spec by physical
+  // width, giving the narrower docs board only 224 px (floor((224-70)/28) = 5 lines instead of
+  // its old 9: a silent truncation, not just a size change). A uniform-density regression
+  // would shrink this sum; this asserts the full, undiminished total.
+  const expectedHeight = [
+    Math.round(512 * (1.6 / 3.6)),
+    Math.round(512 * (1.6 / 2.4)),
+    Math.round(512 * (1.8 / 3.6)),
+  ].reduce((sum, h) => sum + h, 0);
+  assert.equal(atlas.width, 512, 'every spec keeps canvasBoard\'s own fixed 512px width');
+  assert.equal(atlas.height, expectedHeight, `expected the atlas to stack each spec's own canvasBoard height (${expectedHeight}), got ${atlas.height} — a shared density would shrink this`);
+
+  // The docs board (index 1) on its own, standalone canvasBoard, for a direct before/after.
+  const standaloneDocs = canvasBoard(2.4, 1.6);
+  const docsCanvas = (standaloneDocs.mesh.material as THREE.MeshBasicMaterial).map!.image as HTMLCanvasElement;
+  const docsLineCapacity = Math.floor((docsCanvas.height - 70) / 28);
+  assert.equal(docsLineCapacity, 9, 'sanity check: the standalone docs board fits 9 lines');
+  // The merged atlas gives region 1 (docs) the same height as its standalone board would.
+  const docsRegionHeight = Math.round(512 * (1.6 / 2.4));
+  const mergedDocsLineCapacity = Math.floor((docsRegionHeight - 70) / 28);
+  assert.equal(mergedDocsLineCapacity, docsLineCapacity, 'the merged docs region must keep the same line capacity as its old standalone board, not truncate to 5');
 });

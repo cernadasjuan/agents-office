@@ -21,6 +21,9 @@ const GROUPS: GroupSpec[] = [
   { id: 'cold', title: 'Cold', chip: (n) => `${n} cold`, openByDefault: () => false },
 ];
 
+/** The two groups that are a lobby queue across every floor (issue #192), never scoped to `focusFloor` like Working/Idle/Cold. See `refreshGroup`'s `scopeNote` (issue #230). */
+const GLOBAL_GROUPS = new Set<TriageGroupId>(['needs-you', 'your-turn']);
+
 export interface AgentPanelOptions {
   /** A click on a row selects the agent. Without it, rows are not clickable. */
   onSelect?: (agentId: string) => void;
@@ -58,7 +61,15 @@ interface Group {
   rows: HTMLElement;
   chip: HTMLElement;
   userOpen: boolean | undefined;
+  /** Every member of the group, filter or no filter — drives the default-open threshold
+   * (`openByDefault`), which is about overall busy-ness, not a search result count. */
   count: number;
+  /**
+   * Members not hidden by the current filter (issue #229): the header and chip text, and
+   * whether the section shows at all, read this instead of `count`. With no filter text the
+   * two are equal — the old behavior. `applyFilter()` keeps this in sync with the filter.
+   */
+  visibleCount: number;
   agents: AgentInfo[];
 }
 
@@ -124,11 +135,21 @@ export class AgentPanel {
     this.filterInput.select();
   }
 
-  /** Hide rows whose name and activity do not contain the filter text. Case-insensitive, empty text shows everything. */
+  /**
+   * Hide rows whose name and activity do not contain the filter text, case-insensitive, empty
+   * text shows everything. Issue #229: a filtered-out row must also leave its group's count,
+   * so `Working · 2` never sits over an empty list once "build-" matches nothing there —
+   * every group's `visibleCount` is recomputed from the rows left visible, and the header/chip
+   * (and the group's own visibility, when it drops to zero) follow it.
+   */
   private applyFilter(): void {
     for (const row of this.rows.values()) {
       const haystack = `${row.name.textContent ?? ''} ${row.activity.textContent ?? ''}`.toLowerCase();
       row.card.hidden = this.filterText.length > 0 && !haystack.includes(this.filterText);
+    }
+    for (const group of this.groups.values()) {
+      group.visibleCount = group.agents.filter((agent) => !this.rows.get(agent.id)!.card.hidden).length;
+      this.refreshGroup(group);
     }
   }
 
@@ -158,6 +179,7 @@ export class AgentPanel {
       const ordered = orderGroup(id, members.get(id)!);
       this.placeRows(group, ordered);
       group.count = ordered.length;
+      group.visibleCount = ordered.length; // applyFilter() below corrects this when a filter is active
       group.agents = ordered;
       this.refreshGroup(group);
     }
@@ -182,7 +204,7 @@ export class AgentPanel {
     chip.className = 'triage-chip';
     chip.dataset.group = spec.id;
 
-    const group: Group = { spec, section, header, rows, chip, userOpen: undefined, count: 0, agents: [] };
+    const group: Group = { spec, section, header, rows, chip, userOpen: undefined, count: 0, visibleCount: 0, agents: [] };
     header.addEventListener('click', () => {
       group.userOpen = !this.isOpen(group);
       this.refreshGroup(group);
@@ -206,14 +228,20 @@ export class AgentPanel {
 
   private refreshGroup(group: Group): void {
     const open = this.isOpen(group);
-    const empty = group.count === 0;
+    const empty = group.visibleCount === 0;
     group.section.hidden = empty;
     group.chip.hidden = empty;
-    group.chip.textContent = group.spec.chip(group.count);
+    group.chip.textContent = group.spec.chip(group.visibleCount);
     group.section.classList.toggle('collapsed', !open);
     group.header.setAttribute('aria-expanded', String(open));
-    group.header.textContent = `${open ? '▾' : '▸'} ${group.spec.title} · ${group.count}`;
-    group.header.title = open ? 'Collapse' : `Show ${group.count}`;
+    // Issue #230: Needs you / Your turn are a lobby queue across every floor, on purpose
+    // (#192) — Working/Idle/Cold below them are this floor only. A Floor switch changes only
+    // the latter three with nothing on screen saying so, which reads as broken. This marker
+    // shows only once a floor is actually selected (`focusFloor` unset on "All floors" means
+    // there is nothing global to distinguish from yet, the old behavior).
+    const scopeNote = GLOBAL_GROUPS.has(group.spec.id) && this.options.focusFloor !== undefined ? ' · all floors' : '';
+    group.header.textContent = `${open ? '▾' : '▸'} ${group.spec.title} · ${group.visibleCount}${scopeNote}`;
+    group.header.title = open ? 'Collapse' : `Show ${group.visibleCount}`;
   }
 
   private placeRows(group: Group, ordered: AgentInfo[]): void {

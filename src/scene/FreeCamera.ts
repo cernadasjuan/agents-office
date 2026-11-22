@@ -7,10 +7,16 @@ export type { WallRect };
 export const EYE_HEIGHT = FIGURE_EYE_HEIGHT;
 /** Crouching (Shift) lowers the eye height, so looking down at a desk or under a table reads differently from standing. */
 export const CROUCH_EYE_HEIGHT = EYE_HEIGHT * 0.6;
-/** A little faster than the old flight-era base speed (6), issue #174's own acceptance criteria. */
-const WALK_SPEED = 7;
-/** Double-tap W (issue #174), not Shift (now crouch): running goes faster than walking. */
-const RUN_MULTIPLIER = 1.8;
+/**
+ * A little faster than the old flight-era base speed (6), issue #174's own acceptance
+ * criteria. Raised again on round 7 (#214, about 1.4x the old 7): Gabriel found walking
+ * around the office too slow. `stepAxis`'s per-iteration cap at `WALL_MARGIN` makes
+ * collision correct at any speed or frame delta, so this is a plain feel tune, not a
+ * collision risk.
+ */
+const WALK_SPEED = 9.8;
+/** Double-tap W (issue #174), not Shift (now crouch): running goes faster than walking. Raised on #214 to about 2.6x walk. */
+const RUN_MULTIPLIER = 2.6;
 /** Shift crouches and moves slower, the reverse of the old "Shift = fast". */
 const CROUCH_SPEED_MULTIPLIER = 0.5;
 const MOUSE_SENSITIVITY = 0.002;
@@ -55,6 +61,29 @@ let wallColliders: WallRect[] = [];
 /** Issue #194: room, hall and war-room walls stop the camera; a layout with none set (or a test) keeps the old, unobstructed walk. */
 export function setWallColliders(walls: WallRect[]): void {
   wallColliders = walls;
+}
+
+/**
+ * Issue #218 step 3: the walking height at a ground position (a room floor, a walkway deck,
+ * a stair ramp), or `null` off any surface. Unset by default (graceful degradation): the old
+ * flat floor at `y = 0`. `BuildingLayout`'s `surfaceHeightAt()` feeds this through
+ * `ViewController`, the same way `wallColliders` does.
+ */
+let surfaceHeightProvider: ((x: number, z: number) => number | null) | null = null;
+/** How fast the eye eases toward a changed floor height (1/s): walking up a stair reads as a
+ * ramp, not a snap, while still settling within a fraction of a second. */
+const FLOOR_EASE_RATE = 8;
+/** The eased floor height ground-walk is standing on right now; starts flat, the old fixed `y = 0`. */
+let floorHeight = 0;
+
+export function setSurfaceHeightProvider(provider: ((x: number, z: number) => number | null) | null): void {
+  surfaceHeightProvider = provider;
+}
+
+/** The floor height under a position, falling back to the last known height off any surface
+ * — the safety case walls should already keep the camera out of, never a snap to 0. */
+function targetFloorHeight(x: number, z: number): number {
+  return surfaceHeightProvider?.(x, z) ?? floorHeight;
 }
 
 function blockedAt(x: number, z: number): boolean {
@@ -179,6 +208,9 @@ export function setFreeCameraLook(camera: THREE.Camera, position: THREE.Vector3,
   grounded = true;
   running = false;
   lastWTapAt = -Infinity;
+  // A teleport (flight, mode switch) snaps straight to its real floor height — never an eased
+  // climb playing out after landing somewhere new.
+  floorHeight = targetFloorHeight(position.x, position.z);
 }
 
 /** Where the first-person camera is and a point it looks at. */
@@ -253,12 +285,19 @@ export function updateFreeCamera(camera: THREE.PerspectiveCamera, delta: number)
     moveWithCollision(camera.position, move.x, move.z);
   }
 
+  // Issue #218 step 3: ease the standing floor toward whatever surface is under the camera
+  // now (a room floor, a walkway deck, a stair ramp) — a stair climbs as a ramp, not a snap.
+  // Flat, unset layouts (`surfaceHeightProvider` null) keep `floorHeight` at its initial 0
+  // forever, so this is a no-op for every layout before step 3.
+  const floorTarget = targetFloorHeight(camera.position.x, camera.position.z);
+  floorHeight += (floorTarget - floorHeight) * Math.min(1, delta * FLOOR_EASE_RATE);
+
   // Vertical: gravity and the jump impulse (issue #174), replacing the old Space/Q fly up/down.
   // Grounded, standing or crouching tracks the target eye height directly (a pose change, not
   // a fall); only an actual jump (`grounded` false) rides gravity toward it, so the apex and
   // the landing both play out as real motion instead of a teleport.
   if (grounded) {
-    camera.position.y = targetEyeHeight;
+    camera.position.y = floorHeight + targetEyeHeight;
   } else {
     jumpElapsed += delta;
     // The closed-form parabola (review, #185): a pure function of elapsed time, so the apex
@@ -271,10 +310,10 @@ export function updateFreeCamera(camera: THREE.PerspectiveCamera, delta: number)
     // the live target past the camera's current height while it is still going up, and that
     // must never end the jump early.
     if (velocity <= 0 && height <= targetEyeHeight) {
-      camera.position.y = targetEyeHeight;
+      camera.position.y = floorHeight + targetEyeHeight;
       grounded = true;
     } else {
-      camera.position.y = height;
+      camera.position.y = floorHeight + height;
     }
   }
 }

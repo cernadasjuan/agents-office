@@ -14,10 +14,11 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { AgentManager } = await import('../src/agents/AgentManager.js');
 const { buildSkeleton, HIP_HEIGHT } = await import('../src/characters/StickFigureParts.js');
-const { animateActivity } = await import('../src/agents/ActivityAnimations.js');
 // Issue #165's Hero body shortened the legs, moving the standing hip height off the
-// pre-Hero 0.9; the seated drop (0.4) is unchanged (see ActivityAnimations.ts).
-const SEATED_HIP_HEIGHT = HIP_HEIGHT - 0.4;
+// pre-Hero 0.9; round 7 re-tuned the seated drop so hips land on the seat, not below it
+// (ActivityAnimations.ts's SEATED_HIP_HEIGHT) — read the real constant, not a second
+// hardcoded copy of it.
+const { animateActivity, SEATED_HIP_HEIGHT } = await import('../src/agents/ActivityAnimations.js');
 const registry = await import('../src/layout/registry.js');
 after(() => {
   dom.window.close();

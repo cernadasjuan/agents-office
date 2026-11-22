@@ -21,6 +21,7 @@ import { FreshnessFooter } from './ui/freshness.js';
 import { Legend } from './ui/Legend.js';
 import { handleTriageKey } from './ui/TriageKeys.js';
 import { FloorSwitch } from './ui/FloorSwitch.js';
+import { ViewSwitch } from './ui/ViewSwitch.js';
 import { ALL_FLOORS, defaultFloor, floorsWithStoredRooms, rememberFloor, reloadForFloorSwitch } from './floors/FloorRegistry.js';
 import { focusedFloor, setFocusedFloor } from './floors/floorState.js';
 import { isLibrarySceneSearch, libraryEntryUrl } from './library/sceneNav.js';
@@ -107,6 +108,11 @@ const libraryCard = new LibraryCard(document.body, { anchor: document.getElement
 // from the active layout (issue #89); a layout with no rooms, or an unknown name, is a no-op.
 // The panel header shows the layout and the view.
 const viewStatus = document.getElementById('view-status');
+// Issue #231: the view switch is constructed after `view` (its buttons call straight into it),
+// so this starts null and the first `modeChanged` call (always fired once, during the
+// ViewController constructor below) is a no-op; `viewSwitch.setActive(view.mode)` right after
+// construction catches that one up.
+let viewSwitch: ViewSwitch | null = null;
 const view = new ViewController({
   camera,
   canvas: renderer.domElement,
@@ -117,6 +123,7 @@ const view = new ViewController({
   deskView: () => layout.deskView?.() ?? null,
   roomAt: (x, z) => layout.roomAt?.(x, z) ?? null,
   wallColliders: () => layout.wallColliders?.() ?? [],
+  surfaceHeightAt: (x, z) => layout.surfaceHeightAt?.(x, z) ?? null,
   keys: window,
   hint: document.getElementById('pointer-hint'),
   crosshair: document.getElementById('crosshair-dot'),
@@ -127,6 +134,10 @@ const view = new ViewController({
     if (viewStatus) viewStatus.textContent = viewStatusText(layoutName(layoutId), mode);
     // Issue #162: leaving desk mode walks a talker back to its queue spot, same as deselecting it.
     agentManager.setDeskTalker(mode === 'desk' ? selectedAgentId() : null);
+    // Issue #243: the desk-view camera sits close enough to the user's own chair that it
+    // otherwise fills the bottom of the frame; hidden only while actually sitting at the desk.
+    layout.setDeskChairVisible?.(mode !== 'desk');
+    viewSwitch?.setActive(mode);
   },
   figureShiftPx: () => agentCard.cameraShiftPx(),
   // Issue #239/#245: double-clicking the library room in isometric, or simply walking into it
@@ -150,6 +161,18 @@ const view = new ViewController({
   })(),
   startedInLibraryRoom: returningFromLibrary,
 });
+
+// View switch (issue #231): a small, visible alternative to the footer's keyboard hint. Each
+// button calls the exact method its matching key already calls, never a new transition of its
+// own; `ViewSwitch` itself works out the first-person button's "which toggle gets back there" case.
+const viewSwitchContainer = document.getElementById('view-switch-container');
+if (viewSwitchContainer) {
+  viewSwitch = new ViewSwitch(viewSwitchContainer, view.mode, {
+    isometric: () => view.toggleIsometric(),
+    desk: () => view.toggleDesk(),
+  });
+  viewSwitch.setActive(view.mode);
+}
 
 // --- Triage list (side panel) ---
 // `?demo=1` adds the prototype activity menu to each row. Live polls overwrite a choice.
@@ -208,16 +231,20 @@ const offscreenMarkers = new OffscreenMarkers({
   },
 });
 
-// Keyboard triage (issue #85): N the next agent in queue, F recenters and pulses Focus, / the filter field.
+// Keyboard triage (issue #85, F behavior walked back on #214): N the next agent in
+// queue, F recenters and runs the ready herdr focus directly (falls back to a pulse
+// when no ready action exists), / the filter field.
 window.addEventListener('keydown', (event) => {
   handleTriageKey(event, {
     next: () => {
       const queue = triageQueue(agentManager.getAgents().map((managed) => managed.info));
       const next = nextInQueue(queue, selectedAgentId());
-      if (next) selectAgent(next.id);
+      // Issue #252 review round 2: N is explicit agent navigation, same as a click — user intent.
+      if (next) { view.dismissPendingRoom(); selectAgent(next.id); }
     },
     focus: () => {
       const current = selectedAgentId();
+      view.dismissPendingRoom(); // issue #252 review round 2: F is explicit navigation too
       if (current) {
         // Already selected: a reselect would be a no-op, so recenter directly.
         view.refocus(current);
@@ -226,7 +253,7 @@ window.addEventListener('keydown', (event) => {
         if (!next) return;
         selectAgent(next.id); // flies there and opens the card through the normal selection path
       }
-      agentCard.pulseFocus();
+      void agentCard.triageFocus();
     },
     filter: () => {
       expandPanel(document.getElementById('ui-panel')!, document.getElementById('ui-panel-toggle')!, window.localStorage);

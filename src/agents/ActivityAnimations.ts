@@ -7,11 +7,24 @@ import type { Posture } from '../layout/LayoutStrategy.js';
  * Hero body changed HIP_HEIGHT/SHOULDERS_Y/NECK_HEIGHT; this drop is a chair-seat
  * relationship, not a body one, so it stays a fixed offset rather than scaling with
  * the figure).
+ *
+ * Issue #165 round 7 (review: "the sub-agents when sitting on a sofa look that
+ * they're sinking in a sofa... And the agents too"): 0.4 was tuned for the old,
+ * taller plain-stick body (seated hips landed at 0.9 - 0.4 = 0.5, a hair above the
+ * seat). The Hero body's shorter `HIP_HEIGHT` (0.74) kept this same fixed drop,
+ * landing seated hips at 0.34 — well *below* every seat surface this office builds
+ * (the sofa's own cushion top, `Sofa.ts`: 0.35 + 0.15 / 2 = 0.425; the armchair's,
+ * `Armchair.ts`: 0.35 + 0.14 / 2 = 0.42; the desk chair's and the stool's, `Desk.ts`/
+ * `Stool.ts`: ~0.445-0.46) — reading as sinking into the cushion instead of resting
+ * on it. Re-tuned so seated hips land at 0.425, the sofa's own seat height (the
+ * piece of furniture the review named): close enough to the desk chair and stool
+ * too (within 2-3 cm) that neither reads as sinking either.
  */
-const SEATED_DROP = 0.4;
-const SEATED_HIP_HEIGHT = HIP_HEIGHT - SEATED_DROP;
-const SEATED_SHOULDERS_Y = SHOULDERS_Y - SEATED_DROP;
-const SEATED_NECK_HEIGHT = NECK_HEIGHT - SEATED_DROP;
+const SEATED_DROP = HIP_HEIGHT - 0.425;
+/** Exported so a test can assert against the real computed seat height, not a second hardcoded copy of it. */
+export const SEATED_HIP_HEIGHT = HIP_HEIGHT - SEATED_DROP;
+export const SEATED_SHOULDERS_Y = SHOULDERS_Y - SEATED_DROP;
+export const SEATED_NECK_HEIGHT = NECK_HEIGHT - SEATED_DROP;
 
 export type Activity =
   | 'idle'
@@ -185,10 +198,22 @@ function applyStandingBase(j: Joints, dt: number): void {
 // Seated pose: hips, shoulders, neck all drop together
 // Standing: hips=HIP_HEIGHT, shoulders=SHOULDERS_Y, neck=NECK_HEIGHT
 // Seated: each minus SEATED_DROP
+//
+// Round 7 follow-up (subagents sink into the sofa): SEATED_HIP_HEIGHT etc. are tuned
+// against a real sofa/armchair/desk-chair seat top in world space, but these targets
+// are set on a joint local to `j.root`, which AgentManager scales by 0.85 for every
+// subagent (`figure.group.scale.multiplyScalar(SUBAGENT_SCALE)`). Left unscaled here,
+// a subagent's seated hips would land at 0.85 * 0.425 = ~0.361, about 6 cm below the
+// seat it was just tuned to meet, undoing the round 7 fix for the half of the figures
+// the review named ("the sub-agents... and the agents too"). Dividing by the root's
+// own y scale cancels that scale out before the position lands on the parent sofa's
+// local frame, so both a full-scale agent and an 0.85 subagent land hips on the same
+// world-space seat top.
 function applySeatedBase(j: Joints, dt: number): void {
-  j.hips.position.y = approachY(j.hips.position.y, SEATED_HIP_HEIGHT, dt);
-  j.shoulders.position.y = approachY(j.shoulders.position.y, SEATED_SHOULDERS_Y, dt);
-  j.neck.position.y = approachY(j.neck.position.y, SEATED_NECK_HEIGHT, dt);
+  const scale = j.root.scale.y || 1;
+  j.hips.position.y = approachY(j.hips.position.y, SEATED_HIP_HEIGHT / scale, dt);
+  j.shoulders.position.y = approachY(j.shoulders.position.y, SEATED_SHOULDERS_Y / scale, dt);
+  j.neck.position.y = approachY(j.neck.position.y, SEATED_NECK_HEIGHT / scale, dt);
 
   j.leftUpperLeg.rotation.x = approach(j.leftUpperLeg.rotation.x, -1.5, dt);
   j.leftLowerLeg.rotation.x = approach(j.leftLowerLeg.rotation.x, 1.5, dt);

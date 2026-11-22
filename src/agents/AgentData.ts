@@ -39,6 +39,11 @@ export interface AgentExtras {
    * a session without it (an old server, or a source that skips enrichment) is treated as
    * `'general'` by every floor-aware reader, never as a crash. */
   floor?: string;
+  /** Repositories this agent's work touches, as plain display tokens (a bare repo name or an
+   * `owner/repo` pair, the same shape `floor` uses) — never a filesystem path (issue #216,
+   * the agent card's Repos column). Present alongside `badges`/`skills` at the same instant,
+   * set by the server's floor enricher; absent (not a loading state) when no repo resolved. */
+  repos?: string[];
 }
 
 export interface AgentInfo {

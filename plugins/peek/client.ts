@@ -1,18 +1,29 @@
 import type { AgentInfo } from '../../src/agents/AgentData.js';
 import { currentWorld } from '../../src/extensions.js';
 import { registerCardPanel, type CardPanel } from '../../src/ui/AgentCard.js';
+// Speech bubbles and the live tail's scene part (issue #81): a separate module, registered as
+// its own extension, but bundled here since the plugin loader only globs `client.ts`.
+import './bubbles.js';
 
 /**
- * Browser part of the peek plugin. It adds three sections to the agent card:
- * "Recent" (the last lines, with the last open question pinned on top),
- * "Assets" (links from tool calls) and "Equipment" (skills, personas, repos).
- * It asks `/api/views/peek` for the selected agent only, at most every 5 s while
- * the card stays open (a timer that stops when the card closes). All text goes
- * through textContent. `setPeekTextHidden` hides all peek text for a private mode.
+ * Browser part of the peek plugin. It adds two sections to the agent card:
+ * "Recent" (the last lines, with the last open question pinned on top) and
+ * "Links" (links from tool calls — named and styled distinctly from the card's
+ * own "Issues" section, Sally's round 7 review AC5, so neither list reads as a
+ * continuation of the other while scanning). The old "Equipment" section
+ * (skills, personas, repos as a `<dl>` fact list) is gone (AC4): that data now
+ * lives only in the card's own Persona/Skills/Repos table, which renders at
+ * the same instant as the rest of the card instead of behind this plugin's
+ * async per-agent fetch (issue #216). It asks `/api/views/peek` for the
+ * selected agent only, at most every 5 s while the card stays open (a timer
+ * that stops when the card closes). All text goes through textContent.
+ * `setPeekTextHidden` hides all peek text for a private mode.
  */
 
 export const PEEK_URL = '/api/views/peek';
 export const PEEK_REFRESH_MS = 5000;
+/** AC5's tail: "Show 100 lines" asks for this many instead of the default 10. */
+export const PEEK_TAIL_LINES = 100;
 
 export interface PeekReply { ok: boolean; status: number; json(): Promise<unknown> }
 export type PeekFetch = (url: string) => Promise<PeekReply>;
@@ -21,8 +32,6 @@ interface PeekData {
   lines: Array<{ kind: string; text: string }>;
   question?: string;
   assets: Array<{ kind: string; label: string; url: string }>;
-  skills: string[];
-  repos: string[];
 }
 
 export interface PeekPanelOptions {
@@ -34,10 +43,6 @@ export interface PeekPanelOptions {
   clearTimer?: (timer: unknown) => void;
 }
 
-function strings(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
-
 function parse(body: unknown): PeekData {
   const raw = (body ?? {}) as Record<string, unknown>;
   const objects = (value: unknown) => (Array.isArray(value) ? value : []).filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
@@ -45,8 +50,6 @@ function parse(body: unknown): PeekData {
     lines: objects(raw.lines).map((line) => ({ kind: String(line.kind ?? ''), text: String(line.text ?? '') })),
     ...(typeof raw.question === 'string' && raw.question ? { question: raw.question } : {}),
     assets: objects(raw.assets).map((asset) => ({ kind: String(asset.kind ?? ''), label: String(asset.label ?? ''), url: String(asset.url ?? '') })),
-    skills: strings(raw.skills),
-    repos: strings(raw.repos),
   };
 }
 
@@ -69,6 +72,15 @@ export class PeekPanel implements CardPanel {
   private inFlightFor: string | null = null;
   private drawnKey = '';
   private textHidden = false;
+  /** AC5: "Show 100 lines" was pressed for the agent currently shown. Resets on agent switch. */
+  private tailMode = false;
+  /** Review: `showTail()` fires a load without waiting for an in-flight one to finish (the
+   * normal throttle is for "nothing changed yet", not for a request the user just asked for),
+   * so two requests for the same agent can race. Each `load()` call tags itself with the next
+   * number; a reply only applies if it is still the newest one asked for, so an older,
+   * slower reply (for example the short view's own scheduled poll) never overwrites a newer
+   * one still in flight (for example "Show 100 lines"). */
+  private requestSeq = 0;
   private timer: unknown = null;
   private readonly now: () => number;
   private readonly setTimer: (run: () => void, ms: number) => unknown;
@@ -97,6 +109,7 @@ export class PeekPanel implements CardPanel {
       this.data = null;
       this.failed = false;
       this.fetchedAt = -Infinity;
+      this.tailMode = false;
     }
     this.draw();
     if (this.inFlightFor === agent.id) return;
@@ -128,18 +141,30 @@ export class PeekPanel implements CardPanel {
     this.timer = null;
   }
 
-  /** Hide or show all peek text: Recent, the pinned question, Assets and Equipment. */
+  /** Hide or show all peek text: Recent, the pinned question and Links. */
   setTextHidden(hidden: boolean): void {
     this.textHidden = hidden;
     this.applyTextHidden();
   }
 
+  /** AC5: "Show 100 lines" was pressed. Loads at once (the normal throttle is for "nothing
+   * changed yet", not for a request the user just asked for) and stays in tail mode for this
+   * agent until the card switches to another one. */
+  private showTail(): void {
+    if (this.tailMode) return;
+    this.tailMode = true;
+    this.fetchedAt = -Infinity;
+    if (this.agentId !== null) void this.load(this.agentId);
+  }
+
   private async load(agentId: string): Promise<void> {
+    const seq = ++this.requestSeq;
     this.inFlightFor = agentId;
     this.fetchedAt = this.now();
+    const lines = this.tailMode ? `&lines=${PEEK_TAIL_LINES}` : '';
     let data: PeekData | null = null;
     try {
-      const reply = await this.options.fetch(`${PEEK_URL}?agent=${encodeURIComponent(agentId)}`);
+      const reply = await this.options.fetch(`${PEEK_URL}?agent=${encodeURIComponent(agentId)}${lines}`);
       if (reply.ok) data = parse(await reply.json());
     } catch (error) {
       console.debug('peek request failed', error);
@@ -147,6 +172,9 @@ export class PeekPanel implements CardPanel {
       if (this.inFlightFor === agentId) this.inFlightFor = null;
     }
     if (agentId !== this.agentId) return;
+    // A newer request for this agent (for example "Show 100 lines") already started: this
+    // reply is stale, whatever it answers, and must never overwrite what the newer one finds.
+    if (seq !== this.requestSeq) return;
     this.data = data;
     this.failed = data === null;
     this.draw();
@@ -158,7 +186,7 @@ export class PeekPanel implements CardPanel {
     const root = this.root;
     const agent = this.agent;
     if (!root || !agent) return;
-    const key = JSON.stringify([agent.id, agent.extras?.badges, this.data, this.failed]);
+    const key = JSON.stringify([agent.id, this.data, this.failed, this.tailMode]);
     if (key === this.drawnKey && root.childElementCount > 0) return;
     this.drawnKey = key;
     const doc = root.ownerDocument;
@@ -180,20 +208,31 @@ export class PeekPanel implements CardPanel {
     question.hidden = !data?.question;
     question.dataset.empty = data?.question ? 'false' : 'true';
 
-    const recent = section('peek-recent', 'Recent');
+    const recent = section('peek-recent', this.tailMode ? 'Recent (last 100)' : 'Recent');
     if (!data) {
       recent.appendChild(el('p', '', this.failed ? 'Recent lines are not available' : 'Loading recent lines…'));
     } else if (data.lines.length === 0) {
       recent.appendChild(el('p', '', 'No recent lines'));
     } else {
-      const list = el('ul');
+      const list = el('ul', 'peek-tail-list');
       for (const line of data.lines) list.appendChild(el('li', line.kind === 'tool' ? 'peek-tool' : 'peek-text', line.text));
       recent.appendChild(list);
     }
+    // AC5: the live 100-line tail, one button, never on while already in tail mode.
+    if (!this.tailMode) {
+      const button = el('button', 'peek-tail-button', 'Show 100 lines') as HTMLButtonElement;
+      button.type = 'button';
+      button.addEventListener('click', () => this.showTail());
+      recent.appendChild(button);
+    }
 
-    const assets = section('peek-assets', 'Assets');
+    // "Links" (was "Assets"), relabeled and distinctly styled from the card's own "Issues"
+    // section (Sally's round 7 review, AC5): identical markup used to make the two lists read
+    // as one continuous link dump while scanning top to bottom. `.peek-links` carries its own
+    // accent color so this list is visually, not just textually, a different thing.
+    const links = section('peek-links', 'Links');
     if (!data || data.assets.length === 0) {
-      assets.appendChild(el('p', '', 'No assets'));
+      links.appendChild(el('p', '', 'No links'));
     } else {
       const list = el('ul');
       for (const asset of data.assets) {
@@ -209,18 +248,10 @@ export class PeekPanel implements CardPanel {
         }
         list.appendChild(item);
       }
-      assets.appendChild(list);
+      links.appendChild(list);
     }
 
-    const equipment = section('peek-equipment', 'Equipment');
-    const facts = el('dl', 'inspector-facts');
-    const fact = (title: string, items: string[], empty: string) => facts.append(el('dt', '', title), el('dd', '', items.length > 0 ? items.join(', ') : empty));
-    fact('Skills', data?.skills ?? [], 'None');
-    fact('Personas', agent.extras?.badges ?? [], 'None');
-    fact('Repos', data?.repos ?? [], 'None');
-    equipment.appendChild(facts);
-
-    wrapper.append(question, recent, assets, equipment);
+    wrapper.append(question, recent, links);
     root.replaceChildren(wrapper);
     this.applyTextHidden();
   }
@@ -228,7 +259,7 @@ export class PeekPanel implements CardPanel {
   private applyTextHidden(): void {
     const root = this.root;
     if (!root) return;
-    for (const section of root.querySelectorAll<HTMLElement>('.peek-recent, .peek-assets, .peek-equipment')) section.hidden = this.textHidden;
+    for (const section of root.querySelectorAll<HTMLElement>('.peek-recent, .peek-links')) section.hidden = this.textHidden;
     const question = root.querySelector<HTMLElement>('.peek-question');
     if (question) question.hidden = this.textHidden || question.dataset.empty === 'true';
   }

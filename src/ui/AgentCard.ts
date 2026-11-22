@@ -5,7 +5,8 @@ import { attentionBand, attentionLine, BEACON_HINT, callsForYou } from './attent
 /**
  * Agent card (inspector, phase 1): a click on a figure or a triage row opens a
  * card docked left of the triage panel. It shows who the agent is, its state
- * and wait, where it runs, its personas, subagents and linked issues. Plugins
+ * and wait, where it runs, its persona/skills/repos equipment table, subagents
+ * and linked issues. Plugins
  * add buttons (`registerCardAction`), issue links (`registerIssueLinker`) and
  * sections at the end (`registerCardPanel`);
  * the card itself knows no plugin. All text goes through textContent.
@@ -13,6 +14,9 @@ import { attentionBand, attentionLine, BEACON_HINT, callsForYou } from './attent
 
 export const CARD_WIDTH_PX = 360;
 export const CARD_MAX_ISSUES = 10;
+/** Max visible rows per equipment column before a final "+N more" row (Sally's round 7 review,
+ * column rule 2): a long list must never grow the card past its fixed per-column height. */
+export const CARD_EQUIP_MAX = 4;
 const CARD_GAP_PX = 8;
 const MIN_FREE_AREA_PX = 240;
 const STATUS_MS = 3000;
@@ -46,6 +50,53 @@ function createProviderMark(doc: Document, provider: 'codex' | undefined): SVGSV
     shape.setAttribute('fill', '#9fe0c0');
   }
   svg.appendChild(shape);
+  return svg;
+}
+
+/**
+ * A geometric header mark for an equipment column (Sally's round 7 review): a hat for Persona,
+ * a bucket for Repos — the same "simple geometry, not a downloaded brand asset" rule as
+ * `createProviderMark`. Skills reuses the existing gear glyph (the same mark `li.skill::before`
+ * already draws), not a new SVG, per the review's own instruction to reuse it rather than add a
+ * fourth shape.
+ */
+function createPersonaMark(doc: Document): SVGSVGElement {
+  const svg = doc.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
+  svg.setAttribute('width', '12');
+  svg.setAttribute('height', '12');
+  svg.setAttribute('viewBox', '0 0 14 14');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('persona-mark');
+  const crown = doc.createElementNS(SVG_NS, 'path');
+  crown.setAttribute('d', 'M2 9 L7 2 L12 9 Z');
+  crown.setAttribute('fill', '#ffb199');
+  const brim = doc.createElementNS(SVG_NS, 'rect');
+  brim.setAttribute('x', '1');
+  brim.setAttribute('y', '9');
+  brim.setAttribute('width', '12');
+  brim.setAttribute('height', '2.5');
+  brim.setAttribute('rx', '1');
+  brim.setAttribute('fill', '#ffb199');
+  svg.append(crown, brim);
+  return svg;
+}
+
+function createRepoMark(doc: Document): SVGSVGElement {
+  const svg = doc.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
+  svg.setAttribute('width', '12');
+  svg.setAttribute('height', '12');
+  svg.setAttribute('viewBox', '0 0 14 14');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('repo-mark');
+  const body = doc.createElementNS(SVG_NS, 'path');
+  body.setAttribute('d', 'M2.5 4 L11.5 4 L10.5 12 L3.5 12 Z');
+  body.setAttribute('fill', '#a8b8ff');
+  const handle = doc.createElementNS(SVG_NS, 'path');
+  handle.setAttribute('d', 'M4 4 C4 1.5 10 1.5 10 4');
+  handle.setAttribute('fill', 'none');
+  handle.setAttribute('stroke', '#a8b8ff');
+  handle.setAttribute('stroke-width', '1.2');
+  svg.append(body, handle);
   return svg;
 }
 
@@ -153,7 +204,9 @@ export class AgentCard {
   private readonly parentRow: HTMLElement;
   private readonly actionRow: HTMLElement;
   private readonly status: HTMLElement;
-  private readonly personaSkills: Section;
+  private readonly equipPersona: Section;
+  private readonly equipSkills: Section;
+  private readonly equipRepos: Section;
   private readonly subagents: Section;
   private readonly issues: Section;
   private readonly selection: SelectionState;
@@ -225,12 +278,31 @@ export class AgentCard {
       root.append(el('h4', '', title), body);
       return { root, body };
     };
-    this.personaSkills = section('inspector-personas', 'Persona / Skills');
+    // Equipment: a 3-column table (Persona, Skills, Repos), one icon per column header,
+    // replacing the old mixed "Persona / Skills" list (Sally's round 7 review, AC1/AC4).
+    // Each column grows independently top to bottom (no shared row grid, `align-items:
+    // flex-start` in CSS so one empty column never stretches to another's height).
+    const equipColumn = (kind: string, mark: Element, label: string): Section => {
+      const root = el('div', `equip-col equip-col-${kind}`);
+      const heading = el('h4', '', label);
+      heading.prepend(mark);
+      const body = el('div', 'equip-body');
+      root.append(heading, body);
+      return { root, body };
+    };
+    this.equipPersona = equipColumn('persona', createPersonaMark(doc), 'Persona');
+    this.equipSkills = equipColumn('skills', el('span', 'skill-mark', '⚙'), 'Skills');
+    this.equipRepos = equipColumn('repos', createRepoMark(doc), 'Repos');
+    const equipment = el('section', 'inspector-section inspector-equipment');
+    const equipColumns = el('div', 'equip-columns');
+    equipColumns.append(this.equipPersona.root, this.equipSkills.root, this.equipRepos.root);
+    equipment.appendChild(equipColumns);
+
     this.subagents = section('inspector-subagents', 'Subagents');
     this.issues = section('inspector-issues', 'Issues');
 
     this.root.append(header, state, this.wait, this.beaconHint, facts, this.parentRow, this.actionRow, this.status,
-      this.personaSkills.root, this.subagents.root, this.issues.root);
+      equipment, this.subagents.root, this.issues.root);
     parent.appendChild(this.root);
 
     this.selection.onChange(() => this.refresh());
@@ -257,12 +329,13 @@ export class AgentCard {
   }
 
   /**
-   * Key F (issue #85, fixed under the decision on #85): highlight the shown
-   * agent's ready action button (today only "Focus in herdr") for `PULSE_MS`,
-   * so the keystroke has a visible effect. Never moves DOM focus onto the
-   * button (Enter would then send the request) and never calls `runAction`:
-   * S7 keeps a write action behind a click. A silent no-op without a ready
-   * action (no selection, or no action available for the shown agent).
+   * Key F (issue #85, superseded by #214): highlight the shown agent's ready
+   * action button (today only "Focus in herdr") for `PULSE_MS`, so the
+   * keystroke has a visible effect. Never moves DOM focus onto the button
+   * (Enter would then send the request) and never calls `runAction`. Kept as
+   * the fallback `triageFocus` uses when no ready action is available —
+   * S7 ("nothing happens in herdr without a click") still applies then,
+   * there is simply nothing to run.
    */
   pulseFocus(): void {
     const button = this.actionRow.querySelector<HTMLButtonElement>('button');
@@ -272,12 +345,32 @@ export class AgentCard {
     this.pulseTimer = setTimeout(() => button.classList.remove('pulse'), PULSE_MS);
   }
 
+  /**
+   * Key F (round 7, #214, walks back the S7 limit from #85): run the shown
+   * agent's ready action directly, the same request the button's click
+   * sends. Gabriel wants herdr to flicker to front on "next, next, next, F"
+   * with no click and no mouse. Falls back to the old pulse-only behavior
+   * when no ready action is available (herdr focus not configured for this
+   * agent, or no agent selected).
+   */
+  async triageFocus(): Promise<void> {
+    const button = this.actionRow.querySelector<HTMLButtonElement>('button');
+    const actionId = button?.dataset.action;
+    if (!actionId) return;
+    await this.runAction(actionId);
+  }
+
   /** Run a card action on the shown agent (the button click). */
   async runAction(actionId: string): Promise<void> {
     const agent = this.current;
     const action = actions.find((candidate) => candidate.id === actionId);
     if (!agent || !action || !action.available(agent)) return;
     const button = [...this.actionRow.querySelectorAll('button')].find((candidate) => candidate.dataset.action === actionId);
+    // Round 7 (#214) review fix: a disabled button means a request for this action is already
+    // in flight. Without this guard, a second KeyF while the first request is pending (or a
+    // held key's OS auto-repeat) re-enters here before `finally` re-enables the button, sending
+    // a duplicate request and eating into the 10-per-minute write limit (CLAUDE.md S7).
+    if (button?.disabled) return;
     if (button) button.disabled = true;
     try {
       this.showStatus(await action.run(agent));
@@ -363,14 +456,21 @@ export class AgentCard {
     const extras = agent.extras ?? {};
     // Issue #168: the header line reads the same words as the panel row and the floating
     // label for the same agent at the same time — attention overrides the raw activity text
-    // here too, not just in the separate wait line below it (which keeps the minutes; the
-    // header line here never did, so it stays short next to the band).
+    // here too. It also carries the elapsed time now (see the #216 follow-up fix below), so it
+    // is the one complete rendering of this agent's attention state on the card.
     const activityText = activityLabel(agent);
     this.name.textContent = agent.name;
-    this.activity.textContent = attentionLine(activityText, extras.attention, undefined);
-    const waits = extras.attention !== undefined;
-    this.wait.textContent = waits ? attentionLine(activityText, extras.attention, extras.waitMinutes) : '';
-    this.wait.hidden = !waits;
+    // P7/AC6 fix, widened per Sally's issue #216 follow-up: the duplicate was never specific to
+    // 'your-turn' with no waitMinutes — every attention state built the same sentence twice,
+    // once bare in the header and once again (plus a time suffix) in the separate wait line
+    // below it, so the two lines always shared an identical leading phrase ("Waiting for you",
+    // "Your turn"). The header now carries the complete sentence itself, elapsed time included
+    // (the same single-line shape `StickFigure.ts`'s floating label already uses), so there is
+    // only ever one place on the card this text can appear. The wait line adds nothing it could
+    // ever say that the header does not already say, so it stays hidden for every state.
+    this.activity.textContent = attentionLine(activityText, extras.attention, extras.waitMinutes);
+    this.wait.textContent = '';
+    this.wait.hidden = true;
     const beaconOn = callsForYou({ attention: extras.attention, waitMinutes: extras.waitMinutes, orchestrating: extras.orchestrating });
     this.beaconHint.textContent = beaconOn ? BEACON_HINT : '';
     this.beaconHint.hidden = !beaconOn;
@@ -387,7 +487,7 @@ export class AgentCard {
     const children = this.agents.filter((candidate) => candidate.extras?.parentId === agent.id && candidate.id !== agent.id);
     const parent = extras.parentId ? this.agents.find((candidate) => candidate.id === extras.parentId) : undefined;
     const available = actions.filter((action) => action.available(agent));
-    const key = JSON.stringify([agent.id, extras.provider, extras.badges, extras.skills, extras.issues?.slice(0, CARD_MAX_ISSUES),
+    const key = JSON.stringify([agent.id, extras.provider, extras.badges, extras.skills, extras.repos, extras.issues?.slice(0, CARD_MAX_ISSUES),
       children.map((child) => [child.id, child.name, activityLabel(child)]), parent?.id, parent?.name, available.map((a) => a.id)]);
     if (agent.id !== this.shownId) {
       this.shownId = agent.id;
@@ -396,16 +496,14 @@ export class AgentCard {
     if (key === this.renderedKey) return;
     this.renderedKey = key;
 
-    // Persona / Skills (issue #166): personas first, then every skill used this session.
-    // Without the skills plugin, extras.skills is undefined and the row shows personas only
-    // (graceful degradation, the same pattern every other optional extras field already follows).
-    const personaItems = (extras.badges ?? []).map((badge) => ({ kind: 'persona' as const, label: badge }));
-    const skillItems = (extras.skills ?? []).map((skill) => ({ kind: 'skill' as const, label: skill }));
-    this.fillList(this.personaSkills.body, [...personaItems, ...skillItems], 'No personas or skills', (item) => {
-      const li = this.text('li', item.label);
-      if (item.kind === 'skill') li.classList.add('skill');
-      return li;
-    });
+    // Equipment table (Sally's round 7 review, AC1-AC3): Persona, Skills and Repos each grow
+    // independently in their own column, capped at CARD_EQUIP_MAX rows with a final "+N more"
+    // row, never a shared list. Without the skills or peek-promoted-repos data, a column shows
+    // its own empty state (AC2/AC6/AC7) — graceful degradation, the same pattern every other
+    // optional extras field already follows.
+    this.fillEquipColumn(this.equipPersona.body, extras.badges ?? [], 'No persona');
+    this.fillEquipColumn(this.equipSkills.body, extras.skills ?? [], 'No skills', true);
+    this.fillEquipColumn(this.equipRepos.body, extras.repos ?? [], 'No repos');
     this.fillList(this.subagents.body, children, 'No subagents', (child) => {
       const item = this.text('li', '');
       item.appendChild(this.selectButton(child.id, `${child.name} · ${activityLabel(child)}`));
@@ -434,6 +532,38 @@ export class AgentCard {
     }
     const list = this.text('ul', '');
     list.append(...items.map(make));
+    body.replaceChildren(list);
+  }
+
+  /**
+   * One equipment column's rows (Sally's round 7 review, column rules): at most
+   * `CARD_EQUIP_MAX` items, a trailing "+N more" row past that (muted, never a link or badge),
+   * no wrapping (CSS truncates with ellipsis), the full label still reachable on hover through
+   * the native `title` attribute. `isSkill` marks each row with the same gear-dot style
+   * `li.skill::before` already draws, so a skill reads the same here as it used to in the old
+   * merged list.
+   */
+  private fillEquipColumn(body: HTMLElement, items: string[], empty: string, isSkill = false): void {
+    if (items.length === 0) {
+      const p = this.text('p', empty);
+      p.classList.add('equip-empty');
+      body.replaceChildren(p);
+      return;
+    }
+    const visible = items.slice(0, CARD_EQUIP_MAX);
+    const list = this.text('ul', '');
+    list.append(...visible.map((label) => {
+      const li = this.text('li', label);
+      li.title = label;
+      if (isSkill) li.classList.add('skill');
+      return li;
+    }));
+    const hiddenCount = items.length - visible.length;
+    if (hiddenCount > 0) {
+      const more = this.text('li', `+${hiddenCount} more`);
+      more.classList.add('equip-more');
+      list.appendChild(more);
+    }
     body.replaceChildren(list);
   }
 

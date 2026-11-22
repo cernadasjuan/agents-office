@@ -76,6 +76,31 @@
       color: #ffb020;
     }
 
+    /* Speech bubbles (issue #81, SBE-2): the outer element is a 0x0 anchor the CSS2DRenderer
+       centers on the world point between the label (y=2.1) and the beacon (y=2.55). The inner
+       box is absolutely positioned from that anchor's top edge, so it only grows downward,
+       toward the label, and never upward into the beacon (AC4). */
+    .agent-bubble { width: 0; height: 0; pointer-events: none; }
+    .agent-bubble-box {
+      position: absolute;
+      top: 2px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 20, 40, 0.92);
+      color: #e0e0ff;
+      border: 1px solid rgba(120, 120, 255, 0.4);
+      border-radius: 10px;
+      padding: 3px 9px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11px;
+      white-space: nowrap;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .agent-bubble-box:empty { display: none; }
+    .agent-bubble-box.tool { color: #9fe0c0; font-style: italic; }
+
     #ui-panel {
       position: fixed;
       top: 16px;
@@ -114,6 +139,22 @@
       border-radius: 4px;
       padding: 2px 4px;
     }
+    /* Issue #231: a small, quiet alternative to the footer's keyboard hint for the camera
+       mode, in the same header row the floor switch already lives in. */
+    .view-switch { display: flex; gap: 2px; margin-top: 4px; }
+    .view-switch-button {
+      background: none;
+      border: 1px solid rgba(120, 120, 255, 0.3);
+      border-radius: 4px;
+      color: #a8b8ff;
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .view-switch-button.active { color: #fff; background: rgba(120, 120, 255, 0.25); border-color: rgba(168, 184, 255, 0.6); }
     .panel-buttons { display: flex; gap: 4px; }
     .panel-button {
       background: none;
@@ -405,12 +446,49 @@
     .inspector-section li.skill::before { content: '⚙ '; opacity: 0.7; }
     .inspector-section p { color: #8888aa; }
     .inspector-section a { color: #a8b8ff; }
+    /*
+     * Equipment table (Sally's round 7 review): Persona, Skills and Repos side by side, each
+     * its own column with its own icon, growing top to bottom independently — `align-items:
+     * flex-start` so an empty column never stretches to another column's height (AC2). No
+     * wrapping inside a cell (column rule 3): overflow hidden + ellipsis, full label still
+     * reachable through the native `title` attribute set in AgentCard.ts.
+     */
+    .equip-columns { display: flex; gap: 8px; align-items: flex-start; }
+    .equip-col { flex: 1 1 0; min-width: 0; }
+    .equip-col h4 { display: flex; align-items: center; gap: 4px; }
+    .equip-col ul { list-style: none; }
+    .equip-col li {
+      padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .equip-col li.skill { color: #9fe0c0; }
+    .equip-col li.skill::before { content: '⚙ '; opacity: 0.7; }
+    /* "+N more" (column rule: a cap, never silent overflow) reads as muted text, same weight as
+     * the per-column empty state, never a link or badge. */
+    .equip-col li.equip-more, .equip-col p.equip-empty { color: #8888aa; }
+    .skill-mark { font-size: 11px; opacity: 0.85; }
     .peek-question {
       margin-top: 6px; padding: 4px 6px; border-radius: 4px; overflow-wrap: anywhere;
       color: #ffe2a8; background: rgba(232, 197, 71, 0.12); border: 1px solid #e8c547;
     }
-    .peek-question[hidden], .peek-recent[hidden], .peek-assets[hidden], .peek-equipment[hidden] { display: none; }
+    .peek-question[hidden], .peek-recent[hidden], .peek-links[hidden] { display: none; }
     .peek-recent li.peek-tool { color: #8888ff; font-size: 11px; }
+    /* AC5: the live 100-line tail scrolls inside the card rather than growing it unbounded. */
+    .peek-tail-list { max-height: 240px; overflow-y: auto; }
+    .peek-tail-button {
+      margin-top: 4px;
+      background: none;
+      border: 1px solid rgba(120, 120, 255, 0.4);
+      border-radius: 6px;
+      color: #a8b8ff;
+      font: inherit;
+      font-size: 10px;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+    .peek-tail-button:hover { background: rgba(120, 120, 255, 0.15); }
+    /* "Links" (peek assets) reads apart from the card's own "Issues" section (round 7 review
+     * AC5): a distinct accent color, so the two lists never look like one continuous dump. */
+    .peek-links h4 { color: #a8b8ff; }
     .inspector-link {
       background: none; border: none; padding: 0; color: #a8b8ff; font: inherit;
       cursor: pointer; text-align: left; text-decoration: underline;
@@ -517,6 +595,7 @@
         <h2>Agents Office <span id="label-mode" class="label-mode"></span></h2>
         <div id="view-status" class="view-status"></div>
         <div id="floor-switch-container" class="floor-switch-container" hidden></div>
+        <div id="view-switch-container"></div>
       </div>
       <div class="panel-buttons">
         <button type="button" id="legend-button" class="panel-button">?</button>

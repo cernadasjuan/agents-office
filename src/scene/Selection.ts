@@ -89,6 +89,15 @@ export function onSelectionChange(listener: SelectionListener): () => void {
 export interface PickTarget {
   id: string;
   object: THREE.Object3D;
+  /**
+   * Issue #223: a board with several clickable rows (the war room's live-sessions board)
+   * resolves which row from the ray's own hit, instead of needing one extra mesh per row
+   * (the draw-call budget's own growth-rate guard, `tests/mission-corridor-render-budget.test.ts`,
+   * polices exactly that: a new un-merged piece per room). `null` means the hit landed on the
+   * object but not on a clickable row (for example its title area): no selection, the same as
+   * the ray missing every target outright, not a fall-through to the next target behind it.
+   */
+  resolve?: (hit: THREE.Intersection) => string | null;
 }
 
 /**
@@ -102,7 +111,7 @@ export function pickAgent(raycaster: THREE.Raycaster, targets: PickTarget[]): st
   const mask = raycaster.layers.mask;
   raycaster.layers.enable(FIGURE_PART_LAYER);
   raycaster.layers.enable(STATIC_SOURCE_LAYER);
-  const owners = new Map<THREE.Object3D, string>(targets.map((target) => [target.object, target.id]));
+  const owners = new Map<THREE.Object3D, PickTarget>(targets.map((target) => [target.object, target]));
   let hits: THREE.Intersection[];
   try {
     hits = raycaster.intersectObjects(targets.map((target) => target.object), true);
@@ -111,8 +120,9 @@ export function pickAgent(raycaster: THREE.Raycaster, targets: PickTarget[]): st
   }
   for (const hit of hits) {
     for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) {
-      const id = owners.get(node);
-      if (id !== undefined) return id;
+      const target = owners.get(node);
+      if (target === undefined) continue;
+      return target.resolve ? target.resolve(hit) : target.id;
     }
   }
   return null;

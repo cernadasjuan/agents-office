@@ -164,6 +164,21 @@ test('pick targets (issue #221 AC2): one per plaque, one per shown entry line, o
   for (const target of extension.pickTargets()) assert.ok(target.object instanceof THREE.Object3D);
 });
 
+test('#214: neither the section plaque nor the file board is hover-only, and both read from across the room', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'clients', entries: [{ title: 'blinds to go' }] }])]));
+  const signs = shelfSigns(scene);
+  assert.equal(signs.length, 2);
+  for (const sign of signs) {
+    const detail = sign.userData.detailSign as { hoverOnly: boolean; maxDistance: number };
+    assert.equal(detail.hoverOnly, false, `${sign.userData.shelfRole} must not require hovering to read`);
+    assert.ok(detail.maxDistance > 12, `${sign.userData.shelfRole} must read from further than a war room sign's default distance`);
+  }
+});
+
 test('a world update with the same shelves changes nothing (no churn on every 10 s poll)', () => {
   setFocusedFloor('pm-floor');
   const scene = sceneWithLibraryRoom();

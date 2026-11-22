@@ -123,6 +123,26 @@ test('floor keeps a cleaned single-segment or org-qualified two-segment token, n
   assert.equal(floorOf(undefined), undefined);
 });
 
+test('repos keeps only cleaned owner/repo or bare-repo tokens, a path never leaks (issue #216)', () => {
+  const reposOf = (repos: unknown) => projectAgents([observation({ display: { repos: repos as string[] } })], publicId)[0].repos;
+
+  assert.deepEqual(reposOf(['agents-office']), ['agents-office']);
+  assert.deepEqual(reposOf(['gabriel-amyot/agents-office']), ['gabriel-amyot/agents-office']);
+  assert.deepEqual(reposOf(['/Users/gamyot/Developer/gabriel-amyot/projects/agents-office']), undefined,
+    'an absolute path never leaks into the projected repos, not even shortened to its tail');
+  assert.deepEqual(reposOf(['~/Developer/agents-office']), undefined);
+  assert.deepEqual(reposOf(['a/b/c']), undefined, 'more than one slash is never kept');
+  assert.deepEqual(reposOf(['..', 'a/..', '../a']), undefined);
+  assert.deepEqual(reposOf([]), undefined);
+  assert.deepEqual(reposOf(undefined), undefined);
+  assert.deepEqual(reposOf(['agents-office', 'agents-office']), ['agents-office'], 'deduplicated');
+  assert.deepEqual(
+    reposOf(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']),
+    ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
+    'capped at 8 like skills',
+  );
+});
+
 test('an issue card keeps a label color only as a cleaned 6-hex token', () => {
   const cleaned = (color: unknown) => projectAgents([observation({ display: { issues: [
     { number: 1, title: 'a', color: color as string },

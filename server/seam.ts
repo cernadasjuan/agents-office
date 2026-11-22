@@ -1,4 +1,4 @@
-import { maskedLine } from './secrets.js';
+import { lastWords, maskedLine } from './secrets.js';
 import { PERSONAS } from '../plugins/bmad/roster.js';
 
 /**
@@ -53,6 +53,13 @@ export interface DisplayExtras {
    * enricher). The projection re-validates it through its own whitelist (`floorName`, below),
    * never trusting the enricher's own output blindly. */
   floor?: string;
+  /** Repositories this agent's work touches, as plain display tokens (a bare repo name or an
+   * `owner/repo` pair, the same shape `floor` already uses) — never a filesystem path (issue
+   * #216, promoting the agent card's Repos column to synchronous data alongside Persona and
+   * Skills). Today `server/floor.ts`'s floor enricher sets this to the session's own floor
+   * repo (when it resolved one), the same remote-derived token `floor` carries. The projection
+   * re-validates every entry through `repoTag`, never trusting the enricher's own output. */
+  repos?: string[];
 }
 
 /** One agent as the server sees it. `internal` never leaves the server. */
@@ -232,10 +239,43 @@ export interface PeekInput {
 /**
  * An opt-in read view for one selected agent. The server mounts
  * `GET /api/views/<name>?agent=<public id>` only when a loaded plugin offers it.
+ * `maxLines` (issue #81 AC5): the card's default "Recent" asks for the usual few lines;
+ * "Show 100 lines" asks for more. A view that ignores the argument still works (it just
+ * answers its own fixed length), so this stays optional.
  */
 export interface OfficeView {
   name: ViewName;
-  read(agent: Observation): PeekInput | Promise<PeekInput>;
+  read(agent: Observation, maxLines?: number): PeekInput | Promise<PeekInput>;
+}
+
+/**
+ * A bubble event for one agent (issue #81, SBE-2): the newest line since the last time this
+ * agent was asked. `projectBubble` caps and masks it again before it leaves, the same as
+ * `projectPeek`. Never in `/api/agents` or `/api/world`; its own opt-in endpoint, `/api/bubbles`,
+ * answers for every agent the last `/api/agents` poll knows, not one selected agent.
+ */
+export interface BubbleReply {
+  kind: 'text' | 'tool';
+  text: string;
+}
+
+/**
+ * An opt-in bubble source. The server mounts `GET /api/bubbles` only when a loaded plugin
+ * offers one. Unlike `OfficeView`, it is asked once per known agent, not one at a time by a
+ * public id in the query string — there is no separate `BUBBLE_NAMES` registry to keep closed,
+ * since at most one plugin's bubble source is ever mounted (the first one offered, the same
+ * "first wins" rule `views` already uses per name).
+ */
+export interface BubbleSource {
+  read(agent: Observation): BubbleReply | undefined | Promise<BubbleReply | undefined>;
+  /**
+   * Called once per `/api/bubbles` request with the agents the latest `/api/agents` poll
+   * still knows (issue #81 review): a source whose own per-agent state needs bounding (a
+   * dedicated transcript cache for 40+ agents, not `PeekReader`'s 20-file one) prunes
+   * whatever is no longer live here, instead of an arbitrary fixed cache size. Optional: a
+   * source that keeps no per-agent state at all needs no bound.
+   */
+  forget?(liveAgents: Observation[]): void;
 }
 
 export interface OfficePlugin {
@@ -245,6 +285,7 @@ export interface OfficePlugin {
   world?: WorldProvider[];
   actions?: OfficeAction[];
   views?: OfficeView[];
+  bubbles?: BubbleSource;
   /**
    * Issue #253 review: a plugin whose own enricher reads another plugin's own `display` field
    * (`plugins/library/index.ts` reads the `bmad` plugin's own `display.badges`) used to depend
@@ -569,6 +610,12 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
     const waitMinutes = wholeNumber(extras.waitMinutes, 100_000);
     const actions = actionList(extras.actions, enabledActions);
     const floor = floorName(extras.floor);
+    // Repos (issue #216): same `repoTag` whitelist `RoomInput`/`BoardInput` already use, so a
+    // malformed or path-like entry from a future enricher is dropped whole, never shortened to
+    // a tail that could leak a rejected value's fragment. Capped the same as `skills`.
+    const repos = Array.isArray(extras.repos)
+      ? [...new Set(extras.repos.map((repo) => repoTag(repo)).filter((repo): repo is string => repo !== undefined))].slice(0, 8)
+      : [];
     return {
       id: publicId(agent.id),
       name: displayText(agent.name, 60),
@@ -589,15 +636,24 @@ export function projectAgents(observations: Observation[], publicId: PublicId, e
       ...(typeof extras.role === 'string' && BADGE.test(extras.role) ? { role: extras.role } : {}),
       ...(extras.stuck === true ? { stuck: true as const } : {}),
       ...(floor ? { floor } : {}),
+      ...(repos.length > 0 ? { repos } : {}),
     };
   });
 }
 
 const PEEK_LINES = 10;
+/** The most lines any request may ask for (issue #81 AC5's "Show 100 lines"). */
+export const PEEK_TAIL_LINES = 100;
 const PEEK_LINE_LENGTH = 200;
 const PEEK_LIST = 10;
 const PEEK_TOKEN = /^[A-Za-z0-9:_.-]{1,64}$/;
 const ASSET_KINDS = new Set(['issue', 'pr', 'mr', 'jira']);
+/** A bubble's own, much shorter cap (issue #81 AC1: locked at 40 characters). */
+const BUBBLE_LINE_LENGTH = 40;
+/** A tool-call bubble's own cap (review: "verb + tool name only" is always short; a tighter
+ * cap than the general 40 is a cheap, independent backstop if a bubble source ever forgets
+ * the rule — it cannot leak more than this many characters of anything, friendly label or not). */
+const BUBBLE_TOOL_LINE_LENGTH = 24;
 
 function peekText(value: unknown): string {
   return maskedLine(value, PEEK_LINE_LENGTH);
@@ -613,9 +669,12 @@ function httpsUrl(value: unknown): string | undefined {
   }
 }
 
-/** The peek view for one agent: capped lines (masked again), https links, plain tokens. */
-export function projectPeek(input: PeekInput) {
-  const lines = (Array.isArray(input?.lines) ? input.lines : []).slice(-PEEK_LINES)
+/** The peek view for one agent: capped lines (masked again), https links, plain tokens.
+ * `maxLines` (issue #81 AC5) is clamped to [1, `PEEK_TAIL_LINES`]; a caller that sends nothing,
+ * or something out of range, gets the normal `PEEK_LINES` default instead of a wider window. */
+export function projectPeek(input: PeekInput, maxLines: number = PEEK_LINES) {
+  const limit = Number.isInteger(maxLines) && maxLines >= 1 && maxLines <= PEEK_TAIL_LINES ? maxLines : PEEK_LINES;
+  const lines = (Array.isArray(input?.lines) ? input.lines : []).slice(-limit)
     .map((line) => ({ kind: line?.kind === 'text' ? 'text' as const : 'tool' as const, text: peekText(line?.text) }))
     .filter((line) => line.text.length > 0);
   const question = input?.question ? peekText(input.question) : '';
@@ -632,6 +691,17 @@ export function projectPeek(input: PeekInput) {
     skills: tokens(input?.skills, PEEK_TOKEN),
     repos: tokens(input?.repos, REPO_SHORT).filter((repo) => repo !== '.' && repo !== '..'),
   };
+}
+
+/** One agent's bubble (issue #81): masked and cut again at the bubble's own, shorter length,
+ * never the peek line length; the end kept, not the start ("the last few words", AC1), the
+ * same rule a tool-call bubble's own tighter cap follows too. `undefined` in, or an empty
+ * line out, both drop the entry. */
+export function projectBubble(input: BubbleReply | undefined): BubbleReply | undefined {
+  if (!input) return undefined;
+  const kind = input.kind === 'text' ? 'text' as const : 'tool' as const;
+  const text = maskedLine(input.text, kind === 'tool' ? BUBBLE_TOOL_LINE_LENGTH : BUBBLE_LINE_LENGTH, lastWords);
+  return text ? { kind, text } : undefined;
 }
 
 export function projectWorld(parts: WorldInput[], pluginNames: string[], publicId: PublicId) {
