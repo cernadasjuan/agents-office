@@ -24,22 +24,32 @@ after(() => {
   Reflect.deleteProperty(globalThis, 'document');
 });
 
-const LIBRARY_ROOM_NAME = 'room-1-library';
+const LIBRARY_MARKER_NAME = 'hex-library-room';
 
-function sceneWithLibraryRoom(): THREE.Scene {
-  return sceneWithLibraryRoomAt(1);
+/** Issue #258: the hex Library's own marker (`HexRooms.ts`'s `buildHexOffice`) replaces the
+ * old rect `room-N-library` lookup. A hex frame's `doorMid` already IS the door (no rect
+ * `slotFor`/`door.at` off-center correction left to prove) — `doorMid` at the world origin,
+ * `inward` along +X, `along` along +Z, so a fixture door still reads as "a west-facing wall,
+ * shelf row along Z", the same orientation the old `slotFor(1)` west-door room tests assumed. */
+const CANONICAL_FRAME = { doorMid: { x: 0, z: 0 }, inward: { x: 1, z: 0 }, along: { x: 0, z: 1 } };
+const CANONICAL_BOUNDS = { minX: -2, maxX: 14, minZ: -8, maxZ: 8 };
+/** A second frame at a genuinely non-axis-aligned angle (issue #253 review's own point, ported
+ * forward to hex: placement must hold at whatever angle the room's open edge actually sits at,
+ * not only one convenient axis-aligned case). */
+const ROTATED_FRAME = { doorMid: { x: 5, z: 5 }, inward: { x: Math.SQRT1_2, z: Math.SQRT1_2 }, along: { x: -Math.SQRT1_2, z: Math.SQRT1_2 } };
+
+function sceneWithLibraryMarker(frame = CANONICAL_FRAME, bounds = CANONICAL_BOUNDS): THREE.Scene {
+  const scene = new THREE.Scene();
+  const marker = new THREE.Object3D();
+  marker.name = LIBRARY_MARKER_NAME;
+  marker.userData.libraryFrame = frame;
+  marker.userData.libraryBounds = bounds;
+  scene.add(marker);
+  return scene;
 }
 
-/** A scene whose library room rented a specific slot index (`RoomPlanner.ts`'s own
- * `slotFor`) — issue #253 review: the NPC's own placement must hold for a slot whose door is
- * off the wall's own center (index 1, the library's usual slot), not only one where it happens
- * to be centered (index 0). */
-function sceneWithLibraryRoomAt(index: number): THREE.Scene {
-  const scene = new THREE.Scene();
-  const room = new THREE.Group();
-  room.name = `room-${index}-library`;
-  scene.add(room);
-  return scene;
+function sceneWithLibraryRoom(): THREE.Scene {
+  return sceneWithLibraryMarker();
 }
 
 function library(repo: string | undefined, sections: WorldLibrary['sections'], id = 'lib'): WorldLibrary {
@@ -58,7 +68,7 @@ function shelfSigns(scene: THREE.Scene): THREE.Object3D[] {
 
 test('without the library room in the scene, no shelf mounts (another layout, or not grown yet)', () => {
   setFocusedFloor('pm-floor');
-  const scene = new THREE.Scene(); // no room-1-library
+  const scene = new THREE.Scene(); // no hex-library-room marker
   const extension = new FloorLibraryOfficeExtension();
   extension.start(scene);
   extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }])]));
@@ -198,8 +208,8 @@ test('a library shelf and its pick targets add zero draw calls: CSS2D labels car
   // review: a default, unaimed camera's frustum does not reach there at all, so it would read
   // "zero" the same way even if a future change swapped a CSS2DObject for a real Mesh board).
   const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-  camera.position.set(20, 1.9, 12);
-  camera.lookAt(26.5, 1.9, 12);
+  camera.position.set(0, 1.9, 0);
+  camera.lookAt(11.5, 1.9, 0);
   camera.updateMatrixWorld();
   camera.updateProjectionMatrix();
   const before = countDrawCalls(scene, camera);
@@ -236,7 +246,7 @@ test('a library shelf and its pick targets add zero draw calls: CSS2D labels car
 
 test('issue #221 FAIL round: a hit box is rotated to match its label\'s own orientation, so a click along the shelf row (not just dead center) still hits it, on the library room\'s real (west) door', () => {
   setFocusedFloor('pm-floor');
-  const scene = sceneWithLibraryRoom(); // room-1-library -> slotFor(1) -> a west-door room
+  const scene = sceneWithLibraryRoom(); // CANONICAL_FRAME: door faces +X, shelf row along +Z
   const extension = new FloorLibraryOfficeExtension();
   extension.start(scene);
   extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }])]));
@@ -298,33 +308,37 @@ test('the librarian NPC mounts once a library room and a library both exist, cli
   assert.notEqual(npcTarget.object, npcGroup, 'the NPC\'s own pick target is its own hit box, not the figure root the figure batch already manages');
 });
 
-test('issue #253 review: the librarian NPC stands near the door at the library\'s own usual slot (index 1), whose door is well off the wall\'s own center', () => {
+test('issue #253 review, ported to hex (issue #258): the librarian NPC stands near the door, offset from it, on an axis-aligned frame', () => {
   setFocusedFloor('pm-floor');
-  const scene = sceneWithLibraryRoomAt(1); // slotFor(1): door { side: 'west', at: 9.5 } on a wall spanning z in [6, 18] — door.at is 2.5 off that wall's own center (12), not 0
+  const scene = sceneWithLibraryMarker(CANONICAL_FRAME, CANONICAL_BOUNDS);
   const extension = new FloorLibraryOfficeExtension();
   extension.start(scene);
   extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
   const npc = extension.npcFigures()[0]!;
-  // The door itself sits at world z = 11.5 (slotFor(1)'s own rect/door math); the NPC must be
-  // close to that, not at the old fixed-`a` position (z = 16.8 — a 5.3-unit miss toward the
-  // far end of the wall, the bug this review round fixed).
-  assert.ok(Math.abs(npc.position.z - 11.5) < 3, `NPC lands near the door, not the old fixed wall-center offset (got z=${npc.position.z})`);
-  assert.ok(Math.abs(npc.position.z - 16.8) > 2, `NPC must not still land at the old (buggy) position (got z=${npc.position.z})`);
+  // `shelfPoint(frame, NPC_OFFSET_FROM_DOOR=2, NPC_D=2, 0)` on `CANONICAL_FRAME` (doorMid at
+  // the origin, inward=+X, along=+Z) lands at (2, 0, 2): a hex frame's own `doorMid` already
+  // IS the door (no rect `doorAlong` off-center correction left to need), so this is exact,
+  // not a tolerance band.
+  assert.ok(Math.abs(npc.position.x - 2) < 1e-6 && Math.abs(npc.position.z - 2) < 1e-6, `expected (2, _, 2), got (${npc.position.x}, _, ${npc.position.z})`);
+  assert.ok(npc.position.distanceTo(new THREE.Vector3(0, npc.position.y, 0)) > 1, 'clear of the doorway itself, not standing in the opening');
 });
 
-test('issue #253 review: the librarian NPC also stands near the door at a slot where the door happens to be centered (index 0)', () => {
+test('issue #253 review, ported to hex (issue #258): the librarian NPC stands near the door at a genuinely non-axis-aligned angle too', () => {
   setFocusedFloor('pm-floor');
-  const scene = sceneWithLibraryRoomAt(0); // slotFor(0): door { side: 'west', at: 0 } on a wall spanning z in [-6, 6] — centered, door.at === the wall's own center
+  const scene = sceneWithLibraryMarker(ROTATED_FRAME, CANONICAL_BOUNDS);
   const extension = new FloorLibraryOfficeExtension();
   extension.start(scene);
   extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
   const npc = extension.npcFigures()[0]!;
-  assert.ok(Math.abs(npc.position.z - 2) < 3, `NPC lands near the (centered) door here too (got z=${npc.position.z})`);
+  // `shelfPoint(ROTATED_FRAME, 2, 2, 0)`: doorMid (5, 5) + along*2 + inward*2, where
+  // along + inward cancel in X (-SQRT1_2 + SQRT1_2) and double in Z (SQRT1_2 + SQRT1_2) — (5, 5 + 2*SQRT2).
+  assert.ok(Math.abs(npc.position.x - 5) < 1e-6, `expected x=5, got ${npc.position.x}`);
+  assert.ok(Math.abs(npc.position.z - (5 + 2 * Math.SQRT2)) < 1e-6, `expected z=${5 + 2 * Math.SQRT2}, got ${npc.position.z}`);
 });
 
 test('the librarian NPC never mounts without the library room (graceful degradation), and unmounts if the library disappears', () => {
   setFocusedFloor('pm-floor');
-  const scene = new THREE.Scene(); // no room-1-library
+  const scene = new THREE.Scene(); // no hex-library-room marker
   const extension = new FloorLibraryOfficeExtension();
   extension.start(scene);
   extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
@@ -386,16 +400,16 @@ test('issue #221 FAIL round 2: the section label and its shown entry lines never
   const signs = shelfSigns(scene);
   assert.equal(signs.length, 4, 'one plaque, two entry lines (the cap), one "more" sign for the truncated row');
 
-  // The room's own real door side (west, per `findLibraryRoomIndex`/`slotFor`'s own first-ring
-  // assignment for a freshly built office) looking along +X: build the same orthographic
+  // `CANONICAL_FRAME`'s own door looks along +X (`inward`): build the same orthographic
   // camera this office's own isometric view starts at (`IsometricCamera.ts`'s own starting
   // `halfHeight = 20`), on the same 800px-tall viewport the spacing constants were measured
-  // against (`plugins/floor-library/client.ts`'s own `MEASURED_VIEWPORT_HEIGHT`).
+  // against (`plugins/floor-library/client.ts`'s own `MEASURED_VIEWPORT_HEIGHT`), aimed at the
+  // shelf cluster (`SIGN_DEPTH = 11.5` along `inward` from `doorMid`).
   const viewportWidth = 1280;
   const viewportHeight = 800;
   const isometric = new IsometricController();
   isometric.halfHeight = 20;
-  isometric.target.set(26.5, 1.9, 12);
+  isometric.target.set(11.5, 1.9, 0);
   const camera = new THREE.OrthographicCamera();
   isometric.applyTo(camera, viewportWidth / viewportHeight, 60);
   camera.updateMatrixWorld();

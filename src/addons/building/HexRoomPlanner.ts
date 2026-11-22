@@ -45,7 +45,7 @@ function add(a: HexPoint, b: HexPoint): HexPoint {
   return { x: a.x + b.x, z: a.z + b.z };
 }
 
-function sub(a: HexPoint, b: HexPoint): HexPoint {
+export function sub(a: HexPoint, b: HexPoint): HexPoint {
   return { x: a.x - b.x, z: a.z - b.z };
 }
 
@@ -60,6 +60,26 @@ function length(a: HexPoint): number {
 function normalize(a: HexPoint): HexPoint {
   const len = length(a) || 1;
   return { x: a.x / len, z: a.z / len };
+}
+
+/** A hex room's own door-wall frame (issue #258 review: the floor-library plugin's old
+ * `shelfPoint`/`doorAlong` assumed a rectangular room with an axis-aligned door wall — a hex
+ * room's open edge is rarely axis-aligned). `doorMid` is where the door itself sits (the open
+ * edge's own midpoint); `inward` points from there toward the room's center; `along` is
+ * `inward` rotated 90°, the room's own "left-right" axis standing at the door looking in. A
+ * caller places a shelf/sign/NPC at `doorMid + along * a + inward * d`, the same shape
+ * `shelfPoint`'s own `a`/`d` coordinates already had for a rect room, just without that room's
+ * own `doorAlong` correction — a hex frame's `doorMid` already IS the door, never off-center. */
+export interface HexRoomFrame {
+  doorMid: HexPoint;
+  inward: HexPoint;
+  along: HexPoint;
+}
+
+export function hexRoomFrame(room: HexRoomGeometry, openEdgeIndex: number): HexRoomFrame {
+  const doorMid = edgeMidpoint(room.center, room.radius, openEdgeIndex);
+  const inward = normalize(sub(room.center, doorMid));
+  return { doorMid, inward, along: { x: -inward.z, z: inward.x } };
 }
 
 /** The 6 corners of a hex room drawn at `radius`, centered at `center`. Independent of

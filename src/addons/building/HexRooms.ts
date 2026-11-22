@@ -32,6 +32,7 @@ import {
   hexWallSegments,
   hexWallColliders,
   hexSurfaceHeightAt,
+  hexRoomFrame,
   pointInPolygon,
   type HexOfficeLayout,
   type HexRoomGeometry,
@@ -263,6 +264,26 @@ export function buildHexOffice(): BuiltHexOffice {
   kitchen.lookAt(layout.hub.center.x, 0, layout.hub.center.z);
   accents.add(kitchen);
   group.add(accents);
+
+  // Issue #258 review (the floor-library plugin's NPC/shelves went dark the moment the rect
+  // library room they keyed off, `room-N-library`, was deleted): an invisible, zero-geometry
+  // marker, found by name the same way that plugin already finds a rect room, carrying the
+  // hex library's own door-wall frame as plain data — no rect assumptions, no `RoomPlanner`
+  // import needed on the plugin's side.
+  const libraryMarker = new THREE.Object3D();
+  libraryMarker.name = 'hex-library-room';
+  libraryMarker.userData.libraryFrame = hexRoomFrame(layout.library, layout.library.openEdges[0]);
+  // A plain axis-aligned bounding rect of the hexagon, for the same "is the camera/cursor
+  // inside this room" checks `LabelDetail.ts`'s `DetailSign.rect` already does for a rect
+  // room — conservative (a touch larger than the hex itself at the corners), fine for that
+  // coarse a check.
+  const libraryXs = layout.library.corners.map((c) => c.x);
+  const libraryZs = layout.library.corners.map((c) => c.z);
+  libraryMarker.userData.libraryBounds = {
+    minX: Math.min(...libraryXs), maxX: Math.max(...libraryXs),
+    minZ: Math.min(...libraryZs), maxZ: Math.max(...libraryZs),
+  };
+  group.add(libraryMarker);
 
   // Issue #242 review (root cause of the "very dark" finding): the scene's only real light
   // sources are 3 fixed ceiling spotlights over the rect hall (`SceneSetup.ts`'s

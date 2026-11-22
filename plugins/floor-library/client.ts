@@ -3,7 +3,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { registerExtension, type OfficeExtension, type World, type WorldLibrary, type WorldLibraryEntry, type WorldLibrarySection } from '../../src/extensions.js';
 import { ALL_FLOORS, matchesFloor } from '../../src/floors/FloorRegistry.js';
 import { focusedFloor } from '../../src/floors/floorState.js';
-import { ROOM_SIZE, slotFor, type Door, type Rect, type Side } from '../../src/addons/building/RoomPlanner.js';
+import type { HexRoomFrame } from '../../src/addons/building/HexRoomPlanner.js';
 import type { PickTarget } from '../../src/scene/Selection.js';
 import { libraryEntryId, libraryIndexId, librarySectionId } from '../../src/ui/LibraryCard.js';
 import { StickFigure } from '../../src/characters/StickFigure.js';
@@ -30,74 +30,50 @@ import { StickFigure } from '../../src/characters/StickFigure.js';
  * attempted here.
  */
 
-/** The library's own group name, whatever index it actually rented at (`rooms.ts`'s
- * `buildRoom`: `room-${index}-${kind}`). `BuildingLayout`'s constructor force-adds a missing
- * library early, so it is almost always index 1, right after the office — but a floor whose
- * room list already existed before the library was always forced to exist can have it land at
- * a later index within the first ring (review round 1: a hardcoded `room-1-library` matched
- * nothing there, silently showing no shelves). This reads the room's real index back out of
- * its own name instead of assuming one. */
-const LIBRARY_ROOM_PATTERN = /^room-(\d+)-library$/;
+/** The hex Library's own marker (issue #258: `HexRooms.ts`'s `buildHexOffice`), carrying its
+ * door-wall frame as plain data (`HexRoomFrame`: `doorMid`, `inward`, `along`) — the hex
+ * equivalent of the old rect room's name-and-index lookup. Degrades to nothing without it, the
+ * same graceful-degradation rule every other part of this extension already follows (another
+ * layout, or a scene that has not built the hex office yet). */
+const LIBRARY_MARKER_NAME = 'hex-library-room';
 
-function findLibraryRoomIndex(scene: THREE.Scene): number | undefined {
-  for (const child of scene.children) {
-    const match = LIBRARY_ROOM_PATTERN.exec(child.name);
-    if (match) return Number(match[1]);
-  }
-  return undefined;
+/** The same coarse "is the camera/cursor inside this room" bounds `LabelDetail.ts`'s
+ * `DetailSign.rect` already uses for a rect room — a conservative axis-aligned box around the
+ * hexagon (`HexRooms.ts`'s own `libraryBounds`). */
+interface Rect {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
 }
 
-const INWARD_BY_SIDE: Record<Side, [number, number]> = { west: [1, 0], east: [-1, 0], north: [0, 1], south: [0, -1] };
-
-/**
- * A room's own door-wall-center point, `along` and `inward` directions, duplicated from
- * `rooms.ts`'s own `RoomFrame` (plain number math, no THREE needed for it): a plugin's client
- * extension stays self-contained rather than importing the room-building module's full THREE
- * dependency graph (toon materials, static-merge zones, furnishing plans) for one formula —
- * the same reason `server/floor.ts` keeps its own copy of `plugins/peek/transcript.ts`'s
- * `worktreeMain` instead of importing across that core/plugin boundary. `d` is the depth from
- * the door wall into the room, `a` runs along it; see `rooms.ts`'s own doc comment on `RoomFrame`.
- */
-function shelfPoint(rect: Rect, door: Door, a: number, d: number, y: number): [number, number, number] {
-  const [nx, nz] = INWARD_BY_SIDE[door.side];
-  const doorWallX = (rect.minX + rect.maxX) / 2 - (nx * ROOM_SIZE) / 2;
-  const doorWallZ = (rect.minZ + rect.maxZ) / 2 - (nz * ROOM_SIZE) / 2;
-  return [doorWallX + -nz * a + nx * d, y, doorWallZ + nx * a + nz * d];
+function findLibraryMarker(scene: THREE.Scene): { frame: HexRoomFrame; bounds: Rect } | undefined {
+  const marker = scene.getObjectByName(LIBRARY_MARKER_NAME);
+  const frame = (marker?.userData as { libraryFrame?: HexRoomFrame } | undefined)?.libraryFrame;
+  const bounds = (marker?.userData as { libraryBounds?: Rect } | undefined)?.libraryBounds;
+  return frame && bounds ? { frame, bounds } : undefined;
 }
 
 /**
- * Where the door itself actually sits along its own wall, in `shelfPoint`'s own `a` coordinate
- * (relative to the wall's own center) — issue #253 review: the NPC's own placement assumed
- * `door.at` was always the wall's own center (true only for the office's own first ring-0
- * slot, `door.at: 0`); the library's own usual slot (ring 0, index 1, `door.at: 9.5` on a wall
- * that only runs `z` in `[6, 18]`) sits 2.5 units off that center, not 0. `door.at` is an
- * absolute world coordinate (an x for a north/south door, a z for an east/west one); this
- * reprojects it onto the same `(-nz, nx)` unit "along" axis `shelfPoint` itself uses, the same
- * relationship `src/addons/building/rooms.ts`'s own `RoomFrame.doorAlong` has to its own
- * `point()`, duplicated here rather than imported for the same self-containment reason
- * `shelfPoint`'s own doc comment already gives.
+ * A point at `a` along the door wall (`frame.along`) and `d` deep into the room from the door
+ * itself (`frame.inward`) — the hex equivalent of the old rect `shelfPoint`. Issue #258: a hex
+ * frame's `doorMid` already IS the door (no off-center `doorAlong` correction needed — a hex
+ * room's door is always its one open edge's own midpoint, never offset along a longer wall the
+ * way a rect room's could be).
  */
-function doorAlong(rect: Rect, door: Door): number {
-  const [nx, nz] = INWARD_BY_SIDE[door.side];
-  const doorWallX = (rect.minX + rect.maxX) / 2 - (nx * ROOM_SIZE) / 2;
-  const doorWallZ = (rect.minZ + rect.maxZ) / 2 - (nz * ROOM_SIZE) / 2;
-  return nx !== 0 ? (door.at - doorWallZ) * nx : (door.at - doorWallX) * -nz;
+function shelfPoint(frame: HexRoomFrame, a: number, d: number, y: number): [number, number, number] {
+  return [frame.doorMid.x + frame.along.x * a + frame.inward.x * d, y, frame.doorMid.z + frame.along.z * a + frame.inward.z * d];
 }
 
-/**
- * Review (issue #221 FAIL round): a hit-test box's own long axis (local X, `ENTRY_HIT_GEOMETRY`/
- * `SECTION_HIT_GEOMETRY`'s 1.0/1.2 dimension) is built to run along the shelf row — the "a"
- * axis `shelfPoint` reads above — but that axis is world Z for a west/east door room and world
- * X for a north/south one (the same `(-nz, nx)` pair `shelfPoint` itself uses). Left unrotated,
- * every hit box pointed along world X regardless, so it lined up with the visible label only
- * in a north/south-door room and sat rotated 90° off it — wrong footprint, same area — in a
- * west/east-door one (today: the library room most commonly rents a west-door slot). A Y
- * rotation of this box is symmetric (the geometry is centered, so the sign of the angle
- * doesn't matter, only whether it's rotated at all): 0 for north/south, a quarter turn for
- * west/east.
- */
-function hitRotationY(door: Door): number {
-  return door.side === 'north' || door.side === 'south' ? 0 : Math.PI / 2;
+/** A hit-test box's own long axis (local X) needs to run along the shelf row, `frame.along`'s
+ * own direction — the hex equivalent of the old rect `hitRotationY`'s north/south-vs-west/east
+ * split, generalized to whatever angle a hex room's open edge actually sits at. */
+function hitRotationY(frame: HexRoomFrame): number {
+  // Three.js's own Y-rotation turns local +X into world `(cos(θ), -sin(θ))` in the XZ plane;
+  // solving that for `(ax, az) = frame.along` gives this exact angle (the box's long axis
+  // ends up pointing exactly along `along`, not just parallel to it mod a sign the box's own
+  // symmetry would absorb anyway).
+  return Math.atan2(-frame.along.z, frame.along.x);
 }
 
 /**
@@ -275,7 +251,7 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
   private mounted: THREE.Object3D[] = [];
   private picks: PickTarget[] = [];
   private signature = '';
-  private slot: { rect: Rect; door: Door } | null = null;
+  private marker: { frame: HexRoomFrame; bounds: Rect } | null = null;
   private npc: StickFigure | null = null;
   private npcHit: THREE.Mesh | null = null;
   private npcLibraryId: string | null = null;
@@ -298,10 +274,9 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     if (!this.scene) return;
     const floor = focusedFloor();
     const matched = matchedSections(world.libraries ?? [], floor);
-    const roomIndex = findLibraryRoomIndex(this.scene);
-    this.slot = roomIndex === undefined ? null : slotFor(roomIndex);
+    this.marker = findLibraryMarker(this.scene) ?? null;
     this.syncNpc(matched[0]?.libraryId);
-    const sections = this.slot ? matched.slice(0, MAX_SECTIONS_SHOWN) : [];
+    const sections = this.marker ? matched.slice(0, MAX_SECTIONS_SHOWN) : [];
     // Review (issue #221 FAIL round): with more than one library visible at once (`ALL_FLOORS`
     // combining them), the hidden-sections count used to be the *global* overflow across every
     // library combined, always attached to the last shown slot's own library — so a "+N more"
@@ -310,7 +285,7 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     // library's own sections didn't get a slot" instead, the count and the index it opens
     // always agree, however many libraries are configured.
     const lastLibraryId = sections.length > 0 ? sections[sections.length - 1]!.libraryId : undefined;
-    const hiddenSections = this.slot && lastLibraryId !== undefined
+    const hiddenSections = this.marker && lastLibraryId !== undefined
       ? matched.filter((candidate) => candidate.libraryId === lastLibraryId).length
         - sections.filter((candidate) => candidate.libraryId === lastLibraryId).length
       : 0;
@@ -321,8 +296,8 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     // zero even while a whole other library sits unshown right behind it. `shownLibraryIds`
     // catches that: any library present in `matched` but absent from `sections` entirely.
     const shownLibraryIds = new Set(sections.map((candidate) => candidate.libraryId));
-    const unshownLibraryId = this.slot ? matched.find((candidate) => !shownLibraryIds.has(candidate.libraryId))?.libraryId : undefined;
-    const signature = `${roomIndex}:${JSON.stringify(sections)}:${hiddenSections}:${unshownLibraryId ?? ''}`;
+    const unshownLibraryId = this.marker ? matched.find((candidate) => !shownLibraryIds.has(candidate.libraryId))?.libraryId : undefined;
+    const signature = `${this.marker ? 'hex-library' : 'none'}:${JSON.stringify(sections)}:${hiddenSections}:${unshownLibraryId ?? ''}`;
     if (signature === this.signature) return;
     this.signature = signature;
     this.unmountAll();
@@ -334,10 +309,10 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
 
   private mount(matched: MatchedSection, index: number, hiddenSections: number, unshownLibraryId: string | undefined): void {
     const along = SIGN_ALONGS[index];
-    if (along === undefined || !this.scene || !this.slot) return;
-    const { rect, door } = this.slot;
+    if (along === undefined || !this.scene || !this.marker) return;
+    const { frame, bounds } = this.marker;
     const { libraryId, sectionIndex, section } = matched;
-    const rotationY = hitRotationY(door);
+    const rotationY = hitRotationY(frame);
     const add = (object: THREE.Object3D): void => {
       this.scene!.add(object);
       this.mounted.push(object);
@@ -351,11 +326,11 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     };
     // Round 7 (#214): no longer hover-only, and read from `LIBRARY_SIGN_MAX_DISTANCE` away —
     // every sign in this room shares both, not just the section label.
-    const detailSign = { rect, hoverOnly: false, maxDistance: LIBRARY_SIGN_MAX_DISTANCE };
+    const detailSign = { rect: bounds, hoverOnly: false, maxDistance: LIBRARY_SIGN_MAX_DISTANCE };
 
     // The section label (issue #221 AC2): clickable, opens the section card listing every
     // file the section carries, not just the few shown below.
-    const plaquePos = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y + PLAQUE_GAP);
+    const plaquePos = shelfPoint(frame, along, SIGN_DEPTH, SIGN_Y + PLAQUE_GAP);
     const plaque = new CSS2DObject(plaqueElement(section));
     plaque.position.set(...plaquePos);
     plaque.userData.detailSign = detailSign;
@@ -368,7 +343,7 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     // downward from the shelf's own depth — no longer one shared board of inert text.
     const shown = section.entries.slice(0, MAX_ENTRY_LINES);
     shown.forEach((entry, entryIndex) => {
-      const position = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y - entryIndex * ENTRY_LINE_HEIGHT);
+      const position = shelfPoint(frame, along, SIGN_DEPTH, SIGN_Y - entryIndex * ENTRY_LINE_HEIGHT);
       const object = new CSS2DObject(entryElement(entry));
       object.position.set(...position);
       object.userData.detailSign = detailSign;
@@ -396,7 +371,7 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
       if (hiddenEntries) lines.push('…more on this shelf');
       if (hiddenSections > 0) lines.push(`+${hiddenSections} more section${hiddenSections === 1 ? '' : 's'} in the library`);
       if (crossLibraryOverflow !== undefined) lines.push('+1 more library, not shown here');
-      const position = shelfPoint(rect, door, along, SIGN_DEPTH, SIGN_Y - shown.length * ENTRY_LINE_HEIGHT);
+      const position = shelfPoint(frame, along, SIGN_DEPTH, SIGN_Y - shown.length * ENTRY_LINE_HEIGHT);
       const object = new CSS2DObject(moreElement(lines));
       object.position.set(...position);
       object.userData.detailSign = detailSign;
@@ -432,7 +407,7 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
    * appears or disappears.
    */
   private syncNpc(libraryId: string | undefined): void {
-    const shouldExist = this.slot !== null && libraryId !== undefined;
+    const shouldExist = this.marker !== null && libraryId !== undefined;
     if (!shouldExist) {
       if (this.npc) {
         this.npc.group.removeFromParent();
@@ -445,10 +420,12 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     }
     this.npcLibraryId = libraryId;
     if (this.npc) return; // already mounted; its position never needs to move once placed
-    const { rect, door } = this.slot!;
-    const npcA = doorAlong(rect, door) + NPC_OFFSET_FROM_DOOR;
-    const position = shelfPoint(rect, door, npcA, NPC_D, 0);
-    const lookAt = shelfPoint(rect, door, npcA, NPC_D + 4, 0);
+    const { frame } = this.marker!;
+    // Issue #258: a hex frame's own `doorMid` already IS the door (see `shelfPoint`'s own
+    // doc comment) — no `doorAlong` correction needed here either.
+    const npcA = NPC_OFFSET_FROM_DOOR;
+    const position = shelfPoint(frame, npcA, NPC_D, 0);
+    const lookAt = shelfPoint(frame, npcA, NPC_D + 4, 0);
     const npc = new StickFigure('Prospero', new THREE.Color(NPC_COLOR));
     npc.teleportTo(new THREE.Vector3(...position), new THREE.Vector3(...lookAt));
     this.scene!.add(npc.group);
