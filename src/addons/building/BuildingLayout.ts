@@ -5,7 +5,7 @@ import { OFFICE_WALLS, type Station } from '../../scene/Office.js';
 import { OFFICE } from '../../utils/Constants.js';
 import type { LayoutAgent, LayoutMove, LayoutStrategy, RoomView, Seat } from '../../layout/LayoutStrategy.js';
 import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type Rect, type RoomSlot } from './RoomPlanner.js';
-import { buildCeiling, buildRoom, buildWalls, markCutaway, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, wallRects, type RoomKind, type WallRect } from './rooms.js';
+import { buildCeiling, buildRoom, buildWalls, markCutaway, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, station, wallRects, type RoomKind, type WallRect } from './rooms.js';
 import { deskCameraPose, deskTalkSpotPose, monitorWorldCorners } from './deskGeometry.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabelBatchFor } from './roomLabels.js';
@@ -199,10 +199,30 @@ export class BuildingLayout implements LayoutStrategy {
     // `rememberedRooms` always returns the office first (issue #192: it is the lobby, not one
     // floor's own room, so a floor can never come up without it), so there is no fallback
     // list to fall through to here.
-    for (const kind of this.rememberedRooms()) this.addRoom(kind, false);
-    // The Library is its own room from the start: research trips and librarians go there
-    if (!this.roomKinds.includes('library')) this.addRoom('library', false);
+    // Issue #258: 'library' is filtered out here — the rect library room is gone, replaced by
+    // the hex one behind the Office (`addHexLibraryStations` below). A remembered room list
+    // from before this step may still carry 'library' from local storage; harmless to drop.
+    for (const kind of this.rememberedRooms().filter((kind) => kind !== 'library')) this.addRoom(kind, false);
+    this.addHexLibraryStations();
     this.saveRooms();
+  }
+
+  /**
+   * Issue #258: the library is a hex room behind the Office now, not a rect room — but
+   * research trips and librarians still route by station TYPE (`claimOfType('researching')`),
+   * not by which physical room built it (`addRoom`'s own station registration does the same
+   * thing for every rect room kind). Two stations, no furniture: `HexRooms.ts` builds the
+   * walls/floor/walkway; the library's own shelving and index-wall interior is a separate,
+   * larger design (round 7's own open question, not this step's scope).
+   */
+  private addHexLibraryStations(): void {
+    const center = this.hexOffice.layout.library.center;
+    const lookAt = new THREE.Vector3(this.hexOffice.layout.office.center.x, 0, this.hexOffice.layout.office.center.z);
+    const offsets: Array<[number, number]> = [[-2, -2], [2, 2]];
+    for (const [i, [dx, dz]] of offsets.entries()) {
+      const position = new THREE.Vector3(center.x + dx, 0, center.z + dz);
+      this.stations.set(`hex-library-${i}`, station('researching', position, lookAt));
+    }
   }
 
   get roomKinds(): RoomKind[] {

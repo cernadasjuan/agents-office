@@ -113,12 +113,14 @@ export function edgeMidpoint(center: HexPoint, radius: number, edgeIndex: number
   return { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
 }
 
-/** The 5 wall segments of a hex room (every edge but `openEdge`, left clear for its stair). */
-export function hexWallSegments(center: HexPoint, radius: number, openEdge: number): Array<{ a: HexPoint; b: HexPoint }> {
+/** The wall segments of a hex room: every edge but the open ones, left clear for a stair.
+ * Issue #258 (the library, behind the office): the office now has two stairs — one to the
+ * Hub, one to the Library — so a room's open edges are a list, not a single index. */
+export function hexWallSegments(center: HexPoint, radius: number, openEdges: number[]): Array<{ a: HexPoint; b: HexPoint }> {
   const corners = hexRoomCorners(center, radius);
   const segments: Array<{ a: HexPoint; b: HexPoint }> = [];
   for (let i = 0; i < 6; i++) {
-    if (i === openEdge) continue;
+    if (openEdges.includes(i)) continue;
     segments.push({ a: corners[i], b: corners[(i + 1) % 6] });
   }
   return segments;
@@ -159,7 +161,8 @@ export function segmentHeightAt(point: HexPoint, a: HexPoint, b: HexPoint, width
 export interface HexRoomGeometry {
   center: HexPoint;
   radius: number;
-  openEdge: number;
+  /** Issue #258: the office has two (Hub side, Library side); every other room still has one. */
+  openEdges: number[];
   corners: HexPoint[];
 }
 
@@ -170,23 +173,30 @@ export interface HexWalkway {
   to: HexPoint;
 }
 
-/** Everything step 2/3 needs to place, build and walk: the Hub, the Office, and the one
- * walkway (with its two ramps) between them. Pure data — `HexRooms.ts` turns it into meshes
- * and colliders. */
+/** Everything step 2/3/4 needs to place, build and walk: the Hub, the Office, the Library
+ * (behind the Office, same sector — issue #258), and the walkways between them. Pure data —
+ * `HexRooms.ts` turns it into meshes and colliders. */
 export interface HexOfficeLayout {
   hub: HexRoomGeometry;
   office: HexRoomGeometry;
+  library: HexRoomGeometry;
   hubRamp: HexWalkway;
   officeRamp: HexWalkway;
+  /** The office's own stair toward the library (its second open edge). */
+  officeLibraryRamp: HexWalkway;
+  libraryRamp: HexWalkway;
 }
 
-/** The hub and office slots from the planner (issue #218 step 1): always the first two
- * entries `claimHexRegion` returns, with no growth requests needed for either. */
-function hubAndOfficeSlots(): { hub: HexSlot; office: HexSlot } {
-  const slots = claimHexRegion([]);
+/** The hub, office and library slots from the planner: always present — `claimHexRegion`
+ * always claims the hub and the fixed office, and one `library` growth request claims
+ * exactly one hex, in the office's own sector, one ring further out (issue #218's
+ * `SECTOR_TABLE`: the office's sector grows into the library from ring 2 on). */
+function hexOfficeSlots(): { hub: HexSlot; office: HexSlot; library: HexSlot } {
+  const slots = claimHexRegion([{ role: 'library' }]);
   const hub = slots.find((s) => s.role === 'hub')!;
   const office = slots.find((s) => s.role === 'office')!;
-  return { hub, office };
+  const library = slots.find((s) => s.role === 'library')!;
+  return { hub, office, library };
 }
 
 function worldCenter(cell: HexCell): HexPoint {
@@ -194,48 +204,70 @@ function worldCenter(cell: HexCell): HexPoint {
   return add(p, HEX_OFFSET);
 }
 
+/** A room's one stair/ramp toward a neighbor: the open edge facing it, the ramp running
+ * outward from that edge toward the walkway. */
+function rampToward(center: HexPoint, radius: number, toward: HexPoint): { openEdge: number; ramp: HexWalkway } {
+  const openEdge = nearestEdgeIndex(center, radius, toward);
+  const edgeMid = edgeMidpoint(center, radius, openEdge);
+  const outward = normalize(sub(edgeMid, center));
+  return { openEdge, ramp: { from: edgeMid, to: add(edgeMid, scale(outward, RAMP_LENGTH)) } };
+}
+
 /** Builds the full layout from `HexPlanner`'s claim (deterministic, same input every time). */
 export function buildHexOfficeLayout(): HexOfficeLayout {
-  const { hub, office } = hubAndOfficeSlots();
+  const { hub, office, library } = hexOfficeSlots();
   const hubCenter = worldCenter(hub.cell);
   const officeCenter = worldCenter(office.cell);
+  const libraryCenter = worldCenter(library.cell);
 
-  const hubOpenEdge = nearestEdgeIndex(hubCenter, HUB_RADIUS, officeCenter);
-  const officeOpenEdge = nearestEdgeIndex(officeCenter, ROOM_RADIUS, hubCenter);
-
-  const hubEdgeMid = edgeMidpoint(hubCenter, HUB_RADIUS, hubOpenEdge);
-  const officeEdgeMid = edgeMidpoint(officeCenter, ROOM_RADIUS, officeOpenEdge);
-
-  const hubOutward = normalize(sub(hubEdgeMid, hubCenter));
-  const officeOutward = normalize(sub(officeEdgeMid, officeCenter));
+  const hubToOffice = rampToward(hubCenter, HUB_RADIUS, officeCenter);
+  const officeToHub = rampToward(officeCenter, ROOM_RADIUS, hubCenter);
+  const officeToLibrary = rampToward(officeCenter, ROOM_RADIUS, libraryCenter);
+  const libraryToOffice = rampToward(libraryCenter, ROOM_RADIUS, officeCenter);
 
   return {
-    hub: { center: hubCenter, radius: HUB_RADIUS, openEdge: hubOpenEdge, corners: hexRoomCorners(hubCenter, HUB_RADIUS) },
-    office: { center: officeCenter, radius: ROOM_RADIUS, openEdge: officeOpenEdge, corners: hexRoomCorners(officeCenter, ROOM_RADIUS) },
-    hubRamp: { from: hubEdgeMid, to: add(hubEdgeMid, scale(hubOutward, RAMP_LENGTH)) },
-    officeRamp: { from: officeEdgeMid, to: add(officeEdgeMid, scale(officeOutward, RAMP_LENGTH)) },
+    hub: { center: hubCenter, radius: HUB_RADIUS, openEdges: [hubToOffice.openEdge], corners: hexRoomCorners(hubCenter, HUB_RADIUS) },
+    office: {
+      center: officeCenter,
+      radius: ROOM_RADIUS,
+      openEdges: [officeToHub.openEdge, officeToLibrary.openEdge],
+      corners: hexRoomCorners(officeCenter, ROOM_RADIUS),
+    },
+    library: { center: libraryCenter, radius: ROOM_RADIUS, openEdges: [libraryToOffice.openEdge], corners: hexRoomCorners(libraryCenter, ROOM_RADIUS) },
+    hubRamp: hubToOffice.ramp,
+    officeRamp: officeToHub.ramp,
+    officeLibraryRamp: officeToLibrary.ramp,
+    libraryRamp: libraryToOffice.ramp,
   };
 }
 
 /** The walking height at a world position, across the whole hex structure: a room floor (0),
- * a stair ramp (0 to `WALKWAY_HEIGHT`), the walkway deck (`WALKWAY_HEIGHT`), or `null`. */
+ * a stair ramp (0 to `WALKWAY_HEIGHT`), a walkway deck (`WALKWAY_HEIGHT`), or `null`. */
 export function hexSurfaceHeightAt(layout: HexOfficeLayout, x: number, z: number): number | null {
   const point = { x, z };
   if (pointInPolygon(point, layout.hub.corners)) return 0;
   if (pointInPolygon(point, layout.office.corners)) return 0;
+  if (pointInPolygon(point, layout.library.corners)) return 0;
   const onHubRamp = segmentHeightAt(point, layout.hubRamp.from, layout.hubRamp.to, WALKWAY_WIDTH, 0, WALKWAY_HEIGHT);
   if (onHubRamp !== null) return onHubRamp;
   const onOfficeRamp = segmentHeightAt(point, layout.officeRamp.from, layout.officeRamp.to, WALKWAY_WIDTH, 0, WALKWAY_HEIGHT);
   if (onOfficeRamp !== null) return onOfficeRamp;
-  const onDeck = segmentHeightAt(point, layout.hubRamp.to, layout.officeRamp.to, WALKWAY_WIDTH, WALKWAY_HEIGHT, WALKWAY_HEIGHT);
-  if (onDeck !== null) return onDeck;
+  const onHubDeck = segmentHeightAt(point, layout.hubRamp.to, layout.officeRamp.to, WALKWAY_WIDTH, WALKWAY_HEIGHT, WALKWAY_HEIGHT);
+  if (onHubDeck !== null) return onHubDeck;
+  const onOfficeLibraryRamp = segmentHeightAt(point, layout.officeLibraryRamp.from, layout.officeLibraryRamp.to, WALKWAY_WIDTH, 0, WALKWAY_HEIGHT);
+  if (onOfficeLibraryRamp !== null) return onOfficeLibraryRamp;
+  const onLibraryRamp = segmentHeightAt(point, layout.libraryRamp.from, layout.libraryRamp.to, WALKWAY_WIDTH, 0, WALKWAY_HEIGHT);
+  if (onLibraryRamp !== null) return onLibraryRamp;
+  const onLibraryDeck = segmentHeightAt(point, layout.officeLibraryRamp.to, layout.libraryRamp.to, WALKWAY_WIDTH, WALKWAY_HEIGHT, WALKWAY_HEIGHT);
+  if (onLibraryDeck !== null) return onLibraryDeck;
   return null;
 }
 
 /** Every hex wall segment's collision footprint, for `LayoutStrategy.wallColliders()`. */
 export function hexWallColliders(layout: HexOfficeLayout): Array<{ minX: number; maxX: number; minZ: number; maxZ: number }> {
   const half = HEX_WALL_THICKNESS / 2;
-  const hub = hexWallSegments(layout.hub.center, layout.hub.radius, layout.hub.openEdge).map((s) => segmentBounds(s.a, s.b, half));
-  const office = hexWallSegments(layout.office.center, layout.office.radius, layout.office.openEdge).map((s) => segmentBounds(s.a, s.b, half));
-  return [...hub, ...office];
+  const hub = hexWallSegments(layout.hub.center, layout.hub.radius, layout.hub.openEdges).map((s) => segmentBounds(s.a, s.b, half));
+  const office = hexWallSegments(layout.office.center, layout.office.radius, layout.office.openEdges).map((s) => segmentBounds(s.a, s.b, half));
+  const library = hexWallSegments(layout.library.center, layout.library.radius, layout.library.openEdges).map((s) => segmentBounds(s.a, s.b, half));
+  return [...hub, ...office, ...library];
 }
