@@ -8,7 +8,10 @@
  * to a walkway deck and back down — the "little wire mesh bridge" and "little staircase"
  * Gabriel described in round 7. This file places the first one: Hub to Office.
  */
-import { claimHexRegion, hexPixel, type HexCell, type HexPoint, type HexSlot } from './HexPlanner.js';
+import {
+  claimHexRegion, hexNeighbors, hexPixel, hexKey, ringOf,
+  type ComponentRole, type GrowthRequest, type HexCell, type HexPoint, type HexSlot, type RoomRole,
+} from './HexPlanner.js';
 import { OFFICE } from '../../utils/Constants.js';
 
 /** World offset of the whole hex structure, clear of the existing rect building (whose rooms
@@ -181,9 +184,16 @@ export function segmentHeightAt(point: HexPoint, a: HexPoint, b: HexPoint, width
 export interface HexRoomGeometry {
   center: HexPoint;
   radius: number;
-  /** Issue #258: the office has two (Hub side, Library side); every other room still has one. */
+  /** Issue #258: the office has two (Hub side, Library side); every other room still has one —
+   * except a future branch point (round 7: "wings may branch"), not built yet. */
   openEdges: number[];
   corners: HexPoint[];
+  /** Issue #258 steps 5/6: which role this room plays (`hub`/`office`/`library`, or a
+   * component wing), and its full planner slot (cell/ring/sector) — a caller that needs to
+   * tell rooms apart (`HexRooms.ts`'s per-room marker, a war-room builder) reads this instead
+   * of a hardcoded field name. */
+  role: RoomRole;
+  slot: HexSlot;
 }
 
 export interface HexWalkway {
@@ -193,10 +203,28 @@ export interface HexWalkway {
   to: HexPoint;
 }
 
-/** Everything step 2/3/4 needs to place, build and walk: the Hub, the Office, the Library
- * (behind the Office, same sector — issue #258), and the walkways between them. Pure data —
- * `HexRooms.ts` turns it into meshes and colliders. */
+/** One claimed room's own walkway/stair connection to its parent (the already-claimed room one
+ * ring closer to the Hub it docks onto) — issue #258 steps 5/6: a wing's rooms chain outward
+ * exactly like Hub -> Office -> Library already did, just through an arbitrary tree instead of
+ * one fixed 3-room path. */
+export interface HexConnection {
+  parent: HexRoomGeometry;
+  child: HexRoomGeometry;
+  /** The parent's own ramp, from its edge facing the child. */
+  parentRamp: HexWalkway;
+  /** The child's own ramp, from its edge facing the parent. */
+  childRamp: HexWalkway;
+}
+
+/** Everything the hex office needs to place, build and walk: every claimed room (the Hub,
+ * the Office, the Library behind it, and any component wings — issue #258 steps 5/6) and the
+ * walkway connecting each one to its own parent. Pure data — `HexRooms.ts` turns it into
+ * meshes and colliders. `hub`/`office`/`library` and the four named ramps stay as a
+ * convenience (every caller from steps 2-4 already reads them by name); `rooms`/`connections`
+ * generalize over however many wing rooms also exist. */
 export interface HexOfficeLayout {
+  rooms: HexRoomGeometry[];
+  connections: HexConnection[];
   hub: HexRoomGeometry;
   office: HexRoomGeometry;
   library: HexRoomGeometry;
@@ -207,16 +235,14 @@ export interface HexOfficeLayout {
   libraryRamp: HexWalkway;
 }
 
-/** The hub, office and library slots from the planner: always present — `claimHexRegion`
- * always claims the hub and the fixed office, and one `library` growth request claims
- * exactly one hex, in the office's own sector, one ring further out (issue #218's
- * `SECTOR_TABLE`: the office's sector grows into the library from ring 2 on). */
-function hexOfficeSlots(): { hub: HexSlot; office: HexSlot; library: HexSlot } {
-  const slots = claimHexRegion([{ role: 'library' }]);
-  const hub = slots.find((s) => s.role === 'hub')!;
-  const office = slots.find((s) => s.role === 'office')!;
-  const library = slots.find((s) => s.role === 'library')!;
-  return { hub, office, library };
+/** How many more hex rooms each component wing (and the Library) should grow to, this build —
+ * issue #258 steps 5/6: one `GrowthRequest` per unit, same as `library` already was. */
+export interface HexWorldCounts {
+  library: number;
+  portal: number;
+  agents: number;
+  tooling: number;
+  infra: number;
 }
 
 function worldCenter(cell: HexCell): HexPoint {
@@ -233,61 +259,113 @@ function rampToward(center: HexPoint, radius: number, toward: HexPoint): { openE
   return { openEdge, ramp: { from: edgeMid, to: add(edgeMid, scale(outward, RAMP_LENGTH)) } };
 }
 
-/** Builds the full layout from `HexPlanner`'s claim (deterministic, same input every time). */
-export function buildHexOfficeLayout(): HexOfficeLayout {
-  const { hub, office, library } = hexOfficeSlots();
-  const hubCenter = worldCenter(hub.cell);
-  const officeCenter = worldCenter(office.cell);
-  const libraryCenter = worldCenter(library.cell);
+function requestsFor(counts: HexWorldCounts): GrowthRequest[] {
+  const requests: GrowthRequest[] = [];
+  const push = (role: 'library' | ComponentRole, count: number) => {
+    for (let i = 0; i < count; i++) requests.push({ role });
+  };
+  push('library', counts.library);
+  push('portal', counts.portal);
+  push('agents', counts.agents);
+  push('tooling', counts.tooling);
+  push('infra', counts.infra);
+  return requests;
+}
 
-  const hubToOffice = rampToward(hubCenter, HUB_RADIUS, officeCenter);
-  const officeToHub = rampToward(officeCenter, ROOM_RADIUS, hubCenter);
-  const officeToLibrary = rampToward(officeCenter, ROOM_RADIUS, libraryCenter);
-  const libraryToOffice = rampToward(libraryCenter, ROOM_RADIUS, officeCenter);
+/** The already-claimed room one ring closer to the hub that `slot` docks its own walkway onto:
+ * among `slot.cell`'s 6 lattice neighbors (`hexNeighbors`), whichever is both one ring closer
+ * and already claimed. Deterministic: `hexNeighbors`' own fixed direction order breaks a tie
+ * at a sector boundary (rare, only possible where two sectors' own cells happen to share a
+ * ring-(r-1) neighbor) the same way every time. The hub itself (ring 0) has no parent. */
+function parentOf(slot: HexSlot, bySlotKey: Map<string, HexSlot>): HexSlot | null {
+  if (slot.role === 'hub') return null;
+  if (slot.ring === 1) return bySlotKey.get(hexKey({ q: 0, r: 0 })) ?? null;
+  for (const neighbor of hexNeighbors(slot.cell)) {
+    if (ringOf(neighbor) !== slot.ring - 1) continue;
+    const candidate = bySlotKey.get(hexKey(neighbor));
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
+/** Builds the full hex world from `HexPlanner`'s claim (deterministic, same input every time):
+ * every claimed room's own geometry, and a walkway connection from each one to its own parent.
+ * Growth only ever appends a cell (`claimHexRegion`'s own doc comment) — raising any one count
+ * never moves or reorders a room already placed, the same stability the old rect rented-room
+ * system already guaranteed for its own room list. */
+export function buildHexWorld(counts: HexWorldCounts): HexOfficeLayout {
+  const slots = claimHexRegion(requestsFor(counts));
+  const bySlotKey = new Map(slots.map((slot) => [hexKey(slot.cell), slot]));
+
+  const rooms = new Map<string, HexRoomGeometry>();
+  for (const slot of slots) {
+    const center = worldCenter(slot.cell);
+    const radius = slot.role === 'hub' ? HUB_RADIUS : ROOM_RADIUS;
+    rooms.set(hexKey(slot.cell), { center, radius, openEdges: [], corners: hexRoomCorners(center, radius), role: slot.role, slot });
+  }
+
+  const connections: HexConnection[] = [];
+  for (const slot of slots) {
+    const parentSlot = parentOf(slot, bySlotKey);
+    if (!parentSlot) continue;
+    const room = rooms.get(hexKey(slot.cell))!;
+    const parent = rooms.get(hexKey(parentSlot.cell))!;
+    const childSide = rampToward(room.center, room.radius, parent.center);
+    const parentSide = rampToward(parent.center, parent.radius, room.center);
+    room.openEdges.push(childSide.openEdge);
+    parent.openEdges.push(parentSide.openEdge);
+    connections.push({ parent, child: room, parentRamp: parentSide.ramp, childRamp: childSide.ramp });
+  }
+
+  const roomList = [...rooms.values()];
+  const byRole = (role: RoomRole) => roomList.find((room) => room.role === role)!;
+  const connectionBetween = (parent: HexRoomGeometry, child: HexRoomGeometry) =>
+    connections.find((connection) => connection.parent === parent && connection.child === child)!;
+
+  const hub = byRole('hub');
+  const office = byRole('office');
+  const library = byRole('library');
+  const hubOffice = connectionBetween(hub, office);
+  const officeLibrary = connectionBetween(office, library);
 
   return {
-    hub: { center: hubCenter, radius: HUB_RADIUS, openEdges: [hubToOffice.openEdge], corners: hexRoomCorners(hubCenter, HUB_RADIUS) },
-    office: {
-      center: officeCenter,
-      radius: ROOM_RADIUS,
-      openEdges: [officeToHub.openEdge, officeToLibrary.openEdge],
-      corners: hexRoomCorners(officeCenter, ROOM_RADIUS),
-    },
-    library: { center: libraryCenter, radius: ROOM_RADIUS, openEdges: [libraryToOffice.openEdge], corners: hexRoomCorners(libraryCenter, ROOM_RADIUS) },
-    hubRamp: hubToOffice.ramp,
-    officeRamp: officeToHub.ramp,
-    officeLibraryRamp: officeToLibrary.ramp,
-    libraryRamp: libraryToOffice.ramp,
+    rooms: roomList,
+    connections,
+    hub, office, library,
+    hubRamp: hubOffice.parentRamp,
+    officeRamp: hubOffice.childRamp,
+    officeLibraryRamp: officeLibrary.parentRamp,
+    libraryRamp: officeLibrary.childRamp,
   };
 }
 
-/** The walking height at a world position, across the whole hex structure: a room floor (0),
- * a stair ramp (0 to `WALKWAY_HEIGHT`), a walkway deck (`WALKWAY_HEIGHT`), or `null`. */
+/** Steps 2-4's own default world: the Hub, the fixed Office, and one Library hex — no
+ * component wings. Kept as its own function since every step-4-and-earlier caller and test
+ * already calls this with no arguments. */
+export function buildHexOfficeLayout(): HexOfficeLayout {
+  return buildHexWorld({ library: 1, portal: 0, agents: 0, tooling: 0, infra: 0 });
+}
+
+/** The walking height at a world position, across the whole hex structure: any room's floor
+ * (0), a stair ramp (0 to `WALKWAY_HEIGHT`), a walkway deck (`WALKWAY_HEIGHT`), or `null`. */
 export function hexSurfaceHeightAt(layout: HexOfficeLayout, x: number, z: number): number | null {
   const point = { x, z };
-  if (pointInPolygon(point, layout.hub.corners)) return 0;
-  if (pointInPolygon(point, layout.office.corners)) return 0;
-  if (pointInPolygon(point, layout.library.corners)) return 0;
-  const onHubRamp = segmentHeightAt(point, layout.hubRamp.from, layout.hubRamp.to, WALKWAY_WIDTH, 0, WALKWAY_HEIGHT);
-  if (onHubRamp !== null) return onHubRamp;
-  const onOfficeRamp = segmentHeightAt(point, layout.officeRamp.from, layout.officeRamp.to, WALKWAY_WIDTH, 0, WALKWAY_HEIGHT);
-  if (onOfficeRamp !== null) return onOfficeRamp;
-  const onHubDeck = segmentHeightAt(point, layout.hubRamp.to, layout.officeRamp.to, WALKWAY_WIDTH, WALKWAY_HEIGHT, WALKWAY_HEIGHT);
-  if (onHubDeck !== null) return onHubDeck;
-  const onOfficeLibraryRamp = segmentHeightAt(point, layout.officeLibraryRamp.from, layout.officeLibraryRamp.to, WALKWAY_WIDTH, 0, WALKWAY_HEIGHT);
-  if (onOfficeLibraryRamp !== null) return onOfficeLibraryRamp;
-  const onLibraryRamp = segmentHeightAt(point, layout.libraryRamp.from, layout.libraryRamp.to, WALKWAY_WIDTH, 0, WALKWAY_HEIGHT);
-  if (onLibraryRamp !== null) return onLibraryRamp;
-  const onLibraryDeck = segmentHeightAt(point, layout.officeLibraryRamp.to, layout.libraryRamp.to, WALKWAY_WIDTH, WALKWAY_HEIGHT, WALKWAY_HEIGHT);
-  if (onLibraryDeck !== null) return onLibraryDeck;
+  for (const room of layout.rooms) {
+    if (pointInPolygon(point, room.corners)) return 0;
+  }
+  for (const connection of layout.connections) {
+    const onParentRamp = segmentHeightAt(point, connection.parentRamp.from, connection.parentRamp.to, WALKWAY_WIDTH, 0, WALKWAY_HEIGHT);
+    if (onParentRamp !== null) return onParentRamp;
+    const onChildRamp = segmentHeightAt(point, connection.childRamp.from, connection.childRamp.to, WALKWAY_WIDTH, 0, WALKWAY_HEIGHT);
+    if (onChildRamp !== null) return onChildRamp;
+    const onDeck = segmentHeightAt(point, connection.parentRamp.to, connection.childRamp.to, WALKWAY_WIDTH, WALKWAY_HEIGHT, WALKWAY_HEIGHT);
+    if (onDeck !== null) return onDeck;
+  }
   return null;
 }
 
 /** Every hex wall segment's collision footprint, for `LayoutStrategy.wallColliders()`. */
 export function hexWallColliders(layout: HexOfficeLayout): Array<{ minX: number; maxX: number; minZ: number; maxZ: number }> {
   const half = HEX_WALL_THICKNESS / 2;
-  const hub = hexWallSegments(layout.hub.center, layout.hub.radius, layout.hub.openEdges).map((s) => segmentBounds(s.a, s.b, half));
-  const office = hexWallSegments(layout.office.center, layout.office.radius, layout.office.openEdges).map((s) => segmentBounds(s.a, s.b, half));
-  const library = hexWallSegments(layout.library.center, layout.library.radius, layout.library.openEdges).map((s) => segmentBounds(s.a, s.b, half));
-  return [...hub, ...office, ...library];
+  return layout.rooms.flatMap((room) => hexWallSegments(room.center, room.radius, room.openEdges).map((segment) => segmentBounds(segment.a, segment.b, half)));
 }

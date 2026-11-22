@@ -60,6 +60,13 @@ export function hexAdd(a: HexCell, b: HexCell): HexCell {
   return { q: a.q + b.q, r: a.r + b.r };
 }
 
+/** The 6 lattice neighbors of a cell, in `AX_DIRS`'s own fixed order (issue #258 steps 5/6: a
+ * claimed room's own "parent" — the already-claimed cell one ring closer to the hub it docks
+ * its walkway onto — is whichever of these 6 is both claimed and exactly one ring closer). */
+export function hexNeighbors(cell: HexCell): HexCell[] {
+  return AX_DIRS.map((dir) => hexAdd(cell, dir));
+}
+
 export function hexEquals(a: HexCell, b: HexCell): boolean {
   return a.q === b.q && a.r === b.r;
 }
