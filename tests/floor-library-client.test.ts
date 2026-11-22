@@ -6,6 +6,11 @@ import type { World, WorldLibrary } from '../src/extensions.js';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
 Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true, writable: true });
+// Issue #248: client.ts now builds a StickFigure (the librarian NPC), which paints a toon
+// gradient onto a real 2D canvas context (`src/utils/Materials.ts`) at import time — jsdom
+// itself implements no canvas backend, the same stub every other figure-touching test file
+// already installs (`tests/library-plugin.test.ts`, for one).
+dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, { get: () => () => undefined, set: () => true })) as never;
 const { FloorLibraryOfficeExtension } = await import('../plugins/floor-library/client.js');
 const { ALL_FLOORS } = await import('../src/floors/FloorRegistry.js');
 const { setFocusedFloor } = await import('../src/floors/floorState.js');
@@ -22,9 +27,17 @@ after(() => {
 const LIBRARY_ROOM_NAME = 'room-1-library';
 
 function sceneWithLibraryRoom(): THREE.Scene {
+  return sceneWithLibraryRoomAt(1);
+}
+
+/** A scene whose library room rented a specific slot index (`RoomPlanner.ts`'s own
+ * `slotFor`) — issue #253 review: the NPC's own placement must hold for a slot whose door is
+ * off the wall's own center (index 1, the library's usual slot), not only one where it happens
+ * to be centered (index 0). */
+function sceneWithLibraryRoomAt(index: number): THREE.Scene {
   const scene = new THREE.Scene();
   const room = new THREE.Group();
-  room.name = LIBRARY_ROOM_NAME;
+  room.name = `room-${index}-library`;
   scene.add(room);
   return scene;
 }
@@ -143,6 +156,10 @@ test('pick targets (issue #221 AC2): one per plaque, one per shown entry line, o
     librarySectionId('pm-lib', 0), libraryEntryId('pm-lib', 0, 0),
     librarySectionId('pm-lib', 1), libraryEntryId('pm-lib', 1, 0),
     librarySectionId('pm-lib', 2), libraryEntryId('pm-lib', 2, 0), libraryIndexId('pm-lib'),
+    // The librarian NPC (issue #248): its own click target, always last, opening the same
+    // index card the "+N more" sign above already does — a second door to the same room,
+    // never a second source of truth.
+    libraryIndexId('pm-lib'),
   ], 'the 4th section is never reachable as a shelf, but its own id still surfaces through the index, never dropped');
   for (const target of extension.pickTargets()) assert.ok(target.object instanceof THREE.Object3D);
 });
@@ -260,6 +277,78 @@ test('issue #221 FAIL round: in "all floors" with two libraries, the "+N more" s
 
   const moreSignId = extension.pickTargets().find((target) => target.id.startsWith('lib-index:'))?.id;
   assert.equal(moreSignId, libraryIndexId('lib-a'), 'the overflow is library A\'s own 4th section, so the sign must open A\'s index, never B\'s — B never even got a slot to overflow from');
+});
+
+// --- Issue #248: the librarian NPC ---
+
+test('the librarian NPC mounts once a library room and a library both exist, clickable into that library\'s own index card', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
+
+  assert.deepEqual(extension.npcFigures().length, 1, 'one NPC figure, drawn through the shared figure batch');
+  const npcGroup = extension.npcFigures()[0]!;
+  assert.ok(npcGroup.parent === scene, 'the NPC\'s own figure root is actually in the scene (figure-batch sync requires this)');
+
+  const targets = extension.pickTargets();
+  const npcTarget = targets[targets.length - 1]!;
+  assert.equal(npcTarget.id, libraryIndexId('pm-lib'));
+  assert.notEqual(npcTarget.object, npcGroup, 'the NPC\'s own pick target is its own hit box, not the figure root the figure batch already manages');
+});
+
+test('issue #253 review: the librarian NPC stands near the door at the library\'s own usual slot (index 1), whose door is well off the wall\'s own center', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoomAt(1); // slotFor(1): door { side: 'west', at: 9.5 } on a wall spanning z in [6, 18] — door.at is 2.5 off that wall's own center (12), not 0
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
+  const npc = extension.npcFigures()[0]!;
+  // The door itself sits at world z = 11.5 (slotFor(1)'s own rect/door math); the NPC must be
+  // close to that, not at the old fixed-`a` position (z = 16.8 — a 5.3-unit miss toward the
+  // far end of the wall, the bug this review round fixed).
+  assert.ok(Math.abs(npc.position.z - 11.5) < 3, `NPC lands near the door, not the old fixed wall-center offset (got z=${npc.position.z})`);
+  assert.ok(Math.abs(npc.position.z - 16.8) > 2, `NPC must not still land at the old (buggy) position (got z=${npc.position.z})`);
+});
+
+test('issue #253 review: the librarian NPC also stands near the door at a slot where the door happens to be centered (index 0)', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoomAt(0); // slotFor(0): door { side: 'west', at: 0 } on a wall spanning z in [-6, 6] — centered, door.at === the wall's own center
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
+  const npc = extension.npcFigures()[0]!;
+  assert.ok(Math.abs(npc.position.z - 2) < 3, `NPC lands near the (centered) door here too (got z=${npc.position.z})`);
+});
+
+test('the librarian NPC never mounts without the library room (graceful degradation), and unmounts if the library disappears', () => {
+  setFocusedFloor('pm-floor');
+  const scene = new THREE.Scene(); // no room-1-library
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  extension.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
+  assert.deepEqual(extension.npcFigures(), []);
+
+  const withRoom = sceneWithLibraryRoom();
+  const extensionWithRoom = new FloorLibraryOfficeExtension();
+  extensionWithRoom.start(withRoom);
+  extensionWithRoom.worldChanged(world([library('pm-floor', [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }], 'pm-lib')]));
+  assert.equal(extensionWithRoom.npcFigures().length, 1);
+  extensionWithRoom.worldChanged(world([])); // the library disappears
+  assert.deepEqual(extensionWithRoom.npcFigures(), [], 'the NPC leaves when there is no catalog left for him to show');
+});
+
+test('the librarian NPC is the same figure instance across an ordinary poll with no real changes (no churn)', () => {
+  setFocusedFloor('pm-floor');
+  const scene = sceneWithLibraryRoom();
+  const extension = new FloorLibraryOfficeExtension();
+  extension.start(scene);
+  const sections: WorldLibrary['sections'] = [{ name: 'vendors', entries: [{ title: 'Placer.ai' }] }];
+  extension.worldChanged(world([library('pm-floor', sections, 'pm-lib')]));
+  const first = extension.npcFigures()[0];
+  extension.worldChanged(world([library('pm-floor', sections, 'pm-lib')]));
+  assert.equal(extension.npcFigures()[0], first);
 });
 
 test('issue #221 FAIL round 2: a library that gets zero shown sections at all (every slot already belongs to an earlier library) still gets its own reachable "+N more" sign', () => {

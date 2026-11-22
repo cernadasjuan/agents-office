@@ -6,6 +6,7 @@ import { focusedFloor } from '../../src/floors/floorState.js';
 import { ROOM_SIZE, slotFor, type Door, type Rect, type Side } from '../../src/addons/building/RoomPlanner.js';
 import type { PickTarget } from '../../src/scene/Selection.js';
 import { libraryEntryId, libraryIndexId, librarySectionId } from '../../src/ui/LibraryCard.js';
+import { StickFigure } from '../../src/characters/StickFigure.js';
 
 /**
  * Library shelves (issue #191 AC1, #119; issue #221 AC1/AC2/AC4): a self-contained extension
@@ -62,6 +63,25 @@ function shelfPoint(rect: Rect, door: Door, a: number, d: number, y: number): [n
   const doorWallX = (rect.minX + rect.maxX) / 2 - (nx * ROOM_SIZE) / 2;
   const doorWallZ = (rect.minZ + rect.maxZ) / 2 - (nz * ROOM_SIZE) / 2;
   return [doorWallX + -nz * a + nx * d, y, doorWallZ + nx * a + nz * d];
+}
+
+/**
+ * Where the door itself actually sits along its own wall, in `shelfPoint`'s own `a` coordinate
+ * (relative to the wall's own center) — issue #253 review: the NPC's own placement assumed
+ * `door.at` was always the wall's own center (true only for the office's own first ring-0
+ * slot, `door.at: 0`); the library's own usual slot (ring 0, index 1, `door.at: 9.5` on a wall
+ * that only runs `z` in `[6, 18]`) sits 2.5 units off that center, not 0. `door.at` is an
+ * absolute world coordinate (an x for a north/south door, a z for an east/west one); this
+ * reprojects it onto the same `(-nz, nx)` unit "along" axis `shelfPoint` itself uses, the same
+ * relationship `src/addons/building/rooms.ts`'s own `RoomFrame.doorAlong` has to its own
+ * `point()`, duplicated here rather than imported for the same self-containment reason
+ * `shelfPoint`'s own doc comment already gives.
+ */
+function doorAlong(rect: Rect, door: Door): number {
+  const [nx, nz] = INWARD_BY_SIDE[door.side];
+  const doorWallX = (rect.minX + rect.maxX) / 2 - (nx * ROOM_SIZE) / 2;
+  const doorWallZ = (rect.minZ + rect.maxZ) / 2 - (nz * ROOM_SIZE) / 2;
+  return nx !== 0 ? (door.at - doorWallZ) * nx : (door.at - doorWallX) * -nz;
 }
 
 /**
@@ -231,6 +251,22 @@ function matchedSections(libraries: WorldLibrary[], floor: string): MatchedSecti
 const ENTRY_HIT_GEOMETRY = new THREE.BoxGeometry(1.0, 0.22, 0.2);
 const SECTION_HIT_GEOMETRY = new THREE.BoxGeometry(1.2, 0.32, 0.2);
 const HIT_MATERIAL = new THREE.MeshBasicMaterial({ visible: false });
+/** A standing figure's own hit box: tall and narrow, not the shelf signs' wide-and-flat shape. */
+const NPC_HIT_GEOMETRY = new THREE.BoxGeometry(0.7, 1.7, 0.5);
+
+/**
+ * The librarian NPC (issue #248, Gabriel's own words: "doesn't do much... you can interact
+ * with him, maybe he shows you the catalog"). Near the door (AC1) so Gabriel sees him on the
+ * way in, not tucked against the far wall with the shelves themselves — issue #253 review: a
+ * fixed `a = 4.8` assumed the door sat at the wall's own center, which only holds for the
+ * office's own first ring-0 slot. `NPC_OFFSET_FROM_DOOR` is instead a lateral nudge from
+ * wherever the door itself actually is (`doorAlong`), clear of the doorway's own
+ * `DOOR_WIDTH / 2` gap (1.2) so the NPC never stands in the opening itself, same `d = 2` depth
+ * as before (the same row the shelf grid itself starts at).
+ */
+const NPC_OFFSET_FROM_DOOR = 2;
+const NPC_D = 2;
+const NPC_COLOR = 0x5a4a3a;
 
 export class FloorLibraryOfficeExtension implements OfficeExtension {
   readonly id = 'floor-library-shelves';
@@ -240,13 +276,22 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
   private picks: PickTarget[] = [];
   private signature = '';
   private slot: { rect: Rect; door: Door } | null = null;
+  private npc: StickFigure | null = null;
+  private npcHit: THREE.Mesh | null = null;
+  private npcLibraryId: string | null = null;
 
   start(scene: THREE.Scene): void {
     this.scene = scene;
   }
 
   pickTargets(): PickTarget[] {
-    return this.picks;
+    return this.npcHit ? [...this.picks, { id: libraryIndexId(this.npcLibraryId!), object: this.npcHit }] : this.picks;
+  }
+
+  /** Issue #248: the librarian NPC draws through the shared figure batch, same as a real
+   * agent, at the same near-zero marginal draw-call cost. */
+  npcFigures(): THREE.Object3D[] {
+    return this.npc ? [this.npc.group] : [];
   }
 
   worldChanged(world: World): void {
@@ -255,6 +300,7 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     const matched = matchedSections(world.libraries ?? [], floor);
     const roomIndex = findLibraryRoomIndex(this.scene);
     this.slot = roomIndex === undefined ? null : slotFor(roomIndex);
+    this.syncNpc(matched[0]?.libraryId);
     const sections = this.slot ? matched.slice(0, MAX_SECTIONS_SHOWN) : [];
     // Review (issue #221 FAIL round): with more than one library visible at once (`ALL_FLOORS`
     // combining them), the hidden-sections count used to be the *global* overflow across every
@@ -373,6 +419,44 @@ export class FloorLibraryOfficeExtension implements OfficeExtension {
     for (const object of this.mounted) object.removeFromParent();
     this.mounted = [];
     this.picks = [];
+  }
+
+  /**
+   * The librarian NPC itself (issue #248): mounted once a library room and at least one
+   * library's own catalog exist, torn down the moment either goes away (another layout, the
+   * room not grown yet, or no library configured at all — the same graceful-degradation rule
+   * every other part of this extension already follows). Never rebuilt on every section
+   * remount: `worldChanged` calls this every poll regardless of the shelf `signature` gate, so
+   * the figure stays the same `StickFigure` instance (and so the same figure-batch identity)
+   * across ordinary polls, only actually changing hands when the room or the library itself
+   * appears or disappears.
+   */
+  private syncNpc(libraryId: string | undefined): void {
+    const shouldExist = this.slot !== null && libraryId !== undefined;
+    if (!shouldExist) {
+      if (this.npc) {
+        this.npc.group.removeFromParent();
+        this.npcHit?.removeFromParent();
+        this.npc = null;
+        this.npcHit = null;
+        this.npcLibraryId = null;
+      }
+      return;
+    }
+    this.npcLibraryId = libraryId;
+    if (this.npc) return; // already mounted; its position never needs to move once placed
+    const { rect, door } = this.slot!;
+    const npcA = doorAlong(rect, door) + NPC_OFFSET_FROM_DOOR;
+    const position = shelfPoint(rect, door, npcA, NPC_D, 0);
+    const lookAt = shelfPoint(rect, door, npcA, NPC_D + 4, 0);
+    const npc = new StickFigure('Prospero', new THREE.Color(NPC_COLOR));
+    npc.teleportTo(new THREE.Vector3(...position), new THREE.Vector3(...lookAt));
+    this.scene!.add(npc.group);
+    this.npc = npc;
+    const hit = new THREE.Mesh(NPC_HIT_GEOMETRY, HIT_MATERIAL);
+    hit.position.set(position[0], position[1] + 0.85, position[2]);
+    this.scene!.add(hit);
+    this.npcHit = hit;
   }
 }
 

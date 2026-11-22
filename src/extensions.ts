@@ -112,6 +112,11 @@ export interface OfficeExtension {
   update?(elapsed: number, delta: number): void;
   /** Extra things a click or hover can pick, besides an agent (for example a tombstone). */
   pickTargets?(): PickTarget[];
+  /** Extra figures to draw through the shared figure batch, besides a real agent's (issue
+   * #248: the library's own librarian NPC) — same instancing, same draw-call cost whether
+   * one figure stands there or none; never a full `ManagedAgent` of its own, since it has no
+   * activity to animate and no seat to free when it leaves. */
+  npcFigures?(): THREE.Object3D[];
 }
 
 const registered: OfficeExtension[] = [];

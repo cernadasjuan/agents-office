@@ -286,6 +286,17 @@ export interface OfficePlugin {
   actions?: OfficeAction[];
   views?: OfficeView[];
   bubbles?: BubbleSource;
+  /**
+   * Issue #253 review: a plugin whose own enricher reads another plugin's own `display` field
+   * (`plugins/library/index.ts` reads the `bmad` plugin's own `display.badges`) used to depend
+   * on `AGENTS_OFFICE_PLUGINS` happening to list the two in the right order — nothing enforced
+   * it, so a reordered env var silently broke the dependent plugin with no error anywhere.
+   * Lower sorts earlier (default 0); `vitePlugin.ts`'s own `orderByEnricherPriority` stably
+   * sorts every plugin's enrichers by this field before building the pipeline, so the actual
+   * registration order (`AGENTS_OFFICE_PLUGINS`'s own list, or an embedder's `plugins` array)
+   * no longer decides it for any plugin that sets one.
+   */
+  enricherPriority?: number;
 }
 
 const STEP_TIMEOUT_MS = 2000;
