@@ -16,8 +16,16 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
 })) as never;
 const { createOffice } = await import('../src/scene/Office.js');
 const { BuildingLayout, BUILDING_STORAGE_KEY, floorStorageKey } = await import('../src/addons/building/BuildingLayout.js');
-const { missionSlot, combinedBoard } = await import('../src/addons/building/missionRooms.js');
+const { testHexWarRoom, combinedBoard } = await import('../src/addons/building/missionRooms.js');
 const { projectWorld } = await import('../server/seam.js');
+
+/** A hex room's own AABB (issue #259), the same shape `missionSlot(index).rect` used to give
+ * these tests for the first (ordinal-0, default-wing) mission a fresh layout ever builds. */
+function hexRoomRect(room: ReturnType<typeof testHexWarRoom>) {
+  const xs = room.corners.map((c) => c.x);
+  const zs = room.corners.map((c) => c.z);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
+}
 
 /** The same hashing `server/vitePlugin.ts` uses for `publicId`, with its own random key held
  * for the whole call (one key, so the same raw string always hashes the same, the way one
@@ -374,16 +382,17 @@ const missionRoom = (state: 'open' | 'locked' = 'open') => ({
   walls: { statement: 'Ship it', docs: ['Explainer'], issues: [{ number: 46, title: 'Parent', state: 'open' as const }], kanban: [] },
 });
 
-test('a mission becomes a war room north of the hall, with a door in the hall back wall', () => {
+// Issue #259: a mission becomes a hex war room in its own component wing now, not a rect room
+// chained to the hall through the mission corridor (deleted) â€” the hall never gets a door for
+// it at all; it is reachable only through the hex structure's own Hub and walkway.
+test('a mission becomes a hex war room, reachable by name and never through the hall', () => {
   const { layout, scene } = setup();
   layout.syncWorldRooms([missionRoom()]);
   assert.equal(layout.missionRoomCount, 1);
   const room = scene.getObjectByName('mission-room-0')!;
-  const floor = room.children.find((c) => c.userData.floor)!;
-  assert.ok(floor.position.z < -13, 'north of the hall');
-  const hallWalls = scene.getObjectByName('building-hall-walls')!;
-  const northPieces = hallWalls.children.filter((w) => Math.abs(w.position.z + 13) < 0.01);
-  assert.ok(northPieces.length >= 2, 'the back wall has a door gap');
+  assert.ok(room, 'the mission room group exists');
+  assert.equal(room.children.some((c) => c.userData.floor), false, 'no floor of its own: the hex zones already draw one');
+  assert.ok(layout.roomView('room-1'), 'reachable by its own public id, the same as any other room');
 });
 
 test('agents of a mission work in its war room, their helpers stand near them, and a locked room keeps them out', () => {
@@ -863,7 +872,7 @@ test('roomView matches a mission room by its slugified title or its public id â€
   const byId = layout.roomView(projected.id)!;
   assert.deepEqual(byId, byTitle, 'the exact public id also works, for a reviewer who copies it from /api/world');
 
-  const missionRect = missionSlot(0).rect;
+  const missionRect = hexRoomRect(testHexWarRoom(0));
   assert.deepEqual([byTitle.bounds.min.x, byTitle.bounds.max.x, byTitle.bounds.min.z, byTitle.bounds.max.z],
     [missionRect.minX, missionRect.maxX, missionRect.minZ, missionRect.maxZ]);
 });
@@ -1009,7 +1018,7 @@ test('roomAt reports the room\'s own kind (issue #239: so a caller can special-c
 test('roomAt finds a mission room by its own rect, not just building rooms', () => {
   const { layout } = setup();
   layout.syncWorldRooms([{ id: 'm0', kind: 'mission', title: 'Media Plan', state: 'open', walls: {} }]);
-  const rect = missionSlot(0).rect;
+  const rect = hexRoomRect(testHexWarRoom(0));
   const centerX = (rect.minX + rect.maxX) / 2;
   const centerZ = (rect.minZ + rect.maxZ) / 2;
   const hit = layout.roomAt(centerX, centerZ)!;

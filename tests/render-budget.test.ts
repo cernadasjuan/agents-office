@@ -249,11 +249,18 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // and bookshelves, merged into the ordinary room zones) stops costing anything, and the
   // hex Library itself costs nothing new (it shares the hex Hub/Office's own walls/floors/
   // walkway zones, not a zone of its own). Net: back to 405, the plan's own predicted "close
-  // to zero" render-budget trade for this step confirmed by measurement, not assumed. Still
+  // to zero" render-budget trade for this step confirmed by measurement, not assumed.
+  // Issue #259 (steps 5/6, the component wings): this fixture's own 9 mission rooms each lose
+  // their rect floor, 4 walls, door frame and the mission corridor's own shared rect walls —
+  // all replaced by the hex structure's own `hex-walls`/`hex-floors`/`hex-walkway` zones, which
+  // already exist and cost nothing extra to grow (`tests/hex-rooms.test.ts`'s own "a wing costs
+  // nothing extra to render" test). Net measured: -5, landing at 400 — the budget rule from
+  // issue #217 ("every later step that adds hex geometry must pay for itself") confirmed again
+  // by measurement; this step actually *frees* calls rather than merely breaking even. Still
   // exactly one value across all 8 runs — the fixture's own seeded names
   // (`tests/real-size-office.ts`) never change which hair style, face state or equipped item
   // an agent lands on between runs, and the tool crib is one fixed static piece.
-  assert.deepEqual([...totals], [405], `expected every one of 8 runs to measure 405, got ${[...totals]}`);
+  assert.deepEqual([...totals], [400], `expected every one of 8 runs to measure 400, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

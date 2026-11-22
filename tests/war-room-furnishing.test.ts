@@ -171,10 +171,10 @@ test('#214: every desk and debug station turns to face the room center, not the 
 // --- Round 7 (#214) review fix: the seated station must land in the piece's own built-in chair ---
 
 test('#214 review: a desk or debug station seats its agent in the chair the piece actually renders, not across the room from it', async () => {
-  const { RoomFrame } = await import('../src/addons/building/rooms.js');
-  const { missionSlot } = await import('../src/addons/building/missionRooms.js');
-  const slot = missionSlot(0);
-  const frame = new RoomFrame(slot.rect, slot.door);
+  const { HexFrame } = await import('../src/addons/building/HexFrame.js');
+  const { testHexWarRoom } = await import('../src/addons/building/missionRooms.js');
+  const hexRoom = testHexWarRoom(0);
+  const frame = new HexFrame(hexRoom, hexRoom.openEdges[0]);
   const plan = furnishWarRoom('mission-seat-alignment', { deskLike: MAX_DESK_SLOTS, debugging: 2 });
   const deskPieces = plan.pieces.filter((p) => p.piece.name === 'desk' || p.piece.name === 'debugStation');
   for (const [i, p] of deskPieces.entries()) {

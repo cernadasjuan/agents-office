@@ -10,7 +10,7 @@ dom.window.HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, {
   get: () => () => undefined,
   set: () => true,
 })) as never;
-const { buildMissionRoom, MAX_TOMBSTONES, canvasBoard, combinedBoard } = await import('../src/addons/building/missionRooms.js');
+const { buildMissionRoom, testHexWarRoom, MAX_TOMBSTONES, canvasBoard, combinedBoard } = await import('../src/addons/building/missionRooms.js');
 const { MAX_DESK_SLOTS } = await import('../src/addons/building/warRoomFurnishing.js');
 const { tombstoneNameBatchFor } = await import('../src/addons/building/tombstoneNames.js');
 
@@ -29,27 +29,33 @@ const room = (id: string, state: 'open' | 'locked', sleepers: Array<{ id: string
   id, kind: 'mission' as const, title: id, state, sleepers, walls: { statement: 'x', docs: [], issues: [], kanban: [] },
 });
 
-function floorColor(group: THREE.Object3D): number {
-  const floor = group.children.find((child) => child.userData.floor) as THREE.Mesh;
-  return (floor.material as THREE.MeshToonMaterial).color.getHex();
-}
-
-test('one locked mission room darkens only its own floor', () => {
-  const open = buildMissionRoom(room('a', 'open'), 0);
-  const locked = buildMissionRoom(room('b', 'open'), 1);
+/** Issue #259: a hex war room's floor is part of `HexRooms.ts`'s one shared `hex-floors` zone
+ * across every room in the structure, not an independently-recolorable mesh of its own the way
+ * the old rect room's floor was — the lock sign below is the one signal a locked mission's own
+ * war room still gives (`missionRooms.ts`'s own doc comment explains why the floor tint was not
+ * ported). This replaces the old "darkens only its own floor" test with the equivalent check on
+ * that sign instead. */
+test('one locked mission room shows its own lock sign; an open one never does', () => {
+  const open = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
+  const locked = buildMissionRoom(room('b', 'open'), 1, testHexWarRoom(1));
+  const lockSignOf = (group: THREE.Object3D) => {
+    let sign: { visible: boolean } | undefined;
+    group.traverse((o) => { if (/Locked: mission closed/.test((o as { element?: HTMLElement }).element?.textContent ?? '')) sign = o as unknown as { visible: boolean }; });
+    return sign;
+  };
   open.update(room('a', 'open'));
-  const openColor = floorColor(open.group);
+  assert.equal(lockSignOf(open.group)?.visible, false);
   locked.update(room('b', 'locked'));
-  assert.notEqual(floorColor(locked.group), openColor);
-  assert.equal(floorColor(open.group), openColor);
+  assert.equal(lockSignOf(locked.group)?.visible, true);
+  assert.equal(lockSignOf(open.group)?.visible, false);
   locked.update(room('b', 'open'));
-  assert.equal(floorColor(locked.group), openColor);
+  assert.equal(lockSignOf(locked.group)?.visible, false);
 });
 
 // --- Issue #127: beds become small tombstones, identifiable and resurrectable ---
 
 test('AC1: an ended session appears as a tombstone, pickable by id', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', endedAt: '2026-11-18' }]));
   const targets = missionRoom.tombstonePickTargets();
   assert.equal(targets.length, 1);
@@ -58,7 +64,7 @@ test('AC1: an ended session appears as a tombstone, pickable by id', () => {
 });
 
 test('AC2: a session that returns removes its own tombstone by id, leaving the others in place', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1' }, { id: 'tomb-2' }, { id: 'tomb-3' }]));
   const before = new Map(missionRoom.tombstonePickTargets().map((t) => [t.id, t.object]));
   assert.equal(before.size, 3);
@@ -72,7 +78,7 @@ test('AC2: a session that returns removes its own tombstone by id, leaving the o
 });
 
 test('AC3: a tombstone carries which session it was and when it ended', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', endedAt: '2026-11-18' }]));
   const targets = missionRoom.tombstonePickTargets();
   assert.equal(targets[0].id, 'tomb-1');
@@ -85,7 +91,7 @@ test('AC3: a tombstone carries which session it was and when it ended', () => {
 // decal (`tombstoneNameplate`/`TombstoneNameBatch`, `tombstoneNames.ts`): no DOM element at all.
 
 test('AC: a tombstone engraves its session name as a texture decal, not a CSS2D sign', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
   const object = missionRoom.tombstonePickTargets()[0].object;
   const nameplate = nameplateOf(object);
@@ -95,7 +101,7 @@ test('AC: a tombstone engraves its session name as a texture decal, not a CSS2D 
 });
 
 test('AC: no floating sign of any kind remains on a tombstone', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', endedAt: '2026-11-18', name: 'tidy-otter' }]));
   // The only CSS2D-style elements left in the room are its title, lock and past-sessions
   // signs (none of which ever names a session) — not a broad "no 'Ended' text" check, which
@@ -110,14 +116,14 @@ test('AC: no floating sign of any kind remains on a tombstone', () => {
 });
 
 test('AC: a tombstone with no known session name shows a plain placeholder, not a blank', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1' }]));
   const object = missionRoom.tombstonePickTargets()[0].object;
   assert.equal(nameplateOf(object).userData.nameText, 'Ended session');
 });
 
 test('AC: a session that changes name updates the same nameplate handle, not a new object', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
   const before = missionRoom.tombstonePickTargets()[0].object;
   const beforeNameplate = nameplateOf(before);
@@ -132,7 +138,7 @@ test('AC: a session that changes name updates the same nameplate handle, not a n
 // travels with the stone for free, and a room full of tombstones still merges the same way
 // as before (`StaticMerge` only ever merges `THREE.Mesh`, never an `InstancedMesh`).
 test('AC: the nameplate is a child of the tombstone object, not a scene-level sibling', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
   const object = missionRoom.tombstonePickTargets()[0].object;
   assert.ok(object.children.includes(nameplateOf(object)));
@@ -140,7 +146,7 @@ test('AC: the nameplate is a child of the tombstone object, not a scene-level si
 
 test('AC: removing a tombstone stops the shared batch from drawing its nameplate (no leak)', () => {
   const scene = new THREE.Scene();
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   scene.add(missionRoom.group);
   missionRoom.update(room('a', 'open', [{ id: 'tomb-1', name: 'tidy-otter' }]));
   const batch = tombstoneNameBatchFor(scene);
@@ -152,7 +158,7 @@ test('AC: removing a tombstone stops the shared batch from drawing its nameplate
 });
 
 test('AC4: beyond the cap, the existing "N not shown" sign logic carries over', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   const sleepers = Array.from({ length: MAX_TOMBSTONES + 5 }, (_, i) => ({ id: `tomb-${i}` }));
   missionRoom.update(room('a', 'open', sleepers));
   assert.equal(missionRoom.tombstonePickTargets().length, MAX_TOMBSTONES, 'only the cap renders');
@@ -162,7 +168,7 @@ test('AC4: beyond the cap, the existing "N not shown" sign logic carries over', 
 });
 
 test('every tombstone keeps the same merged toon material: a room full of them still draws cheap', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   const sleepers = Array.from({ length: MAX_TOMBSTONES }, (_, i) => ({ id: `tomb-${i}` }));
   missionRoom.update(room('a', 'open', sleepers));
   const materials = new Set<THREE.Material>();
@@ -176,7 +182,7 @@ test('every tombstone keeps the same merged toon material: a room full of them s
 // --- Issue #125: war-room furnishing package ---
 
 test('AC1: a new war room has its must-have furniture from the start, built from the library', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   const names: string[] = [];
   missionRoom.group.traverse((o) => { if (typeof o.userData.piece === 'string') names.push(o.userData.piece); });
   for (const must of ['clock', 'whiteboard', 'bookshelf', 'desk', 'debugStation']) assert.ok(names.includes(must), `missing ${must}`);
@@ -187,7 +193,7 @@ test('AC1: a new war room has its must-have furniture from the start, built from
 test('desk-like furniture grows with the peak live count and never shrinks back', () => {
   // Issue #123: every war room's door opens onto the mission corridor at its own row's
   // center, so every index (not just a later ring) gets the grid's full, door-centered fit.
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   const countOf = (name: string) => {
     let n = 0;
     missionRoom.group.traverse((o) => { if (o.userData.piece === name) n++; });
@@ -215,7 +221,7 @@ test('desk-like furniture grows with the peak live count and never shrinks back'
 test('the desk grid never exceeds the room\'s physical fit', () => {
   // Every row's door sits at the column's own center (`missionSlot`, issue #123), so every
   // room's fit is the grid's full, door-centered MAX_DESK_SLOTS.
-  const missionRoom = buildMissionRoom(room('a', 'open'), 2);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 2, testHexWarRoom(2));
   missionRoom.updateCounts({ deskLike: 20, debugging: 5 });
   let total = 0;
   missionRoom.group.traverse((o) => { if (o.userData.piece === 'desk' || o.userData.piece === 'debugStation') total++; });
@@ -223,7 +229,7 @@ test('the desk grid never exceeds the room\'s physical fit', () => {
 });
 
 test('a peak that does not grow rebuilds nothing: the same furniture objects stay in the scene', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.updateCounts({ deskLike: 3, debugging: 0 });
   const before: THREE.Object3D[] = [];
   missionRoom.group.traverse((o) => { if (o.userData.piece === 'desk') before.push(o); });
@@ -235,7 +241,7 @@ test('a peak that does not grow rebuilds nothing: the same furniture objects sta
 
 test('AC5: every war-room rule-set piece is named after a factory in the furniture library, not inline geometry', async () => {
   const { PIECES } = await import('../src/furniture/index.js');
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
   const names: string[] = [];
   missionRoom.group.traverse((o) => { if (typeof o.userData.piece === 'string') names.push(o.userData.piece); });
@@ -246,12 +252,11 @@ test('AC5: every war-room rule-set piece is named after a factory in the furnitu
 // --- Issue #124: mission signs move off the door frame ---
 
 test('AC124: the title and lock signs sit on the far wall, not near the door', async () => {
-  const { missionSlot } = await import('../src/addons/building/missionRooms.js');
-  const { RoomFrame } = await import('../src/addons/building/rooms.js');
+  const { HexFrame } = await import('../src/addons/building/HexFrame.js');
   const { ROOM_SIZE: SIZE } = await import('../src/addons/building/RoomPlanner.js');
-  const missionRoom = buildMissionRoom(room('a', 'locked'), 0);
-  const slot = missionSlot(0);
-  const frame = new RoomFrame(slot.rect, slot.door);
+  const hexRoom = testHexWarRoom(0);
+  const missionRoom = buildMissionRoom(room('a', 'locked'), 0, hexRoom);
+  const frame = new HexFrame(hexRoom, hexRoom.openEdges[0]);
   const doorPoint = frame.point(0, 0);
   const farWallPoint = frame.point(0, SIZE);
 
@@ -270,7 +275,7 @@ test('AC124: the title and lock signs sit on the far wall, not near the door', a
 // --- Issue #146: a click on the issue board opens the real-link list ---
 
 test('the issue board is pickable, and its pick id points at this room', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   const target = missionRoom.issuesBoardPickTarget();
   assert.equal(target.id, 'issues:a');
   assert.ok(target.object instanceof THREE.Object3D);
@@ -301,7 +306,7 @@ const SECTION_TOP_PX = kanbanRegion.h / 2; // this region, 2 equal sections
 const uvForCanvasY = (y: number) => kanbanRegion.vBottom + (1 - y / kanbanRegion.h) * (kanbanRegion.vTop - kanbanRegion.vBottom);
 
 test('issue #223: the sessions board shares the kanban mesh (no extra draw call) and its `resolve` reaches the clicked session', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   const kanbanLikeTarget = missionRoom.issuesBoardPickTarget(); // a different mesh, for the identity check below
   const target = missionRoom.sessionsBoardPickTarget();
   assert.equal(target.id, 'sessions-board:a');
@@ -325,7 +330,7 @@ test('issue #223: the sessions board shares the kanban mesh (no extra draw call)
 });
 
 test('issue #223: no live sessions resolves to no selection anywhere on the board', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   missionRoom.updateSessions([]);
   const target = missionRoom.sessionsBoardPickTarget();
   const vs = [0.9, uvForCanvasY(SECTION_TOP_PX + 30), uvForCanvasY(SECTION_TOP_PX + 60), uvForCanvasY(SECTION_TOP_PX + 79), uvForCanvasY(SECTION_TOP_PX + 98)];
@@ -340,7 +345,7 @@ test('issue #223: no live sessions resolves to no selection anywhere on the boar
 // rule every other board redraw in this file follows. `THREE.Texture.version` only increments
 // when `needsUpdate` is set to `true`, so it stands in for "did a redraw actually happen".
 test('issue #223: the sessions board redraws only when the sessions actually change, not on every tick', () => {
-  const missionRoom = buildMissionRoom(room('a', 'open'), 0);
+  const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   const texture = (missionRoom.sessionsBoardPickTarget().object as THREE.Mesh & { material: THREE.MeshBasicMaterial }).material.map!;
 
   missionRoom.updateSessions([{ id: 'agent-1', name: 'Amelia', extras: {} }]);
@@ -366,22 +371,29 @@ test('issue #223: the sessions board redraws only when the sessions actually cha
  * meters, not fractions of this margin. */
 const WALL_STRADDLE_TOLERANCE = 0.2;
 
-test('issue #123 review: every mesh of a built war room stays inside its own room rect, at several rows', () => {
+test('issue #259: every mesh of a built hex war room stays inside its own hex interior, at several wings and ordinals', async () => {
+  const { pointInPolygon, hexRoomCorners } = await import('../src/addons/building/HexRoomPlanner.js');
   const failures: string[] = [];
   for (const index of [0, 1, 2, 3, 20]) {
-    const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index);
+    const hexRoom = testHexWarRoom(index);
+    const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index, hexRoom);
     missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
     missionRoom.group.updateMatrixWorld(true);
-    const { rect } = missionRoom.slot;
-    const bounds = new THREE.Box3(
-      new THREE.Vector3(rect.minX - WALL_STRADDLE_TOLERANCE, -1, rect.minZ - WALL_STRADDLE_TOLERANCE),
-      new THREE.Vector3(rect.maxX + WALL_STRADDLE_TOLERANCE, 10, rect.maxZ + WALL_STRADDLE_TOLERANCE),
-    );
+    // A grown copy of the room's own hex, the same "a touch larger at the corners" margin
+    // every other coarse hex-interior check in this fork already uses.
+    const grown = hexRoomCorners(hexRoom.center, hexRoom.radius + WALL_STRADDLE_TOLERANCE);
     missionRoom.group.traverse((object) => {
       if (!(object as THREE.Mesh).isMesh) return;
       const box = new THREE.Box3().setFromObject(object);
-      if (!bounds.containsBox(box)) {
-        failures.push(`room ${index}: ${object.name || object.userData.piece || '(unnamed mesh)'} at ${JSON.stringify(box)} falls outside rect ${JSON.stringify(rect)}`);
+      const corners2D = [
+        { x: box.min.x, z: box.min.z }, { x: box.min.x, z: box.max.z },
+        { x: box.max.x, z: box.min.z }, { x: box.max.x, z: box.max.z },
+      ];
+      for (const corner of corners2D) {
+        if (!pointInPolygon(corner, grown)) {
+          failures.push(`room ${index}: ${object.name || object.userData.piece || '(unnamed mesh)'} at ${JSON.stringify(box)} falls outside its hex (center ${JSON.stringify(hexRoom.center)}, radius ${hexRoom.radius})`);
+          break;
+        }
       }
     });
   }
@@ -419,12 +431,20 @@ function combinedBoardWorldCenter(mesh: THREE.Mesh, groupIndex: number): THREE.V
   return box.getCenter(new THREE.Vector3());
 }
 
-test('issue #123 review round 2: the kanban board sits flush against a side wall, in both wing columns', () => {
+// Issue #259 review: `warRoomFurnishing.ts`'s plan keeps the old rect room's exact `a`/`d`
+// coordinates (the build plan's own instruction — reuse the furniture plan as-is, not
+// rescaled), and `WAR_ROOM_HEX_RADIUS` is sized to contain that plan's deepest corners
+// (the far-wall boards at `d` close to `ROOM_SIZE`). That makes the hex interior visibly
+// bigger than the old rect's own footprint, so a board authored to sit flush against the old
+// rect's side wall (a = ±9) no longer touches the bigger hex's own, further-out wall — a known,
+// documented trade-off of this port, not a missed regression. This test checks the board still
+// sits on the room's own outer third along its side axis (same intent: "on a side wall," not
+// floating near the center), not literal wall contact.
+test('issue #259: the kanban board sits toward the hex room\'s own side, not floating near the center, at several ordinals', async () => {
   for (const index of [0, 1]) {
-    const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index);
+    const hexRoom = testHexWarRoom(index);
+    const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index, hexRoom);
     missionRoom.group.updateMatrixWorld(true);
-    const { rect, door } = missionRoom.slot;
-    assert.ok(door.side === 'east' || door.side === 'west', `expected an east/west door, got ${door.side}`);
     let combinedBoardMesh: THREE.Mesh | undefined;
     missionRoom.group.traverse((object) => {
       const mesh = object as THREE.Mesh;
@@ -438,11 +458,14 @@ test('issue #123 review round 2: the kanban board sits flush against a side wall
     if (!combinedBoardMesh) throw new Error(`room ${index}: combined board mesh (statement/docs/kanban) not found`);
     // `buildMissionRoom` passes statement, docs, kanban to `combinedBoard` in that order (group 2 = kanban).
     const position = combinedBoardWorldCenter(combinedBoardMesh, 2);
-    // A side wall runs the room's full depth at the rect's own z-extremes (the door wall's
-    // east/west rows run along z); flush against one of them means within wall thickness of
-    // minZ or maxZ, never floating meters toward the room's own z-center.
-    const distanceToNearestWall = Math.min(Math.abs(position.z - rect.minZ), Math.abs(position.z - rect.maxZ));
-    assert.ok(distanceToNearestWall < 0.2, `room ${index}: kanban board at z=${position.z} is ${distanceToNearestWall.toFixed(2)}m from the nearest side wall (rect ${JSON.stringify(rect)})`);
+    const { HexFrame } = await import('../src/addons/building/HexFrame.js');
+    const frame = new HexFrame(hexRoom, hexRoom.openEdges[0]);
+    // The board's own `a` offset (`WAR_ROOM_WIDTH / 2 - 0.12`) projected onto the frame's
+    // `along` axis: however the hex interior's own width compares to the old rect's, the board
+    // must still sit in the outer third along that axis, not drift back toward `a = 0`.
+    const toBoard = position.clone().sub(frame.point(0, 0));
+    const alongOffset = toBoard.dot(frame.along);
+    assert.ok(Math.abs(alongOffset) > hexRoom.radius * 0.3, `room ${index}: kanban board's own along-axis offset (${alongOffset.toFixed(2)}) is too close to the room's center line`);
   }
 });
 

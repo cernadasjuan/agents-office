@@ -2,98 +2,51 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { PIECES } from '../../furniture/index.js';
-import { getToonMaterial } from '../../utils/Materials.js';
 import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
 import type { PickTarget } from '../../scene/Selection.js';
 import type { WorldRoom } from '../../extensions.js';
-import { ROOM_SIZE, type Door, type Rect, type RoomSlot, type Side } from './RoomPlanner.js';
-import { buildCeiling, buildWalls, doorFrame, markCutaway, markDoorCutaway, place, roomLabel, RoomFrame, setRoomLabelText, station } from './rooms.js';
+import { ROOM_SIZE, type Rect } from './RoomPlanner.js';
+import { place, roomLabel, setRoomLabelText, station } from './rooms.js';
+import { HexFrame } from './HexFrame.js';
+import { buildHexWorld, type ComponentRole, type HexRoomGeometry, type HexWorldCounts } from './HexRoomPlanner.js';
 import { sceneOf, setTombstoneName, tombstoneNameBatchFor, tombstoneNameplate } from './tombstoneNames.js';
 import { furnishWarRoom, WAR_ROOM_WIDTH, type WarRoomCounts } from './warRoomFurnishing.js';
 import { sessionLines, sessionRows, type SessionEntry, type SessionRow } from './displayWall.js';
 
 /**
- * The mission wing: war rooms north of the hall, behind its back wall, two columns either
- * side of the mission corridor, stacked further north one row at a time.
+ * The mission wing (issue #259): every war room is a hex tile, one per component (the
+ * `HexPlanner.SECTOR_TABLE`'s own sector-to-role lookup, `componentWing.ts`'s `componentForRepo`
+ * decides which one), reached only by its own stair and walkway — never a door, never a
+ * corridor. `HexRooms.ts`'s `buildHexOffice` already builds every room's floor, walls and
+ * walkway as part of the hex structure's own shared, merged zones (hub, office and library
+ * included); this module only furnishes a war room's interior (its furniture, boards, signs
+ * and tombstones) inside the hex room `BuildingLayout` hands it.
  *
- * Issue #123 review: before this, only row 0 opened directly onto the hall; every row after
- * it chained onto the room in front of it through `extraDoors` (`BuildingLayout.syncWorldRooms`),
- * so a deep room was reachable only by crossing another room's closed door. Fixed by running
- * the mission corridor (`missionCorridorRect`) up the old shared boundary between the two
- * columns (x = -9) and giving every row's room a door straight onto it, on the column's own
- * outward-facing side wall — never on the wall it shares with the row before or after it. The
- * corridor itself opens into the hall once, at its own south end (`MISSION_CORRIDOR_DOOR`), so
- * the hall still reads as the one place every wing ultimately connects back to.
- *
- * Issue #193: a war room's door-wall length is `WAR_ROOM_WIDTH` (18), wider than a generic
- * room's `ROOM_SIZE` (12, which stays its depth), so the desk grid fits 6-8 desks instead of
- * 4. Issue #123 review (blocking defect 1): that door-wall length is the rect's extent
- * *parallel* to the door, not always the rect's x-span — now the door sits on the east/west
- * wall, `WAR_ROOM_WIDTH` is each row's own z-span (the wing's growth direction), and the
- * rect's x-span (the depth from the door to the far wall) is `ROOM_SIZE`, same as any other
- * room's depth. Column 1's east edge (x <= `CORRIDOR_MAX_X + ROOM_SIZE`, well under 15) stays
- * clear of the east-side rented ring (`RoomPlanner.ts`'s `slotFor`, ring 0 index 2, x >= 15, z
- * in [-18, -6]) at any room count — the corridor only ever grows north (more negative z),
- * never widens, so this margin never erodes. Column 0's west edge is unconstrained by the
- * west-side rented ring: that ring sits at z in [-11, 13], never overlapping a war room's
- * z <= -13, by construction (`tests/mission-wing-overlap.test.ts`).
+ * Deleted here (issue #259, the budget rule from issue #217 — this step must pay for itself in
+ * draw calls, not add a cap raise): the rect mission corridor (`missionCorridorRect`,
+ * `MISSION_CORRIDOR_DOOR`, `MISSION_CORRIDOR_HALL_DOOR`, `WING_COLUMNS`, `missionSlot`,
+ * `missionCorridorFloor`) PR 204 built. A war room's own per-room floor tint on lock (the rect
+ * version's `floor.material` swap, `FLOOR_OPEN`/`FLOOR_LOCKED`) is deliberately not ported: a
+ * hex war room's floor is part of `HexRooms.ts`'s one shared `hex-floors` merged zone across
+ * every room in the whole structure (hub, office, library and every wing room, issue #258/#259),
+ * rebuilt wholesale each time a wing grows (`BuildingLayout.rebuildHexOffice`) — tracking one
+ * individually-recolorable floor mesh through that teardown-and-rebuild cycle is not worth the
+ * staleness risk the already-existing "Locked: mission closed" sign (below) already covers the
+ * same signal for.
  */
-export const MISSION_CORRIDOR_WIDTH = 5;
-const CORRIDOR_CENTER_X = -9;
-const CORRIDOR_MIN_X = CORRIDOR_CENTER_X - MISSION_CORRIDOR_WIDTH / 2;
-const CORRIDOR_MAX_X = CORRIDOR_CENTER_X + MISSION_CORRIDOR_WIDTH / 2;
-
-/** The mission corridor's own door into the hall (issue #123): fixed, since the corridor's south
- * frontage never moves as the wing grows north — only its far (north) end ever extends. */
-export const MISSION_CORRIDOR_DOOR: Door = { side: 'south', at: CORRIDOR_CENTER_X };
-/** The hall's own matching door for `MISSION_CORRIDOR_DOOR` (the wall it shares with the corridor). */
-export const MISSION_CORRIDOR_HALL_DOOR: Door = { side: 'north', at: CORRIDOR_CENTER_X };
-
-// Issue #123 review (blocking defect 1): a war room's door-wall length (the `a` axis every
-// desk-grid/furniture position in `warRoomFurnishing.ts` is authored against) is `WAR_ROOM_WIDTH`,
-// not `ROOM_SIZE` — true when the door sat on the north/south wall (that wall's own length is
-// the rect's x-span), and still true now the door sits on the east/west wall instead (that
-// wall's own length is the rect's z-span). So each row's rect runs `WAR_ROOM_WIDTH` along z
-// (parallel to its door, the wing's growth direction) and only `ROOM_SIZE` along x (the depth
-// from the door to the far wall) — the two dimensions from the pre-#123 room, kept on the same
-// meaning they always had, just carried by the other world axis now that the door moved.
-const WING_COLUMNS: Array<{ minX: number; maxX: number; side: Side }> = [
-  { minX: CORRIDOR_MIN_X - ROOM_SIZE, maxX: CORRIDOR_MIN_X, side: 'east' },
-  { minX: CORRIDOR_MAX_X, maxX: CORRIDOR_MAX_X + ROOM_SIZE, side: 'west' },
-];
-
-export function missionSlot(index: number): RoomSlot {
-  const column = WING_COLUMNS[index % WING_COLUMNS.length];
-  const row = Math.floor(index / WING_COLUMNS.length);
-  const maxZ = -13 - row * WAR_ROOM_WIDTH;
-  const rect = { minX: column.minX, maxX: column.maxX, minZ: maxZ - WAR_ROOM_WIDTH, maxZ };
-  // Issue #123: every row's door opens onto its own frontage on the mission corridor, never
-  // onto the row before or after it.
-  const at = (rect.minZ + rect.maxZ) / 2;
-  return { rect, door: { side: column.side, at }, outward: 'north', ring: row };
-}
 
 /**
- * The mission corridor's own rect (issue #123): the one shared frontage every war room's door
- * opens directly onto. Its south end is fixed, flush against the hall's own back wall; its
- * north end grows one `WAR_ROOM_WIDTH` further out each time a new row is rented (the row's
- * own height, issue #123 review defect 1), so there is no room-count cap on the wing it serves.
+ * A deterministic hex war room for a bare index (issue #259): one dedicated wing (`tooling` by
+ * default, an arbitrary pick), grown to `index + 1` rooms, returning the index-th one. This is
+ * the test/fixture convenience `missionSlot(index)` used to be before this port — production
+ * code (`BuildingLayout.syncWorldRooms`) never calls this; it assigns each mission's own hex
+ * room from the real per-wing counts via `componentForRepo`, so a mission actually lands in the
+ * wing its own repo maps to, not always `tooling`.
  */
-export function missionCorridorRect(roomCount: number): Rect {
-  const rows = Math.max(1, Math.ceil(roomCount / WING_COLUMNS.length));
-  return { minX: CORRIDOR_MIN_X, maxX: CORRIDOR_MAX_X, minZ: -13 - rows * WAR_ROOM_WIDTH, maxZ: -13 };
-}
-
-/** The mission corridor's own floor (issue #123), the same open-mission tint every war room's
- * floor starts in, so the corridor reads as part of the same wing, not a separate room. */
-export function missionCorridorFloor(rect: Rect): THREE.Mesh {
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(rect.maxX - rect.minX, rect.maxZ - rect.minZ), getToonMaterial(FLOOR_OPEN));
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.set((rect.minX + rect.maxX) / 2, 0.005, (rect.minZ + rect.maxZ) / 2);
-  floor.receiveShadow = true;
-  floor.userData.floor = true;
-  return floor;
+export function testHexWarRoom(index: number, wing: ComponentRole = 'tooling'): HexRoomGeometry {
+  const counts: HexWorldCounts = { library: 1, portal: 0, agents: 0, tooling: 0, infra: 0, ...{ [wing]: index + 1 } };
+  return buildHexWorld(counts).rooms.filter((room) => room.role === wing)[index]!;
 }
 
 export const MAX_TOMBSTONES = 12;
@@ -325,10 +278,19 @@ function sign(text: string, position: THREE.Vector3, rect: Rect, hoverOnly: bool
   return label;
 }
 
+/** A hex room's own AABB, for `roomLabel`/`sign`'s `rect` parameter (a detail sign's proximity
+ * check, `LabelDetail.ts`): the same conservative "a touch larger than the hex itself at the
+ * corners" bound `HexRooms.ts`'s library marker already uses for the same purpose. */
+function hexBounds(room: HexRoomGeometry): Rect {
+  const xs = room.corners.map((c) => c.x);
+  const zs = room.corners.map((c) => c.z);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
+}
+
 export interface MissionRoom {
   id: string;
   index: number;
-  slot: RoomSlot;
+  hexRoom: HexRoomGeometry;
   group: THREE.Group;
   stations: Map<string, Station>;
   locked: boolean;
@@ -361,12 +323,13 @@ export interface MissionRoom {
   sessionsBoardPickTarget(): PickTarget;
 }
 
-const FLOOR_OPEN = 0x6f7f9a;
-const FLOOR_LOCKED = 0x4a4f5a;
-
-export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?: WarRoomCounts): MissionRoom {
-  const slot = missionSlot(index);
-  const frame = new RoomFrame(slot.rect, slot.door);
+export function buildMissionRoom(room: WorldRoom, index: number, hexRoom: HexRoomGeometry, initialCounts?: WarRoomCounts): MissionRoom {
+  // Issue #259: the room's own stair, the one open edge facing its parent toward the hub —
+  // every non-office hex room has exactly one (`HexRoomPlanner.buildHexWorld`'s own doc
+  // comment; `tests/hex-world.test.ts`'s own invariant). It stands in for "the door" `HexFrame`
+  // needs, the same way a rect room's `RoomFrame` took its one door.
+  const frame = new HexFrame(hexRoom, hexRoom.openEdges[0]);
+  const rect = hexBounds(hexRoom);
   const group = new THREE.Group();
   group.name = `mission-room-${index}`;
   markStatic(group, { zone: 'missions', castShadow: false });
@@ -374,29 +337,17 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   const key = (n: number) => `mission${index}_seat_${n}`;
   const type = `room:${room.id}`;
 
-  // Issue #123 review round 2: the door-wall's own length (the `a` axis every along-the-wall
-  // mount, the kanban board and the closed-door slab both included, is authored against) is
-  // the rect's x-span for a north/south door, its z-span for an east/west one — same rule
-  // `RoomFrame` uses for depth, just the complementary dimension.
-  const doorIsNorthSouth = slot.door.side === 'north' || slot.door.side === 'south';
-  const doorWallLength = doorIsNorthSouth ? slot.rect.maxX - slot.rect.minX : slot.rect.maxZ - slot.rect.minZ;
-
-  // Issue #193: a war room's own width (`WAR_ROOM_WIDTH`) is wider than its depth
-  // (`ROOM_SIZE`, unchanged), so the floor is the slot's real rect, not a square.
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(slot.rect.maxX - slot.rect.minX, slot.rect.maxZ - slot.rect.minZ), getToonMaterial(FLOOR_OPEN));
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.copy(frame.point(0, ROOM_SIZE / 2, 0.005));
-  floor.userData.floor = true;
-  group.add(floor);
-  const walls = buildWalls(slot.rect, [slot.door]);
-  walls.name = 'room-walls';
-  markCutaway(walls);
-  group.add(walls);
-  const doorway = doorFrame(slot.rect, slot.door, FLOOR_OPEN);
-  markDoorCutaway(doorway);
-  group.add(doorway);
-  group.add(buildCeiling(slot.rect));
-  const label = roomLabel(room.title, frame.point(0, ROOM_SIZE / 2), slot.rect);
+  // Issue #259: a hex war room's floor and walls are built once, generically, as part of
+  // `HexRooms.ts`'s own shared `hex-floors`/`hex-walls` zones (every room in the whole
+  // structure, hub/office/library/every wing room, merged into the same two draw calls) — this
+  // function only furnishes the interior. No ceiling (round 7: hex rooms have none) and no
+  // door frame (round 7: a hex room's only entrance is its stair, never a door).
+  //
+  // The old rect room's `doorWallLength` was always exactly `WAR_ROOM_WIDTH` (its door sat on
+  // the east/west wall, whose own length is the rect's z-span — a war room's own fixed
+  // dimension, not something that varied by door side the way a generic room's did).
+  const doorWallLength = WAR_ROOM_WIDTH;
+  const label = roomLabel(room.title, frame.point(0, ROOM_SIZE / 2), rect);
   group.add(label);
 
   // The table and its seats; more agents stand around it
@@ -508,7 +459,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
 
   // Issue #124: the title and lock signs sit on the far wall, over the statement board, not
   // near the door frame (the narration: "they are in the door frames so it's kind of weird").
-  const title = sign(room.title, frame.point(0, ROOM_SIZE - 0.3, 2.6), slot.rect, false);
+  const title = sign(room.title, frame.point(0, ROOM_SIZE - 0.3, 2.6), rect, false);
   group.add(title);
   const tombstonesGroup = new THREE.Group();
   group.add(tombstonesGroup);
@@ -518,25 +469,11 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   // floating `CSS2DObject`): it moves with the stone for free, and the scene's one shared
   // `TombstoneNameBatch` draws every tombstone's name in a single call regardless of count.
   const tombstones = new Map<string, { object: THREE.Object3D; nameplate: THREE.Object3D; name?: string }>();
-  const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.4, 0.1), getToonMaterial(0x5a4a3a));
-  // Issue #123 review (blocking defect 2): `door.at` is a z-coordinate for an east/west door
-  // (the gap axis `wallPieces` uses for that side), not always an x-coordinate — subtracting
-  // the rect's x-center unconditionally put the closed-door slab in the wrong spot once the
-  // corridor fix moved war room doors onto the east/west wall.
-  const doorAlongCenter = doorIsNorthSouth
-    ? (slot.rect.minX + slot.rect.maxX) / 2
-    : (slot.rect.minZ + slot.rect.maxZ) / 2;
-  door.position.copy(frame.point(slot.door.at - doorAlongCenter, 0.02, 1.2));
-  // The slab's own width (2.4) runs along its local x axis; it only lines up with the door
-  // wall's own length (the rect's x-span) for a north/south door. An east/west door's wall
-  // runs along z instead, so the slab needs a quarter turn to stay flush with it, not poke
-  // 1.2 m out the room's side wall (issue #123 review, found while fixing blocking defect 2).
-  door.rotation.y = doorIsNorthSouth ? 0 : Math.PI / 2;
-  door.visible = false;
-  // The closed door stands in the doorway: it drops with the walls in the overview
-  markCutaway(door);
-  group.add(door);
-  const lockSign = sign('Locked: mission closed', frame.point(0, ROOM_SIZE - 0.3, 2.3), slot.rect, false, 'rgba(120, 40, 40, 0.9)');
+  // Issue #259: a hex room has no door to close — its only entrance is its own stair, straight
+  // up to the walkway (round 7: "rooms without doors"). The rect version's closed-door slab
+  // (a mesh blocking the doorway when a mission locks) has no hex equivalent; `lockSign` below
+  // is the one signal a locked mission's war room still gives.
+  const lockSign = sign('Locked: mission closed', frame.point(0, ROOM_SIZE - 0.3, 2.3), rect, false, 'rgba(120, 40, 40, 0.9)');
   lockSign.visible = false;
   group.add(lockSign);
   let sleepersSign: CSS2DObject | null = null;
@@ -579,7 +516,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
   rebuildFurniture();
 
   const result: MissionRoom = {
-    id: room.id, index, slot, group, stations, locked: false, title: room.title,
+    id: room.id, index, hexRoom, group, stations, locked: false, title: room.title,
     get peakCounts() {
       return peakCounts;
     },
@@ -615,10 +552,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
       result.title = next.title;
       title.element.textContent = next.title;
       setRoomLabelText(label, next.title);
-      door.visible = result.locked;
       lockSign.visible = result.locked;
-      // Swap the cached material, never recolor it: every open mission floor shares it
-      floor.material = getToonMaterial(result.locked ? FLOOR_LOCKED : FLOOR_OPEN);
       boards.statement.draw('Mission', (next.walls.statement ?? '').match(/.{1,44}(\s|$)/g)?.map((line) => line.trim()) ?? []);
       boards.docs.draw('Documents', next.walls.docs ?? []);
       boards.issues.draw('Issues', (next.walls.issues ?? []).map((issue) => `${issue.state === 'closed' ? '✓' : '○'} #${issue.number} ${issue.title}`));
@@ -667,7 +601,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, initialCounts?:
       const extra = sleepers.length - shown.length;
       if (sleepersSign) group.remove(sleepersSign);
       sleepersSign = sleepers.length > 0
-        ? sign(`${sleepers.length} past session${sleepers.length === 1 ? '' : 's'}${extra > 0 ? ` (+${extra} not shown)` : ''}`, frame.point(-ROOM_SIZE / 2 + 1.2, 1.4, 1.8), slot.rect, true)
+        ? sign(`${sleepers.length} past session${sleepers.length === 1 ? '' : 's'}${extra > 0 ? ` (+${extra} not shown)` : ''}`, frame.point(-ROOM_SIZE / 2 + 1.2, 1.4, 1.8), rect, true)
         : null;
       if (sleepersSign) group.add(sleepersSign);
     },

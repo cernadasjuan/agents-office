@@ -175,8 +175,11 @@ function buildKitchenCorner(): THREE.Group {
  * the rect room keeps its existing behavior and tests unchanged). Standing a third of the way
  * in from the open (stair) edge, facing the center, the same framing rule `roomViewFromSlot`
  * uses for a rect room's door wall.
+ *
+ * Exported (issue #259): a mission war room is a hex room too — `BuildingLayout.roomView`/
+ * `roomAt` use this same framing for one, rather than reimplementing it.
  */
-function hexRoomView(room: HexRoomGeometry, kind?: string): { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 }; kind?: string } {
+export function hexRoomView(room: HexRoomGeometry, kind?: string): { bounds: THREE.Box3; standing: { position: THREE.Vector3; lookAt: THREE.Vector3 }; kind?: string } {
   const xs = room.corners.map((c) => c.x);
   const zs = room.corners.map((c) => c.z);
   const bounds = new THREE.Box3(

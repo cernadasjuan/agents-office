@@ -22,7 +22,7 @@ const {
 const { buildRealSizeOffice } = await import('./real-size-office.js');
 const { IsometricController } = await import('../src/scene/IsometricCamera.js');
 const { overviewBounds } = await import('../src/scene/OverviewCamera.js');
-const { buildMissionRoom } = await import('../src/addons/building/missionRooms.js');
+const { buildMissionRoom, testHexWarRoom } = await import('../src/addons/building/missionRooms.js');
 const { applyCutaway, applyCeilingCut, OVERVIEW_WALL_HEIGHT } = await import('../src/scene/Cutaway.js');
 const { StaticBatch, STATIC_SOURCE_LAYER } = await import('../src/scene/StaticMerge.js');
 const { FrameLoop } = await import('../src/scene/FrameLoop.js');
@@ -234,14 +234,19 @@ test('every room label of the scene draws in one instanced call; a hidden label 
   const other = batch.labels.find((label) => label !== inside)!;
   batch.mesh.getMatrixAt(batch.labels.indexOf(other), matrix);
   const position = new THREE.Vector3().setFromMatrixPosition(matrix);
-  assert.ok(position.distanceTo(other.getWorldPosition(new THREE.Vector3())) < 1e-6, 'an instance stands at its label');
+  // Issue #259: the hex structure (and so its Library label, a candidate for `other`) sits a
+  // few hundred units from the origin; the instance matrix's own storage
+  // (`THREE.InstancedBufferAttribute`, a `Float32Array`) only carries single-precision at that
+  // magnitude, so a position round-tripped through it drifts by a few times 1e-6, not the
+  // double-precision 1e-6 this bound assumed when every label lived near the origin.
+  assert.ok(position.distanceTo(other.getWorldPosition(new THREE.Vector3())) < 1e-4, 'an instance stands at its label');
   assert.ok(Math.abs(new THREE.Vector3().setFromMatrixScale(matrix).y - other.scale.y) < 1e-6, 'with the plate size');
   assert.equal((batch.mesh.material as THREE.ShaderMaterial).depthTest, true, 'walls hide labels in first person');
 });
 
 test('a room label shows its full name when zoomed in or with labels: all', () => {
   const scene = new THREE.Scene();
-  const room = buildMissionRoom(missionRoom('Roadmap for the fork'), 0);
+  const room = buildMissionRoom(missionRoom('Roadmap for the fork'), 0, testHexWarRoom(0));
   scene.add(room.group);
   const camera = new THREE.PerspectiveCamera(60, 1.6, 0.1, 500);
   camera.position.set(0, 60, 40);
@@ -265,7 +270,7 @@ test('a room label shows its full name when zoomed in or with labels: all', () =
 
 test('the sign list is collected once, and again after sceneChanged', () => {
   const scene = new THREE.Scene();
-  scene.add(buildMissionRoom(missionRoom('One'), 0).group);
+  scene.add(buildMissionRoom(missionRoom('One'), 0, testHexWarRoom(0)).group);
   const camera = new THREE.PerspectiveCamera(60, 1.6, 0.1, 500);
   camera.position.set(0, 60, 40);
   camera.updateMatrixWorld();
@@ -280,7 +285,7 @@ test('the sign list is collected once, and again after sceneChanged', () => {
   controller.refresh();
   controller.refresh();
   assert.equal(traversals, 1);
-  const late = buildMissionRoom(missionRoom('Two'), 1);
+  const late = buildMissionRoom(missionRoom('Two'), 1, testHexWarRoom(1));
   scene.add(late.group);
   controller.sceneChanged();
   controller.refresh();
@@ -302,7 +307,7 @@ test('every room of the building, and every war room, gets a label', () => {
 });
 
 test('a war room label follows the mission title', () => {
-  const room = buildMissionRoom(missionRoom('Old title'), 0);
+  const room = buildMissionRoom(missionRoom('Old title'), 0, testHexWarRoom(0));
   room.update({ ...missionRoom('Old title'), title: 'New title' });
   assert.equal(labelsIn(room.group)[0].userData.roomLabel, 'New title');
 });
@@ -400,7 +405,10 @@ test('every doorway of the building has a frame, outer rings and war rooms inclu
   const roomCount = layout.roomKinds.length;
   assert.ok(roomCount >= 8, `an outer ring exists (${roomCount} rooms)`);
   const frames = framesIn(scene);
-  assert.equal(frames.length, roomCount + 3, 'one frame per room door');
+  // Issue #259: a war room is a hex room now, with no door frame at all (round 7: "rooms
+  // without doors" — its only entrance is its own stair). The "+3" below used to count one
+  // frame per mission room; dropped, since none of them build one any more.
+  assert.equal(frames.length, roomCount, 'one frame per rect room door, none for the hex war rooms');
   for (let index = 0; index < roomCount; index++) {
     const slot = slotFor(index);
     const room = scene.getObjectByName(`room-${index}-${layout.roomKinds[index]}`)!;
@@ -491,7 +499,11 @@ test('room walls, door frames and hall walls draw merged in zones the overview l
   const statics = new StaticBatch(scene);
   frameOf(scene, statics, false);
   const sources = sourceWalls(scene);
-  assert.ok(sources.length > 20, `${sources.length} wall meshes`);
+  // Issue #259: a mission war room is a hex room now — its own walls live in `HexRooms.ts`'s
+  // `hex-walls` zone, which `sourceWalls` (named `room-walls`/`building-hall-walls`/
+  // `door-frame` only) never scans. The bound here used to include the mission corridor's and
+  // this room's own rect wall pieces; now it only counts the hall and the base rect rooms.
+  assert.ok(sources.length > 10, `${sources.length} wall meshes`);
   for (const mesh of sources) assert.ok(mesh.layers.isEnabled(STATIC_SOURCE_LAYER) && !mesh.layers.isEnabled(0), `${mesh.name} draws merged`);
   const tops = drawnWallTops(scene);
   assert.ok(tops.length > 0, 'the walls draw from cutaway zones');
@@ -657,11 +669,17 @@ test('maxDistance overrides FIRST_PERSON_SIGN_DISTANCE in first person, for a si
 });
 
 test('war room signs are marked as detail signs with their room', () => {
-  const room = buildMissionRoom(missionRoom('Roadmap', 2), 0);
+  const hexRoom = testHexWarRoom(0);
+  const room = buildMissionRoom(missionRoom('Roadmap', 2), 0, hexRoom);
   const signs = room.group.children.filter((child): child is CSS2DObject => child instanceof CSS2DObject);
   assert.ok(signs.length >= 2);
+  // Issue #259: the sign's own `rect` is the hex room's AABB now, the same conservative bound
+  // `HexRooms.ts`'s library marker and `missionRooms.ts`'s own `hexBounds` helper both use.
+  const xs = hexRoom.corners.map((c) => c.x);
+  const zs = hexRoom.corners.map((c) => c.z);
+  const expectedRect = { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
   for (const sign of signs) {
-    assert.deepEqual(sign.userData.detailSign.rect, room.slot.rect);
+    assert.deepEqual(sign.userData.detailSign.rect, expectedRect);
     assert.equal(sign.element.dataset.sign, 'mission');
   }
   const sleepers = signs.find((sign) => /past session/.test(sign.element.textContent ?? ''))!;
@@ -670,7 +688,7 @@ test('war room signs are marked as detail signs with their room', () => {
 
 test('the label controller hides war room signs in the default overview and shows them when zoomed in', () => {
   const scene = new THREE.Scene();
-  const room = buildMissionRoom(missionRoom('Roadmap', 2), 0);
+  const room = buildMissionRoom(missionRoom('Roadmap', 2), 0, testHexWarRoom(0));
   scene.add(room.group);
   const camera = new THREE.PerspectiveCamera(60, 16 / 10, 0.1, 500);
   camera.position.set(0, 60, 40);

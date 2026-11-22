@@ -12,22 +12,58 @@ import {
   claimHexRegion, hexNeighbors, hexPixel, hexKey, ringOf,
   type ComponentRole, type GrowthRequest, type HexCell, type HexPoint, type HexSlot, type RoomRole,
 } from './HexPlanner.js';
+export type { ComponentRole, RoomRole } from './HexPlanner.js';
 import { OFFICE } from '../../utils/Constants.js';
 
 /** World offset of the whole hex structure, clear of the existing rect building (whose rooms
  * grow outward from the origin in every direction) so the two coexist without touching, per
  * step 2's AC ("side by side with the old rect rooms, which keep working unconverted"). */
-export const HEX_OFFSET: HexPoint = { x: 300, z: 0 };
+/**
+ * Issue #259 review: an x-only offset coexists with the rect building fine while only the Hub,
+ * Office and Library exist (every sector that could actually grow pointed away from the rect
+ * building's own origin-centered spread) — but the office/library sector (0, angle 0°, `+x`)
+ * and the `tooling` wing's own sector (3, angle 180°, `-x`) sit on exactly opposite sides of the
+ * Hub. A busy `tooling` wing grows straight back down the same x-axis this offset sits on, and
+ * at a realistic room count (`tests/mission-wing-overlap.test.ts`'s own 42-room stress case,
+ * matching `tests/mission-corridor-render-budget.test.ts`'s scale) it crosses back through
+ * x = 0 and overlaps the rect building's own rented rooms. A `z` offset, not just `x`, moves
+ * every sector's own growth ray clear of the rect building's origin-centered spread (which
+ * stays within roughly z = ±100 even at dozens of rented rooms): the Hub sits off to the side
+ * in both axes, so no sector's ray, however far it grows, re-enters that spread.
+ */
+export const HEX_OFFSET: HexPoint = { x: 300, z: 200 };
 /** Distance between neighboring lattice cell centers. Rooms are deliberately gapped (their
  * own drawn radius is smaller than this), since nothing but a walkway ever bridges two of
  * them — unlike the round 3 spike's decorative mosaic, where tiles touch edge to edge. Large
  * enough that each room's own stair ramp (`RAMP_LENGTH`) clears the other room's wall with a
- * real walkway span left over in between. */
-export const LATTICE_SPACING = 24;
-/** An ordinary hex room's own floor/wall circumradius. */
+ * real walkway span left over in between, and (issue #259) wide enough for two neighboring
+ * `WAR_ROOM_HEX_RADIUS` wing rooms to sit side by side without overlapping. */
+export const LATTICE_SPACING = 34;
+/** An ordinary hex room's own floor/wall circumradius (the Hub, Office and Library). */
 export const ROOM_RADIUS = 7;
 /** The Hub's own radius: a larger hex, the old `HALL`'s role. */
 export const HUB_RADIUS = 10;
+/**
+ * A component-wing war room's own circumradius (issue #259). Bigger than `ROOM_RADIUS`: a war
+ * room reuses `warRoomFurnishing.ts`'s existing furniture plan as-is (the same `a`/`d`
+ * coordinates the old rectangular `WAR_ROOM_WIDTH` (18) x `ROOM_SIZE` (12) room used), and a
+ * hex interior that size needs a bigger circumradius than a plain hex room to actually contain
+ * every piece. A hand-picked point check (every desk slot, wall board, plant spot, the meeting
+ * table ring and the tombstone strip) found 13 enough with a 0.3 m wall margin to spare — but
+ * `tests/mission-rooms.test.ts`'s own exhaustive mesh-bounds check (every mesh a built room
+ * actually renders, at full desk/debug counts, several wings and ordinals) is the real gate:
+ * it found a few outer pieces (plants, the low divider) still poking past 13-15. 16 is the
+ * measured value that check passes at, not a guessed round number. A hex interior this much
+ * bigger than the old rect's own footprint does mean a board authored to sit flush against the
+ * old rect's side wall no longer touches this bigger hex's own wall — see
+ * `tests/mission-rooms.test.ts`'s own "toward the hex room's own side" test and comment.
+ */
+export const WAR_ROOM_HEX_RADIUS = 16;
+
+/** Whether a hex room role is one of the 4 component wings (not the hub, office or library). */
+export function isComponentRole(role: RoomRole): role is ComponentRole {
+  return role !== 'hub' && role !== 'office' && role !== 'library';
+}
 /** Wall height, shared with the rect building's rooms (`rooms.ts`'s `WALL_HEIGHT`, issue #176:
  * every room is as tall as the main room — `OFFICE.height` directly here, so this stays pure
  * geometry with no Three.js import chain). Hex rooms have no ceiling (round 7 decision), so
@@ -300,7 +336,7 @@ export function buildHexWorld(counts: HexWorldCounts): HexOfficeLayout {
   const rooms = new Map<string, HexRoomGeometry>();
   for (const slot of slots) {
     const center = worldCenter(slot.cell);
-    const radius = slot.role === 'hub' ? HUB_RADIUS : ROOM_RADIUS;
+    const radius = slot.role === 'hub' ? HUB_RADIUS : isComponentRole(slot.role) ? WAR_ROOM_HEX_RADIUS : ROOM_RADIUS;
     rooms.set(hexKey(slot.cell), { center, radius, openEdges: [], corners: hexRoomCorners(center, radius), role: slot.role, slot });
   }
 

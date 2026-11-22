@@ -9,15 +9,7 @@ import { buildCeiling, buildRoom, buildWalls, markCutaway, QUEUE_COUNT_SIGN, ROO
 import { deskCameraPose, deskTalkSpotPose, monitorWorldCorners } from './deskGeometry.js';
 import { showLoadedPortrait } from './portrait.js';
 import { roomLabel, roomLabelBatchFor } from './roomLabels.js';
-import {
-  buildMissionRoom,
-  MISSION_CORRIDOR_DOOR,
-  MISSION_CORRIDOR_HALL_DOOR,
-  missionCorridorFloor,
-  missionCorridorRect,
-  missionSlot,
-  type MissionRoom,
-} from './missionRooms.js';
+import { buildMissionRoom, type MissionRoom } from './missionRooms.js';
 import { tombstoneNameBatchFor } from './tombstoneNames.js';
 import type { WarRoomCounts } from './warRoomFurnishing.js';
 import type { SessionEntry } from './displayWall.js';
@@ -29,7 +21,9 @@ import { createStool } from '../../furniture/Stool.js';
 import type { PickTarget } from '../../scene/Selection.js';
 import { FIGURE_EYE_HEIGHT } from '../../characters/StickFigureParts.js';
 import { createMissionsBoard, placeMissionsBoard, type MissionBoardEntry } from './missionsBoard.js';
-import { buildHexOffice } from './HexRooms.js';
+import { buildHexOffice, hexRoomView, type BuiltHexOffice } from './HexRooms.js';
+import { pointInPolygon, type ComponentRole, type HexWorldCounts } from './HexRoomPlanner.js';
+import { componentForRepo } from './componentWing.js';
 
 /**
  * Work that happens at the agent's own desk. Everything else is a trip. Planning,
@@ -169,9 +163,13 @@ export class BuildingLayout implements LayoutStrategy {
   private agents = new Map<string, AgentState>();
   private rooms: RoomRecord[] = [];
   private hallWalls: THREE.Group | null = null;
-  /** Issue #123: the one shared frontage every war room's door opens onto, grown each time a new row is rented. */
-  private missionCorridor: THREE.Group | null = null;
   private missionRooms = new Map<string, MissionRoom>();
+  /** Issue #259: how many hex rooms each wing (and the Library) has actually claimed so far —
+   * `rebuildHexOffice` passes this straight to `buildHexWorld`. The Library stays fixed at 1
+   * (its own document-driven growth is a separate, later design, out of this step's scope);
+   * the 4 component wings grow one room at a time as `syncWorldRooms` discovers a new mission,
+   * `componentForRepo` deciding which wing. */
+  private missionWingCounts: HexWorldCounts = { library: 1, portal: 0, agents: 0, tooling: 0, infra: 0 };
   private now: () => number;
   private wallClock: () => number;
   private dwellMs: number;
@@ -181,12 +179,17 @@ export class BuildingLayout implements LayoutStrategy {
   private lastMissionsBoardRefresh = -Infinity;
   private missionBoardEntries: MissionBoardEntry[] = [];
   private missionsBoard = createMissionsBoard();
-  /** Issue #218 steps 2/3: the hex Hub and Office, built side by side with the rect rooms
-   * above, which keep working unconverted until a later step migrates them. */
-  private hexOffice = buildHexOffice();
+  /** Issue #218 steps 2/3, grown by #259: the hex Hub, Office, Library and every component
+   * wing room — `rebuildHexOffice` tears this down and rebuilds it whenever `missionWingCounts`
+   * changes, the same "rebuild the whole merged group" pattern `rebuildHallWalls`/the old
+   * `rebuildMissionCorridor` already used for the rect building's own shared zones. */
+  private hexOffice!: BuiltHexOffice;
+  /** Issue #259 review: the one Library label object, reused across every `rebuildHexOffice`
+   * rebuild (see `addHexLibraryStations`'s own comment) rather than leaking a fresh one into
+   * `RoomLabelBatch` each time. */
+  private hexLibraryLabel: THREE.Object3D | undefined;
 
   constructor(private scene: THREE.Scene, private stations: Map<string, Station>, options: BuildingOptions = {}) {
-    this.scene.add(this.hexOffice.group);
     this.now = options.now ?? (() => performance.now());
     this.wallClock = options.wallClock ?? (() => Date.now());
     this.dwellMs = options.dwellMs ?? DEFAULT_DWELL_MS;
@@ -194,6 +197,7 @@ export class BuildingLayout implements LayoutStrategy {
     this.floor = options.floor;
     this.migrateLegacyRooms();
     this.hideHallSideWalls();
+    this.rebuildHexOffice();
     placeMissionsBoard(this.missionsBoard.mesh, this.scene);
     this.missionsBoard.draw([], this.wallClock());
     // `rememberedRooms` always returns the office first (issue #192: it is the lobby, not one
@@ -203,8 +207,20 @@ export class BuildingLayout implements LayoutStrategy {
     // the hex one behind the Office (`addHexLibraryStations` below). A remembered room list
     // from before this step may still carry 'library' from local storage; harmless to drop.
     for (const kind of this.rememberedRooms().filter((kind) => kind !== 'library')) this.addRoom(kind, false);
-    this.addHexLibraryStations();
     this.saveRooms();
+  }
+
+  /**
+   * Issue #259: tears down the current hex structure (if any) and rebuilds it from
+   * `missionWingCounts` — the Hub, the Office, the Library behind it, and every component
+   * wing's own war rooms so far, as one fresh merged group. Re-adds the Library's own stations
+   * and label every time, since they lived on the group this just replaced.
+   */
+  private rebuildHexOffice(): void {
+    if (this.hexOffice) this.scene.remove(this.hexOffice.group);
+    this.hexOffice = buildHexOffice(this.missionWingCounts);
+    this.scene.add(this.hexOffice.group);
+    this.addHexLibraryStations();
   }
 
   /**
@@ -233,9 +249,16 @@ export class BuildingLayout implements LayoutStrategy {
       minZ: Math.min(...corners.map((c) => c.z)),
       maxZ: Math.max(...corners.map((c) => c.z)),
     };
-    const label = roomLabel('Library', new THREE.Vector3(center.x, 0, center.z), rect);
-    this.hexOffice.group.add(label);
-    roomLabelBatchFor(this.scene).collect(this.hexOffice.group);
+    // Issue #259 review: `rebuildHexOffice` replaces `this.hexOffice.group` wholesale every
+    // time a new mission grows a wing — a fresh `roomLabel()` + `collect()` every single time
+    // would leak one stale, now-orphaned label into `RoomLabelBatch` per rebuild (it has no
+    // `untrack`, unlike `tombstoneNameBatch`). The Library's own hex cell never moves (its own
+    // count is fixed at 1), so one label, reused and just re-parented onto the new group, is
+    // always still correctly positioned — `track()` is its own idempotent no-op after the first
+    // rebuild.
+    if (!this.hexLibraryLabel) this.hexLibraryLabel = roomLabel('Library', new THREE.Vector3(center.x, 0, center.z), rect);
+    this.hexOffice.group.add(this.hexLibraryLabel);
+    roomLabelBatchFor(this.scene).track(this.hexLibraryLabel);
   }
 
   get roomKinds(): RoomKind[] {
@@ -253,30 +276,41 @@ export class BuildingLayout implements LayoutStrategy {
     // Unset `this.floor` is `ALL_FLOORS` (`src/addons/building.ts` never passes a floor option
     // for it), the original behavior: every room shows, repo tag or none.
     const rooms = this.floor === undefined ? worldRooms : worldRooms.filter((room) => matchesFloor(this.floor!, room.repo));
-    let grew = false;
+    const newRooms = rooms.filter((room) => !this.missionRooms.has(room.id));
     for (const room of rooms) {
       const known = this.missionRooms.get(room.id);
-      if (known) {
-        known.update(room);
-        continue;
-      }
-      const index = this.missionRooms.size;
-      const built = buildMissionRoom(room, index, this.rememberedMissionCounts(room.id));
-      this.missionRooms.set(room.id, built);
-      this.scene.add(built.group);
-      roomLabelBatchFor(this.scene).collect(built.group);
-      // Issue #159 review round 1: a room built with sleepers already present (a reload, not a
-      // fresh mission) creates its nameplates before `this.scene.add` above; this catches them.
-      tombstoneNameBatchFor(this.scene).collect(built.group);
-      for (const [key, station] of built.stations) this.stations.set(key, station);
-      grew = true;
+      if (known) known.update(room);
     }
-    // Issue #123: every war room's door opens directly onto the mission corridor, never
-    // through another room, so a new room never touches another room's own walls — only the
-    // hall (once, for the corridor's own doorway) and the corridor itself need a rebuild.
-    if (grew) {
-      this.rebuildHallWalls();
-      this.rebuildMissionCorridor();
+    if (newRooms.length > 0) {
+      // Issue #259: a new mission's wing (`componentForRepo`) grows by exactly one room, in the
+      // order its own mission first appears here — the wing's own N-th claimed hex cell, never
+      // reassigned once claimed (`HexRoomPlanner.buildHexWorld`'s own append-only guarantee).
+      // Every new room's own wing count is tallied first, then the hex structure rebuilds once
+      // for the whole batch (never once per room): `rebuildHexOffice` tears down and rebuilds
+      // every wing's geometry, so doing that once per new mission in a multi-mission poll would
+      // be pure waste.
+      const wingOf = new Map<string, ComponentRole>();
+      const ordinalOf = new Map<string, number>();
+      for (const room of newRooms) {
+        const wing = componentForRepo(room.repo);
+        wingOf.set(room.id, wing);
+        this.missionWingCounts = { ...this.missionWingCounts, [wing]: this.missionWingCounts[wing] + 1 };
+        ordinalOf.set(room.id, this.missionWingCounts[wing] - 1);
+      }
+      this.rebuildHexOffice();
+      for (const room of newRooms) {
+        const wing = wingOf.get(room.id)!;
+        const hexRoom = this.hexOffice.layout.rooms.filter((candidate) => candidate.role === wing)[ordinalOf.get(room.id)!]!;
+        const index = this.missionRooms.size;
+        const built = buildMissionRoom(room, index, hexRoom, this.rememberedMissionCounts(room.id));
+        this.missionRooms.set(room.id, built);
+        this.scene.add(built.group);
+        roomLabelBatchFor(this.scene).collect(built.group);
+        // Issue #159 review round 1: a room built with sleepers already present (a reload, not a
+        // fresh mission) creates its nameplates before `this.scene.add` above; this catches them.
+        tombstoneNameBatchFor(this.scene).collect(built.group);
+        for (const [key, station] of built.stations) this.stations.set(key, station);
+      }
     }
     this.missionBoardEntries = rooms.filter((room) => room.kind === 'mission')
       .map((room) => ({ title: room.title, state: room.state, createdAt: room.createdAt, closedAt: room.closedAt }));
@@ -322,20 +356,17 @@ export class BuildingLayout implements LayoutStrategy {
       const record = this.rooms.find((room) => room.kind === query);
       if (record) slot = slotFor(record.index);
     }
-    if (!slot) {
-      const byId = [...this.missionRooms.values()].find((room) => room.id === name);
-      if (byId) {
-        slot = byId.slot;
-      } else {
-        // Two mission rooms can slugify to the same title (issue #89 review, fix round 2):
-        // picking the first one silently would show the wrong room. The exact public id
-        // always disambiguates them; a title match only resolves when exactly one applies.
-        const byTitle = [...this.missionRooms.values()].filter((room) => slugify(room.title) === query);
-        if (byTitle.length === 1) slot = byTitle[0]!.slot;
-        else if (byTitle.length > 1) console.debug(`roomView("${name}") matches more than one mission room by title; none resolved`);
-      }
-    }
     if (slot) return roomViewFromSlot(slot);
+    // Issue #259: a mission war room is a hex room now — framed the same way `HexRooms.ts`
+    // already frames the Hub/Office/Library (`hexRoomView`), not `roomViewFromSlot`.
+    const byId = [...this.missionRooms.values()].find((room) => room.id === name);
+    if (byId) return hexRoomView(byId.hexRoom);
+    // Two mission rooms can slugify to the same title (issue #89 review, fix round 2): picking
+    // the first one silently would show the wrong room. The exact public id always
+    // disambiguates them; a title match only resolves when exactly one applies.
+    const byTitle = [...this.missionRooms.values()].filter((room) => slugify(room.title) === query);
+    if (byTitle.length === 1) return hexRoomView(byTitle[0]!.hexRoom);
+    if (byTitle.length > 1) console.debug(`roomView("${name}") matches more than one mission room by title; none resolved`);
     // Issue #218 step 2/3 review: `#room=hub` / `#room=hex-office` frame the new hex rooms,
     // the same way `#room=office` already frames the rect one. Checked last so none of the
     // names above (`office` included: the rect room keeps that name, see `HexRooms.ts`) ever
@@ -415,8 +446,9 @@ export class BuildingLayout implements LayoutStrategy {
       // library's own scene) without this layout needing to know what a "scene swap" is.
       if (inside(slot.rect)) return { ...roomViewFromSlot(slot), kind: record.kind };
     }
+    // Issue #259: a mission war room is a hex room; `inside(rect)` only ever fit a rectangle.
     for (const room of this.missionRooms.values()) {
-      if (inside(room.slot.rect)) return roomViewFromSlot(room.slot);
+      if (pointInPolygon({ x, z }, room.hexRoom.corners)) return hexRoomView(room.hexRoom);
     }
     // Issue #249: a double-click in isometric over the hex structure (Hub or Office) did
     // nothing — this only ever scanned the rect rooms above. Checked last, so it never changes
@@ -434,23 +466,15 @@ export class BuildingLayout implements LayoutStrategy {
    * room exists, which `setWallColliders([])` already treats as unobstructed.
    */
   wallColliders(): WallRect[] {
-    const hallDoors = [
-      ...this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0).map(matchingDoor),
-      ...(this.missionRooms.size > 0 ? [MISSION_CORRIDOR_HALL_DOOR] : []),
-    ];
+    const hallDoors = this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0).map(matchingDoor);
     const colliders: WallRect[] = [...wallRects(HALL, hallDoors)];
     for (const record of this.rooms) {
       const slot = slotFor(record.index);
       colliders.push(...wallRects(slot.rect, [slot.door, ...record.extraDoors]));
     }
-    // Issue #123: every war room has only its own door now (no `extraDoors` chain), plus the
-    // mission corridor's own walls, the one shared frontage they all open onto.
-    for (const room of this.missionRooms.values()) {
-      colliders.push(...wallRects(room.slot.rect, [room.slot.door]));
-    }
-    if (this.missionRooms.size > 0) {
-      colliders.push(...wallRects(missionCorridorRect(this.missionRooms.size), this.missionCorridorDoors()));
-    }
+    // Issue #259: every war room's walls (and its stair's own open edge) come from the hex
+    // structure's own shared `hex-walls` zone now, the same as the Hub/Office/Library —
+    // `hexWallColliders(layout)` already covers every room in `layout.rooms`, wings included.
     colliders.push(...this.hexOffice.wallColliders);
     return colliders;
   }
@@ -846,40 +870,15 @@ export class BuildingLayout implements LayoutStrategy {
 
   private rebuildHallWalls(): void {
     if (this.hallWalls) this.scene.remove(this.hallWalls);
-    const doors = [
-      ...this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0).map(matchingDoor),
-      // Issue #123: the hall's own one doorway into the whole mission wing, through the
-      // corridor — never a door per war room (that chained through `extraDoors` before).
-      ...(this.missionRooms.size > 0 ? [MISSION_CORRIDOR_HALL_DOOR] : []),
-    ];
+    // Issue #259: the mission wing is a separate hex structure now, with no door into the hall
+    // at all (its own entrance is the Hub, reached by its own means) — the hall's doors are
+    // only ever its ring-0 rented rooms.
+    const doors = this.rooms.map((room) => slotFor(room.index)).filter((slot) => slot.ring === 0).map(matchingDoor);
     this.hallWalls = buildWalls(HALL, doors, OFFICE.height, ['south', 'west']);
     this.hallWalls.name = 'building-hall-walls';
     // Its own zone: the overview lowers the hall walls like the room walls
     markStatic(this.hallWalls, { zone: 'hall-walls', overviewLower: OFFICE.height });
     this.scene.add(this.hallWalls);
-  }
-
-  /** Every war room's own door onto the mission corridor (issue #123), the corridor's one
-   * doorway back into the hall included. Shared by `rebuildMissionCorridor` and `wallColliders`
-   * so the collision list can never drift from what the corridor's walls actually build. */
-  private missionCorridorDoors(): Door[] {
-    return [MISSION_CORRIDOR_DOOR, ...[...this.missionRooms.values()].map((room) => matchingDoor(room.slot))];
-  }
-
-  private rebuildMissionCorridor(): void {
-    if (this.missionRooms.size === 0) return;
-    if (this.missionCorridor) this.scene.remove(this.missionCorridor);
-    const rect = missionCorridorRect(this.missionRooms.size);
-    const group = new THREE.Group();
-    group.name = 'mission-corridor';
-    group.add(missionCorridorFloor(rect));
-    const walls = buildWalls(rect, this.missionCorridorDoors());
-    walls.name = 'room-walls';
-    markCutaway(walls);
-    group.add(walls);
-    group.add(buildCeiling(rect));
-    this.scene.add(group);
-    this.missionCorridor = group;
   }
 
   /**
