@@ -391,8 +391,11 @@ test('a room door has a frame of two posts and a lintel in the room floor color'
 
 test('every doorway of the building has a frame, outer rings and war rooms included', () => {
   const { scene, layout, agent } = building();
-  // Fill the first ring and open an outer room (8 rooms)
-  for (let i = 0; i < 6 + 9 * 6; i++) layout.seatFor(agent(`idle-${i}`, 'idle'), null);
+  // Fill the first ring and open an outer room (8 rooms). Issue #258: the Library no longer
+  // force-occupies a ring-0 slot (it is a hex room behind the hex Office now), so ring 0
+  // holds one more idle-capable lounge than before this step — it takes more idle agents to
+  // spill into an outer room than the old 6 + 9*6 did.
+  for (let i = 0; i < 70; i++) layout.seatFor(agent(`idle-${i}`, 'idle'), null);
   layout.syncWorldRooms([missionRoom('A'), missionRoom('B'), missionRoom('C')]);
   const roomCount = layout.roomKinds.length;
   assert.ok(roomCount >= 8, `an outer ring exists (${roomCount} rooms)`);

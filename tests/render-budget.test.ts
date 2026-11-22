@@ -239,13 +239,21 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // (this fixture's 9 war rooms' statement/docs/kanban boards merged into one mesh each, 2
   // canvas draw calls per room instead of 3; see the baseline comment above), landing it at
   // 406. Round 7's hair-bucket recovery (#165, see the baseline comment above) then drops it
-  // one further, to 405. Issue #218 steps 2/3 then adds 4 (the hex Hub and Office build
+  // one further, to 405. Issue #218 steps 2/3 add 4 (the hex Hub and Office build
   // unconditionally, not behind a flag, so this fixture's own scene carries them too — see
-  // the baseline comment in the test above for the breakdown), landing it at 409. Still
+  // the baseline comment in the test above for the breakdown), landing it at 409 on its own.
+  // Issue #258 (step 4, the Library) frees exactly those 4 back: this fixture's own stored
+  // room list (`tests/real-size-office.ts`) still names 'library', but `BuildingLayout` now
+  // drops that entry before building (the Library is a hex room behind the Office, never a
+  // rect one any more) — the whole rect library room (its walls, floor, ceiling, door frame
+  // and bookshelves, merged into the ordinary room zones) stops costing anything, and the
+  // hex Library itself costs nothing new (it shares the hex Hub/Office's own walls/floors/
+  // walkway zones, not a zone of its own). Net: back to 405, the plan's own predicted "close
+  // to zero" render-budget trade for this step confirmed by measurement, not assumed. Still
   // exactly one value across all 8 runs — the fixture's own seeded names
   // (`tests/real-size-office.ts`) never change which hair style, face state or equipped item
   // an agent lands on between runs, and the tool crib is one fixed static piece.
-  assert.deepEqual([...totals], [409], `expected every one of 8 runs to measure 409, got ${[...totals]}`);
+  assert.deepEqual([...totals], [405], `expected every one of 8 runs to measure 405, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

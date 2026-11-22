@@ -8,7 +8,7 @@ import { HALL, ROOM_SIZE, matchingDoor, slotFor, type Door, type Rect, type Room
 import { buildCeiling, buildRoom, buildWalls, markCutaway, QUEUE_COUNT_SIGN, ROOM_STATION_TYPE, RoomFrame, WALL_HEIGHT, roomTitle, station, wallRects, type RoomKind, type WallRect } from './rooms.js';
 import { deskCameraPose, deskTalkSpotPose, monitorWorldCorners } from './deskGeometry.js';
 import { showLoadedPortrait } from './portrait.js';
-import { roomLabelBatchFor } from './roomLabels.js';
+import { roomLabel, roomLabelBatchFor } from './roomLabels.js';
 import {
   buildMissionRoom,
   MISSION_CORRIDOR_DOOR,
@@ -223,6 +223,19 @@ export class BuildingLayout implements LayoutStrategy {
       const position = new THREE.Vector3(center.x + dx, 0, center.z + dz);
       this.stations.set(`hex-library-${i}`, station('researching', position, lookAt));
     }
+    // Issue #258: the rect library room (and its own label, built by `buildRoom`) is gone;
+    // this is the hex Library's own replacement, same text ("Library", `roomTitle`'s own
+    // name for the kind), so wayfinding keeps showing a "Library" plate on the new room.
+    const corners = this.hexOffice.layout.library.corners;
+    const rect: Rect = {
+      minX: Math.min(...corners.map((c) => c.x)),
+      maxX: Math.max(...corners.map((c) => c.x)),
+      minZ: Math.min(...corners.map((c) => c.z)),
+      maxZ: Math.max(...corners.map((c) => c.z)),
+    };
+    const label = roomLabel('Library', new THREE.Vector3(center.x, 0, center.z), rect);
+    this.hexOffice.group.add(label);
+    roomLabelBatchFor(this.scene).collect(this.hexOffice.group);
   }
 
   get roomKinds(): RoomKind[] {
@@ -747,9 +760,12 @@ export class BuildingLayout implements LayoutStrategy {
   }
 
   private claimOfType(type: string): string {
-    // Research prefers the Library room's shelves over the two hall shelves
+    // Research prefers the Library's own shelves over the two hall shelves. Issue #258: the
+    // Library is a hex room now (`hex-library-${i}` stations, `addHexLibraryStations`), not a
+    // rect `room${index}_researching_*` one — both name shapes count as "the Library" here.
+    const isLibraryKey = (key: string) => key.startsWith('room') || key.startsWith('hex-library');
     const keys = type === 'researching'
-      ? [...this.keysOfType(type).filter((key) => key.startsWith('room')), ...this.keysOfType(type).filter((key) => !key.startsWith('room'))]
+      ? [...this.keysOfType(type).filter(isLibraryKey), ...this.keysOfType(type).filter((key) => !isLibraryKey(key))]
       : this.keysOfType(type);
     const free = keys.find((key) => !this.stations.get(key)!.occupied);
     if (free) return this.claim([free], type);
