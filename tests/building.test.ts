@@ -418,10 +418,12 @@ test('agents of a mission work in its war room, their helpers stand near them, a
 // `combinedBoard`'s shared canvas, its own region (index 2 of the same 3 specs
 // `buildMissionRoom` passes it — only `width`/`height` affect a region's own bounds), so a
 // hit's `uv.y` is in that shared canvas's full UV space, not a region-local [0, 1].
+// Issue #259 review round 2: the display wall's own board grid shrank along with the room
+// (BOARD_W/BOARD_H, `buildMissionRoom`'s own constants) — same 3 specs, smaller dimensions.
 const kanbanRegion = combinedBoard([
-  { width: 3.6, height: 1.6, position: new THREE.Vector3(), rotationY: 0 },
-  { width: 2.4, height: 1.6, position: new THREE.Vector3(), rotationY: 0 },
-  { width: 3.6, height: 1.8, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 1.4, height: 0.8, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 1.4, height: 0.8, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 1.4, height: 0.8, position: new THREE.Vector3(), rotationY: 0 },
 ]).regionOf(2);
 const SECTION_TOP_PX = kanbanRegion.h / 2;
 const uvForCanvasY = (y: number) => kanbanRegion.vBottom + (1 - y / kanbanRegion.h) * (kanbanRegion.vTop - kanbanRegion.vBottom);
@@ -617,17 +619,24 @@ test('AC5: a researching mission agent never goes to the library-knowledge shelv
   assert.doesNotMatch(seat.key, /^hex-library-/, 'hex-library- is the building Library, not the war room');
 });
 
-test('AC4: once the room\'s one researching spot is taken, the next researcher still stays in the room, not a dedicated room', () => {
+// Issue #259 review round 2: there is no generic "room:<id>" ring any more (no meeting table,
+// no standing ring — Gabriel's own round-6 base set is work furniture only). Once a war room's
+// one piece of a kind is taken, the next agent of that same activity has nowhere room-specific
+// left and falls through to the main room's lounge, the same graceful-degradation path
+// `BuildingLayout.claimInRoom` already used for "no free spot of any kind".
+test('AC4: once the room\'s one researching spot is taken, the next researcher falls through to the lounge, not a dedicated room', () => {
   const { layout, agent } = setup();
   layout.syncWorldRooms([missionRoom()]);
   layout.seatFor(agent('r1', 'researching', { room: 'room-1' }), null);
   const seat = layout.seatFor(agent('r2', 'researching', { room: 'room-1' }), null)!;
-  assert.match(seat.key, /^mission0_/, 'still in the war room: the generic ring, not the library or a dedicated room');
+  assert.doesNotMatch(seat.key, /^mission0_/, 'no war-room ring left to fall back to');
+  assert.doesNotMatch(seat.key, /^hex-library-/, 'not the library either');
 });
 
-// --- Issue #129: a 9th desk-like agent overflows to the room's standing ring, not a 9th desk ---
+// --- Issue #129/#259 review round 2: a desk-cap overflow has no standing ring any more — it
+// falls through to the lounge, the same as any other kind of war-room overflow. ---
 
-test('AC4 (#129): once a war room\'s desk cap is full, the next desk-like agent uses the room\'s standing ring', () => {
+test('AC4 (#129): once a war room\'s desk cap is full, the next desk-like agent falls through to the lounge', () => {
   const { layout, agent, tick } = setup();
   layout.syncWorldRooms([missionRoom()]);
   for (let i = 0; i < 8; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
@@ -635,36 +644,13 @@ test('AC4 (#129): once a war room\'s desk cap is full, the next desk-like agent 
   for (let i = 0; i < 8; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
   const overflow = layout.seatFor(agent('d8', 'implementing', { room: 'room-1' }), null)!;
   assert.doesNotMatch(overflow.key, /_furniture_/, 'no extra desk piece');
-  // mission0_seat_0 through 7 are the meeting table's own seats (TABLE_SEATS,
-  // missionRooms.ts); 8 and up are the standing ring. A desk-cap overflow must stand.
-  assert.doesNotMatch(overflow.key, /^mission0_seat_[0-7]$/, 'not seated at the meeting table');
-  assert.match(overflow.key, /^mission0_seat_/, 'the room\'s own standing ring instead');
-});
-
-// --- Issue #129 review round 2: the standing ring fills before the meeting table's own
-// seats, even though they share one station type (posture is the only difference) ---
-
-test('every desk-cap overflow stands, until the standing ring itself is full', () => {
-  const { layout, agent, tick } = setup();
-  layout.syncWorldRooms([missionRoom()]);
-  // room-1's door is off-center (missionSlot's first wing column, issue #125 review): 3 desk slots here.
-  for (let i = 0; i < 3; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
-  tick(0);
-  for (let i = 0; i < 3; i++) layout.seatFor(agent(`d${i}`, 'implementing', { room: 'room-1' }), null);
-  // STANDING_SPOTS (missionRooms.ts) is 12: every one of the next 12 overflow agents must stand.
-  for (let i = 0; i < 12; i++) {
-    const seat = layout.seatFor(agent(`o${i}`, 'implementing', { room: 'room-1' }), null)!;
-    assert.doesNotMatch(seat.key, /^mission0_seat_[0-7]$/, `overflow ${i} sat at the meeting table instead of standing`);
-  }
-  // The 13th overflow: every desk and every standing spot is full, so only the table's own seats are left.
-  const lastResort = layout.seatFor(agent('o12', 'implementing', { room: 'room-1' }), null)!;
-  assert.match(lastResort.key, /^mission0_seat_[0-7]$/, 'the meeting table\'s own seats, the true last resort');
+  assert.doesNotMatch(overflow.key, /^mission0_/, 'no war-room ring left to fall back to');
 });
 
 // --- Issue #126 review round 2: growth must actually reach seating, and an activity change
 // inside the same room must re-run claimInRoom, through the real BuildingLayout ---
 
-test('a desk-like agent moves onto a grown desk once one exists, not forever stuck on the generic ring', () => {
+test('a desk-like agent moves onto a grown desk once one exists, not left in the lounge', () => {
   const { layout, agent, tick } = setup();
   layout.syncWorldRooms([missionRoom()]);
   // Issue #209: the base work set's own desk is there from the start, so the first
@@ -675,7 +661,7 @@ test('a desk-like agent moves onto a grown desk once one exists, not forever stu
 
   const b = agent('b', 'implementing', { room: 'room-1' });
   const firstB = layout.seatFor(b, null)!;
-  assert.match(firstB.key, /^mission0_seat_/, 'no second desk exists yet: the generic ring');
+  assert.doesNotMatch(firstB.key, /^mission0_/, 'no second desk exists yet, and no war-room ring left: the lounge');
 
   tick(0); // grows a second desk, now that two implementing agents are counted in the room
   // Same activity, same room target string: only an activity-aware re-check (not the
@@ -684,7 +670,7 @@ test('a desk-like agent moves onto a grown desk once one exists, not forever stu
   const moves = tick(4000); // past the dwell time
   const move = moves.find((m) => m.agentId === 'b');
   assert.ok(move, 'agent b is moved once the dwell time passes');
-  assert.match(move!.seat.key, /mission0_furniture_/, 'onto the grown desk, not left on the generic ring');
+  assert.match(move!.seat.key, /mission0_furniture_/, 'onto the grown desk, not left in the lounge');
 });
 
 // --- Issue #126 review round 3: growing one furniture station must never carry its

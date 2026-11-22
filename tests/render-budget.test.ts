@@ -256,11 +256,15 @@ test('the worst case measures the same total every run: the fixture\'s one rando
   // already exist and cost nothing extra to grow (`tests/hex-rooms.test.ts`'s own "a wing costs
   // nothing extra to render" test). Net measured: -5, landing at 400 — the budget rule from
   // issue #217 ("every later step that adds hex geometry must pay for itself") confirmed again
-  // by measurement; this step actually *frees* calls rather than merely breaking even. Still
-  // exactly one value across all 8 runs — the fixture's own seeded names
-  // (`tests/real-size-office.ts`) never change which hair style, face state or equipped item
-  // an agent lands on between runs, and the tool crib is one fixed static piece.
-  assert.deepEqual([...totals], [400], `expected every one of 8 runs to measure 400, got ${[...totals]}`);
+  // by measurement; this step actually *frees* calls rather than merely breaking even.
+  // Issue #259 review round 2: the war room itself shrank again (Gabriel's own "too big and too
+  // empty" — a smaller hex radius, the meeting table and standing ring gone, the base work set
+  // moved onto 4 walls instead of a wider desk grid). Each room's own furniture draws fewer
+  // merged-zone pieces; net measured: -15, landing at 385. Still exactly one value across all
+  // 8 runs — the fixture's own seeded names (`tests/real-size-office.ts`) never change which
+  // hair style, face state or equipped item an agent lands on between runs, and the tool crib
+  // is one fixed static piece.
+  assert.deepEqual([...totals], [385], `expected every one of 8 runs to measure 385, got ${[...totals]}`);
 });
 
 test('the merge keeps every visible furniture triangle: merged vertices equal the source vertices', () => {

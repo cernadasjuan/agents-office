@@ -6,12 +6,12 @@ import type { Station } from '../../scene/Office.js';
 import { markStatic } from '../../scene/StaticMerge.js';
 import type { PickTarget } from '../../scene/Selection.js';
 import type { WorldRoom } from '../../extensions.js';
-import { ROOM_SIZE, type Rect } from './RoomPlanner.js';
+import { type Rect } from './RoomPlanner.js';
 import { place, roomLabel, setRoomLabelText, station } from './rooms.js';
 import { HexFrame } from './HexFrame.js';
-import { buildHexWorld, type ComponentRole, type HexRoomGeometry, type HexWorldCounts } from './HexRoomPlanner.js';
+import { buildHexWorld, WAR_ROOM_HEX_RADIUS, type ComponentRole, type HexRoomGeometry, type HexWorldCounts } from './HexRoomPlanner.js';
 import { sceneOf, setTombstoneName, tombstoneNameBatchFor, tombstoneNameplate } from './tombstoneNames.js';
-import { furnishWarRoom, WAR_ROOM_WIDTH, type WarRoomCounts } from './warRoomFurnishing.js';
+import { furnishWarRoom, type WarRoomCounts } from './warRoomFurnishing.js';
 import { sessionLines, sessionRows, type SessionEntry, type SessionRow } from './displayWall.js';
 
 /**
@@ -50,8 +50,12 @@ export function testHexWarRoom(index: number, wing: ComponentRole = 'tooling'): 
 }
 
 export const MAX_TOMBSTONES = 12;
-const TABLE_SEATS = 8;
-const STANDING_SPOTS = 12;
+
+/** The display wall's own depth from the door (issue #259 review round 2): a hex room's
+ * display wall sits on the edge directly opposite the door, reachable through the door frame's
+ * own `d` axis at this depth (the flat-to-flat distance across a regular hexagon,
+ * `R * sqrt(3)`), the same way the old rect room's far wall sat at `d = ROOM_SIZE`. */
+const DISPLAY_WALL_D = WAR_ROOM_HEX_RADIUS * Math.sqrt(3) - 0.12;
 
 /** The one board-drawing recipe (title line, then up to as many lines as the height fits), at a given pixel offset within whatever canvas owns it — `canvasBoard`'s own canvas, or one region of `combinedBoard`'s shared one. */
 function drawBoardContent(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, title: string, lines: string[]): void {
@@ -334,72 +338,49 @@ export function buildMissionRoom(room: WorldRoom, index: number, hexRoom: HexRoo
   group.name = `mission-room-${index}`;
   markStatic(group, { zone: 'missions', castShadow: false });
   const stations = new Map<string, Station>();
-  const key = (n: number) => `mission${index}_seat_${n}`;
-  const type = `room:${room.id}`;
 
   // Issue #259: a hex war room's floor and walls are built once, generically, as part of
   // `HexRooms.ts`'s own shared `hex-floors`/`hex-walls` zones (every room in the whole
   // structure, hub/office/library/every wing room, merged into the same two draw calls) — this
   // function only furnishes the interior. No ceiling (round 7: hex rooms have none) and no
   // door frame (round 7: a hex room's only entrance is its stair, never a door).
-  //
-  // The old rect room's `doorWallLength` was always exactly `WAR_ROOM_WIDTH` (its door sat on
-  // the east/west wall, whose own length is the rect's z-span — a war room's own fixed
-  // dimension, not something that varied by door side the way a generic room's did).
-  const doorWallLength = WAR_ROOM_WIDTH;
-  const label = roomLabel(room.title, frame.point(0, ROOM_SIZE / 2), rect);
+  const label = roomLabel(room.title, frame.point(0, DISPLAY_WALL_D / 2), rect);
   group.add(label);
 
-  // The table and its seats; more agents stand around it
-  const center = frame.point(0, 6.2);
-  const table = PIECES.meetingTable().create();
-  table.position.copy(center);
-  group.add(table);
-  for (let i = 0; i < TABLE_SEATS; i++) {
-    const angle = (i / TABLE_SEATS) * Math.PI * 2;
-    const position = center.clone().add(new THREE.Vector3(Math.cos(angle) * 1.9, 0, Math.sin(angle) * 1.9));
-    stations.set(key(i), { type, position, lookAt: center.clone().setY(1.0), occupied: false, posture: 'seated' });
-  }
-  for (let i = 0; i < STANDING_SPOTS; i++) {
-    const angle = ((i + 0.5) / STANDING_SPOTS) * Math.PI * 2;
-    const position = center.clone().add(new THREE.Vector3(Math.cos(angle) * 3.0, 0, Math.sin(angle) * 3.0));
-    stations.set(key(TABLE_SEATS + i), { type, position, lookAt: center.clone().setY(1.2), occupied: false, posture: 'standing' });
-  }
+  // Issue #259 review round 2: no meeting table, no generic standing ring. Gabriel's round-6
+  // feedback named a war room's base set as work furniture only (desk, debug station,
+  // whiteboard, bookshelf) — the social, round-the-table gathering spot belongs to the Hub now
+  // (`HexRooms.ts`'s kitchen/play corner), not a war room. Nothing uses a bare `room:${id}`
+  // station type any more: a desk-cap overflow simply has nowhere room-specific left to stand
+  // and falls through to the lounge (`BuildingLayout.claimInRoom`'s own existing
+  // graceful-degradation path, unchanged).
 
-  // Wall boards: the statement on the far wall, docs and issues beside it, the kanban on a side
-  // wall. Issue #244: statement, docs and kanban share one mesh (`combinedBoard`) — none of the
-  // three is individually clickable at the board level, so merging them costs nothing
-  // functionally and saves 2 of the 4 per-room draw calls a canvas board can never get back
-  // through `StaticBatch`. `issues` stays its own plain `canvasBoard`: it is a pick target
-  // (`issuesBoardPickTarget` below) resolved by plain object identity, so sharing its mesh with
-  // the other three would make a click anywhere on them wrongly resolve to it too.
+  // Wall boards: statement, docs, issues and kanban+sessions all mount on the display wall
+  // (the edge directly opposite the door, round 7: "a clear display wall... no objects in
+  // front of it"), 2x2, not split across two different walls the way the old rect room split
+  // the kanban onto a side wall. Issue #244: statement, docs and kanban share one mesh
+  // (`combinedBoard`) — none of the three is individually clickable at the board level, so
+  // merging them costs nothing functionally and saves 2 of the 4 per-room draw calls a canvas
+  // board can never get back through `StaticBatch`. `issues` stays its own plain `canvasBoard`:
+  // it is a pick target (`issuesBoardPickTarget` below) resolved by plain object identity, so
+  // sharing its mesh with the other three would make a click anywhere on them wrongly resolve
+  // to it too.
   //
   // Issue #223: the kanban region also carries the live-sessions list, as a second section on
   // the same region of the same shared canvas (`combined.drawSections`/`regionOf`, below) —
   // still no 5th mesh, the exact extra per-room draw call
-  // `tests/mission-corridor-render-budget.test.ts`'s growth-rate guard exists to catch (a 5th
-  // mesh, even merged into `combined.mesh`'s own geometry, cannot share `combined.mesh`'s pick
-  // resolution the way `issues` avoids `combined.mesh` entirely above — sessions needs its own
-  // resolver (`resolveSessionRow` below) reached through the SAME region a click on it already
-  // lands on, which only works by splitting that region's own canvas area, never by adding a
-  // 4th spec). This wall (a = doorWallLength / 2, opposite the tombstones) carries no floor
-  // furniture at all, so nothing ever stands in front of it, the "no furniture in front" rule
-  // (AC1) without needing a new wall-finding seam for a rectangle room: a war room's four walls
-  // are already fixed roles (door, far, tombstones, kanban+sessions). The far wall's own
-  // clock/whiteboard/bookshelf moved clear of its own board row for the same reason
-  // (`warRoomFurnishing.ts`).
+  // `tests/mission-corridor-render-budget.test.ts`'s growth-rate guard exists to catch.
+  const BOARD_W = 1.4;
+  const BOARD_H = 0.8;
+  const BOARD_INSET = DISPLAY_WALL_D - 2.2;
   const combined = combinedBoard([
-    { width: 3.6, height: 1.6, position: frame.point(0, ROOM_SIZE - 0.12, 1.7), rotationY: frame.faceDoor },
-    { width: 2.4, height: 1.6, position: frame.point(-3.6, ROOM_SIZE - 0.12, 1.7), rotationY: frame.faceDoor },
-    // Issue #123 review round 2: this used the rect's x-span unconditionally, left over from
-    // when the door wall always ran along x — once the corridor fix moved war room doors onto
-    // the east/west wall, the door-wall's real length became the rect's z-span instead, and the
-    // board floated 3+ meters off the side wall it is meant to sit flush against.
-    { width: 3.6, height: 1.8, position: frame.point(doorWallLength / 2 - 0.12, 6, 1.7), rotationY: frame.faceDoor - Math.PI / 2 },
+    { width: BOARD_W, height: BOARD_H, position: frame.point(-0.75, BOARD_INSET, 2.0), rotationY: frame.faceDoor },
+    { width: BOARD_W, height: BOARD_H, position: frame.point(0.75, BOARD_INSET, 2.0), rotationY: frame.faceDoor },
+    { width: BOARD_W, height: BOARD_H, position: frame.point(0.75, BOARD_INSET, 0.9), rotationY: frame.faceDoor },
   ]);
   group.add(combined.mesh);
-  const issuesCanvas = canvasBoard(2.4, 1.6);
-  issuesCanvas.mesh.position.copy(frame.point(3.6, ROOM_SIZE - 0.12, 1.7));
+  const issuesCanvas = canvasBoard(BOARD_W, BOARD_H);
+  issuesCanvas.mesh.position.copy(frame.point(-0.75, BOARD_INSET, 0.9));
   issuesCanvas.mesh.rotation.y = frame.faceDoor;
   group.add(issuesCanvas.mesh);
   const boards = {
@@ -459,9 +440,10 @@ export function buildMissionRoom(room: WorldRoom, index: number, hexRoom: HexRoo
 
   // Issue #124: the title and lock signs sit on the far wall, over the statement board, not
   // near the door frame (the narration: "they are in the door frames so it's kind of weird").
-  const title = sign(room.title, frame.point(0, ROOM_SIZE - 0.3, 2.6), rect, false);
+  const title = sign(room.title, frame.point(0, DISPLAY_WALL_D, 2.9), rect, false);
   group.add(title);
   const tombstonesGroup = new THREE.Group();
+  tombstonesGroup.name = 'tombstones';
   group.add(tombstonesGroup);
   // One tombstone per ended session, along the side wall opposite the kanban, keyed by its own id
   // (not by position): a session that returns removes its own tombstone, not whichever is oldest.
@@ -473,7 +455,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, hexRoom: HexRoo
   // up to the walkway (round 7: "rooms without doors"). The rect version's closed-door slab
   // (a mesh blocking the doorway when a mission locks) has no hex equivalent; `lockSign` below
   // is the one signal a locked mission's war room still gives.
-  const lockSign = sign('Locked: mission closed', frame.point(0, ROOM_SIZE - 0.3, 2.3), rect, false, 'rgba(120, 40, 40, 0.9)');
+  const lockSign = sign('Locked: mission closed', frame.point(0, DISPLAY_WALL_D, 2.65), rect, false, 'rgba(120, 40, 40, 0.9)');
   lockSign.visible = false;
   group.add(lockSign);
   let sleepersSign: CSS2DObject | null = null;
@@ -481,6 +463,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, hexRoom: HexRoo
   // War-room furniture (issue #125): a rule set, not hand-placed. `furniture` holds every
   // piece `furnishWarRoom` plans; it rebuilds only when the peak live count actually grows.
   const furniture = new THREE.Group();
+  furniture.name = 'furniture';
   group.add(furniture);
   // A stable identity per piece (its station type and its ordinal among stations of that
   // same type), not the array position `furnishWarRoom` happens to place it at (issue #125/
@@ -492,24 +475,34 @@ export function buildMissionRoom(room: WorldRoom, index: number, hexRoom: HexRoo
   let peakCounts: WarRoomCounts = initialCounts ? { ...initialCounts } : { deskLike: 0, debugging: 0 };
   let furnitureStationKeys: string[] = [];
 
+  // Issue #259 review round 2: a placement or station's own `edge` (an offset from the room's
+  // open/door edge, `warRoomFurnishing.ts`'s own doc comment) resolves to a `HexFrame` native to
+  // that specific wall, not the door's — the desk/debug/whiteboard/bookshelf walls are not
+  // reachable through the door frame's own `a`/`d` axis the way the display wall (directly
+  // opposite the door) is. Undefined keeps using the room's one door frame, as every rect
+  // room's own plan already does.
+  const frameFor = (edge: number | undefined): HexFrame => (edge === undefined ? frame : new HexFrame(hexRoom, (hexRoom.openEdges[0] + edge) % 6));
+
   const rebuildFurniture = () => {
     for (const key of furnitureStationKeys) stations.delete(key);
     furnitureStationKeys = [];
     furniture.clear();
-    const plan = furnishWarRoom(room.id, peakCounts, frame.doorAlong);
+    const plan = furnishWarRoom(room.id, peakCounts);
     plan.pieces.forEach((placement) => {
       const object = placement.piece.create();
       object.userData.piece = placement.piece.name;
-      place(furniture, object, frame.point(placement.a, placement.d, placement.y ?? 0), frame.faceDoor + (placement.turn ?? 0));
+      const pieceFrame = frameFor(placement.edge);
+      place(furniture, object, pieceFrame.point(placement.a, placement.d, placement.y ?? 0), pieceFrame.faceDoor + (placement.turn ?? 0));
     });
     const ordinalByType = new Map<string, number>();
     plan.stations.forEach((spot) => {
       const ordinal = ordinalByType.get(spot.type) ?? 0;
       ordinalByType.set(spot.type, ordinal + 1);
       const key = furnitureKey(spot.type, ordinal);
+      const spotFrame = frameFor(spot.edge);
       // Room-scoped, issue #126: `room:<id>:<activity>` so BuildingLayout can route an agent to
       // this room's own piece without ever matching another war room's same-named station.
-      stations.set(key, station(`room:${room.id}:${spot.type}`, frame.point(spot.a, spot.d), frame.point(...spot.look), spot.posture));
+      stations.set(key, station(`room:${room.id}:${spot.type}`, spotFrame.point(spot.a, spot.d), spotFrame.point(...spot.look), spot.posture));
       furnitureStationKeys.push(key);
     });
   };
@@ -574,7 +567,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, hexRoom: HexRoo
         tombstones.delete(id);
       }
       shown.forEach((entry, i) => {
-        const position = frame.point(-ROOM_SIZE / 2 + 0.7 + (i % 2) * 1.05, 2.2 + Math.floor(i / 2) * 1.6, 0);
+        const position = frame.point(-2.3 + (i % 3) * 0.95, 1.2 + Math.floor(i / 3) * 1.0, 0);
         const name = entry.name ?? 'Ended session';
         let item = tombstones.get(entry.id);
         if (!item) {
@@ -601,7 +594,7 @@ export function buildMissionRoom(room: WorldRoom, index: number, hexRoom: HexRoo
       const extra = sleepers.length - shown.length;
       if (sleepersSign) group.remove(sleepersSign);
       sleepersSign = sleepers.length > 0
-        ? sign(`${sleepers.length} past session${sleepers.length === 1 ? '' : 's'}${extra > 0 ? ` (+${extra} not shown)` : ''}`, frame.point(-ROOM_SIZE / 2 + 1.2, 1.4, 1.8), rect, true)
+        ? sign(`${sleepers.length} past session${sleepers.length === 1 ? '' : 's'}${extra > 0 ? ` (+${extra} not shown)` : ''}`, frame.point(-2.0, 1.0, 1.8), rect, true)
         : null;
       if (sleepersSign) group.add(sleepersSign);
     },

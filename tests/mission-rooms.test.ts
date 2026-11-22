@@ -185,9 +185,12 @@ test('AC1: a new war room has its must-have furniture from the start, built from
   const missionRoom = buildMissionRoom(room('a', 'open'), 0, testHexWarRoom(0));
   const names: string[] = [];
   missionRoom.group.traverse((o) => { if (typeof o.userData.piece === 'string') names.push(o.userData.piece); });
-  for (const must of ['clock', 'whiteboard', 'bookshelf', 'desk', 'debugStation']) assert.ok(names.includes(must), `missing ${must}`);
+  // Issue #259 review round 2: no clock any more — Gabriel's own base set names only the work
+  // furniture (desk, debug station, whiteboard, bookshelf), no ornamental pieces.
+  for (const must of ['whiteboard', 'bookshelf', 'desk', 'debugStation']) assert.ok(names.includes(must), `missing ${must}`);
   assert.ok(!names.includes('sofa'), 'issue #209: no sofa in a war room');
   assert.ok(!names.includes('lowTable'), 'issue #209: no coffee table in a war room');
+  assert.ok(!names.includes('clock'), 'issue #259: no clock in a war room');
 });
 
 test('desk-like furniture grows with the peak live count and never shrinks back', () => {
@@ -212,9 +215,11 @@ test('desk-like furniture grows with the peak live count and never shrinks back'
   assert.equal(countOf('desk'), 2);
   assert.equal(countOf('debugStation'), 1);
 
-  // A later, bigger peak grows it further, up to this room's own physical fit
+  // A later, bigger peak grows it further, up to this room's own physical fit (issue #259
+  // review round 2: MAX_DESK_SLOTS shrank from 8 to 6, shared between desk and debug — debug
+  // stations fill first, so 2 debugging + 6 desk-like requested caps out at 2 debug + 4 desk).
   missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
-  assert.equal(countOf('desk'), 6);
+  assert.equal(countOf('desk'), 4);
   assert.equal(countOf('debugStation'), 2);
 });
 
@@ -297,10 +302,12 @@ test('the issue board is pickable, and its pick id points at this room', () => {
 // `combinedBoard`, only `width`/`height` affect a region's own bounds) gives this test the real
 // region bounds to convert a region-local canvas-Y pixel position into that full UV space,
 // instead of assuming the region is the whole canvas.
+// Issue #259 review round 2: the display wall's own board grid shrank along with the room
+// (BOARD_W/BOARD_H, `buildMissionRoom`'s own constants) — same 3 specs, smaller dimensions.
 const kanbanRegion = combinedBoard([
-  { width: 3.6, height: 1.6, position: new THREE.Vector3(), rotationY: 0 },
-  { width: 2.4, height: 1.6, position: new THREE.Vector3(), rotationY: 0 },
-  { width: 3.6, height: 1.8, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 1.4, height: 0.8, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 1.4, height: 0.8, position: new THREE.Vector3(), rotationY: 0 },
+  { width: 1.4, height: 0.8, position: new THREE.Vector3(), rotationY: 0 },
 ]).regionOf(2);
 const SECTION_TOP_PX = kanbanRegion.h / 2; // this region, 2 equal sections
 const uvForCanvasY = (y: number) => kanbanRegion.vBottom + (1 - y / kanbanRegion.h) * (kanbanRegion.vTop - kanbanRegion.vBottom);
@@ -400,6 +407,36 @@ test('issue #259: every mesh of a built hex war room stays inside its own hex in
   assert.deepEqual(failures, []);
 });
 
+// Issue #259 review round 2: the furniture plan now spans 4 of the room's own 6 walls (each
+// its own `HexFrame`, `warRoomFurnishing.ts`'s own doc comment) instead of one rect room's
+// single frame — a real risk the old single-frame layout never had is two pieces on
+// *different* walls landing in the same world spot near the room's own center. This checks
+// every named furniture piece (`userData.piece`, desks/debug stations/whiteboard/bookshelf —
+// not boards, signs or tombstones, which are not floor-standing pieces competing for the same
+// footprint) pairwise, at the full desk/debug count where the grid is busiest.
+test('issue #259 review round 2: no two furniture pieces of a built hex war room overlap, at the full desk/debug count', () => {
+  const failures: string[] = [];
+  for (const index of [0, 1, 2, 3, 20]) {
+    const hexRoom = testHexWarRoom(index);
+    const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index, hexRoom);
+    missionRoom.updateCounts({ deskLike: 6, debugging: 2 });
+    missionRoom.group.updateMatrixWorld(true);
+    const boxes: Array<{ name: string; box: THREE.Box3 }> = [];
+    missionRoom.group.traverse((object) => {
+      if (typeof object.userData.piece !== 'string') return;
+      boxes.push({ name: object.userData.piece, box: new THREE.Box3().setFromObject(object) });
+    });
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        if (boxes[i].box.intersectsBox(boxes[j].box)) {
+          failures.push(`room ${index}: ${boxes[i].name} overlaps ${boxes[j].name}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
 // --- Issue #123 review round 2: the kanban board's own along-the-door-wall offset still used
 // the rect's x-span unconditionally (left over from when the door wall always ran along x),
 // so once the corridor fix put war room doors on the east/west wall, the board floated meters
@@ -440,7 +477,13 @@ function combinedBoardWorldCenter(mesh: THREE.Mesh, groupIndex: number): THREE.V
 // documented trade-off of this port, not a missed regression. This test checks the board still
 // sits on the room's own outer third along its side axis (same intent: "on a side wall," not
 // floating near the center), not literal wall contact.
-test('issue #259: the kanban board sits toward the hex room\'s own side, not floating near the center, at several ordinals', async () => {
+// Issue #259 review round 2: statement, docs and kanban all mount on the display wall now (the
+// edge opposite the door, round 7's own "a clear display wall"), 2x2 with the issues board —
+// not split across the far wall and a side wall the way the old rect room did. This checks the
+// combined mesh's own 3 regions all sit near the display wall's own depth (not floating near
+// the room's center) and are laterally distinct from each other (statement and docs share a
+// row, kanban sits below one of them — never on top of either).
+test('issue #259: the combined board (statement/docs/kanban) mounts on the display wall, each region laterally distinct', async () => {
   for (const index of [0, 1]) {
     const hexRoom = testHexWarRoom(index);
     const missionRoom = buildMissionRoom(room(`m${index}`, 'open'), index, hexRoom);
@@ -448,24 +491,22 @@ test('issue #259: the kanban board sits toward the hex room\'s own side, not flo
     let combinedBoardMesh: THREE.Mesh | undefined;
     missionRoom.group.traverse((object) => {
       const mesh = object as THREE.Mesh;
-      // `mesh.geometry.groups.length === 3` alone is not unique: a plain `CylinderGeometry`
-      // (chair poles, desk legs, plant pots) always carries 3 built-in groups (top, bottom,
-      // side) of its own. The combined board mesh is the only `MeshBasicMaterial` with a
-      // canvas-texture map in this room — everything else here is a toon material.
       const material = mesh.material as THREE.MeshBasicMaterial | undefined;
       if (mesh.isMesh && (mesh.geometry.groups?.length ?? 0) === 3 && material?.isMeshBasicMaterial && material.map) combinedBoardMesh = mesh;
     });
     if (!combinedBoardMesh) throw new Error(`room ${index}: combined board mesh (statement/docs/kanban) not found`);
-    // `buildMissionRoom` passes statement, docs, kanban to `combinedBoard` in that order (group 2 = kanban).
-    const position = combinedBoardWorldCenter(combinedBoardMesh, 2);
     const { HexFrame } = await import('../src/addons/building/HexFrame.js');
     const frame = new HexFrame(hexRoom, hexRoom.openEdges[0]);
-    // The board's own `a` offset (`WAR_ROOM_WIDTH / 2 - 0.12`) projected onto the frame's
-    // `along` axis: however the hex interior's own width compares to the old rect's, the board
-    // must still sit in the outer third along that axis, not drift back toward `a = 0`.
-    const toBoard = position.clone().sub(frame.point(0, 0));
-    const alongOffset = toBoard.dot(frame.along);
-    assert.ok(Math.abs(alongOffset) > hexRoom.radius * 0.3, `room ${index}: kanban board's own along-axis offset (${alongOffset.toFixed(2)}) is too close to the room's center line`);
+    const doorPoint = frame.point(0, 0);
+    const positions = [0, 1, 2].map((i) => combinedBoardWorldCenter(combinedBoardMesh!, i));
+    for (const position of positions) {
+      const toDoor = position.distanceTo(doorPoint);
+      assert.ok(toDoor > hexRoom.radius, `room ${index}: a display-wall board sits only ${toDoor.toFixed(2)}m from the door, nearer the room's center than its own far wall`);
+    }
+    // No two of the 3 regions land at the same world spot (statement/docs share a row, kanban
+    // sits in its own spot below one of them).
+    assert.ok(positions[0].distanceTo(positions[1]) > 0.5, 'statement and docs overlap');
+    assert.ok(positions[0].distanceTo(positions[2]) > 0.5 || positions[1].distanceTo(positions[2]) > 0.5, 'kanban overlaps both statement and docs');
   }
 });
 

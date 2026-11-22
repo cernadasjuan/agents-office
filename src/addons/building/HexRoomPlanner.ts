@@ -37,28 +37,27 @@ export const HEX_OFFSET: HexPoint = { x: 300, z: 200 };
  * them — unlike the round 3 spike's decorative mosaic, where tiles touch edge to edge. Large
  * enough that each room's own stair ramp (`RAMP_LENGTH`) clears the other room's wall with a
  * real walkway span left over in between, and (issue #259) wide enough for two neighboring
- * `WAR_ROOM_HEX_RADIUS` wing rooms to sit side by side without overlapping. */
-export const LATTICE_SPACING = 34;
+ * `WAR_ROOM_HEX_RADIUS` wing rooms, or a wing room and the Hub, to sit side by side without
+ * overlapping (the largest pairwise sum is `HUB_RADIUS + WAR_ROOM_HEX_RADIUS` = 18; this
+ * leaves 8 clear for the walkway). */
+export const LATTICE_SPACING = 26;
 /** An ordinary hex room's own floor/wall circumradius (the Hub, Office and Library). */
 export const ROOM_RADIUS = 7;
 /** The Hub's own radius: a larger hex, the old `HALL`'s role. */
 export const HUB_RADIUS = 10;
 /**
- * A component-wing war room's own circumradius (issue #259). Bigger than `ROOM_RADIUS`: a war
- * room reuses `warRoomFurnishing.ts`'s existing furniture plan as-is (the same `a`/`d`
- * coordinates the old rectangular `WAR_ROOM_WIDTH` (18) x `ROOM_SIZE` (12) room used), and a
- * hex interior that size needs a bigger circumradius than a plain hex room to actually contain
- * every piece. A hand-picked point check (every desk slot, wall board, plant spot, the meeting
- * table ring and the tombstone strip) found 13 enough with a 0.3 m wall margin to spare — but
- * `tests/mission-rooms.test.ts`'s own exhaustive mesh-bounds check (every mesh a built room
- * actually renders, at full desk/debug counts, several wings and ordinals) is the real gate:
- * it found a few outer pieces (plants, the low divider) still poking past 13-15. 16 is the
- * measured value that check passes at, not a guessed round number. A hex interior this much
- * bigger than the old rect's own footprint does mean a board authored to sit flush against the
- * old rect's side wall no longer touches this bigger hex's own wall — see
- * `tests/mission-rooms.test.ts`'s own "toward the hex room's own side" test and comment.
+ * A component-wing war room's own circumradius (issue #259 review round 2). Gabriel's own
+ * round-6 complaint: the first hex war room pass (radius 16, built to contain the old rect
+ * room's furniture plan unscaled) was "a bit too big and a bit too empty" — a smaller room
+ * sized for his own named base set (one desk, one debug station, one whiteboard, one small
+ * bookshelf, no sofa, no table, `warRoomFurnishing.ts`'s own doc comment) instead. 8 is the
+ * measured value `tests/mission-rooms.test.ts`'s own exhaustive mesh-bounds check (every mesh
+ * a built room actually renders, at full desk/debug counts, several wings and ordinals) passes
+ * at, not a guessed round number — the smallest radius that check accepted once the furniture
+ * plan itself moved onto 4 of the room's own 6 walls (`warRoomFurnishing.ts`'s own doc
+ * comment) instead of being authored for a rectangle and left to fit however it could.
  */
-export const WAR_ROOM_HEX_RADIUS = 16;
+export const WAR_ROOM_HEX_RADIUS = 8;
 
 /** Whether a hex room role is one of the 4 component wings (not the hub, office or library). */
 export function isComponentRole(role: RoomRole): role is ComponentRole {

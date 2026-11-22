@@ -1,25 +1,30 @@
 import { PIECES } from '../../furniture/index.js';
 import { Colors } from '../../utils/Colors.js';
-import { DOOR_WIDTH, ROOM_SIZE } from './RoomPlanner.js';
 import type { Placement, SpotPlan } from './furnishing.js';
 
 /** Fewer book colors than the full palette, so a room full of bookshelves still merges cheap. */
 const BOOKSHELF_COLORS = Colors.books.slice(0, 2);
 
 /**
- * One furnishing plan per war room (issue #125): a rule set, not a hand-placed
- * room. Every war room gets the must-have pieces; a few could-haves unlock by
- * live-agent tier; desk-like and debug stations grow with the peak concurrent
- * count and never shrink back. Placement is seeded by the mission id, so a
- * reload gives the same room, with a small jitter so it reads as lived-in, not
- * symmetric. No piece is built here: everything comes from `src/furniture/`.
+ * One furnishing plan per hex war room (issue #259 review round 2, Gabriel's own round-6
+ * complaint: "a bit too big and a bit too empty"). A rule set, not a hand-placed room. Every
+ * war room gets exactly the base work set he named, nothing more: one work desk, one debug
+ * station, one whiteboard, one small bookshelf. No sofa, no table, no clock, no plants, no
+ * water cooler, no TV, no rug, no divider — the ornamental filler the old rect room carried to
+ * fill a bigger floor is gone along with that floor; this room is sized to need none of it.
+ * Desk-like and debug stations still grow with the peak concurrent count and never shrink.
+ * Placement is seeded by the mission id, so a reload gives the same room, with a small jitter
+ * so it reads as lived-in, not symmetric. No piece is built here: everything comes from
+ * `src/furniture/`.
  *
- * Issue #209: a war room is a work space only, never a rest stop. The must-haves
- * are one workstation (desk), one debug station, one whiteboard and one small
- * bookshelf, present even with zero live agents (the base work set); more desks
- * and debug stations still grow with the peak count, on top of that base, and
- * never shrink. There is no sofa and no coffee table here any more: an idle
- * mission agent now goes to the main room's lounge instead (`BuildingLayout.ts`).
+ * A hex room's own stair (the door) sits on one edge; this plan uses 4 of its other 5 edges —
+ * two "near" ones (`DESK_EDGE`, `DEBUG_EDGE`, one edge-step either side of the door) for the
+ * desk grid, two "far" ones (`WHITEBOARD_EDGE`, `BOOKSHELF_EDGE`) for the must-have wall
+ * pieces. The 6th edge, directly opposite the door, is the display wall
+ * (`missionRooms.ts`'s own combined board) — reserved, no furniture of this plan's own stands
+ * in front of it. Each edge number here is an *offset* from the room's own open (door) edge,
+ * not an absolute index: `missionRooms.ts` resolves `(openEdge + offset) % 6` against the real
+ * room before placing anything, so this file stays pure geometry, no hex room needed.
  */
 
 export interface WarRoomCounts {
@@ -64,169 +69,75 @@ function jitter(rand: () => number, base: number, spread: number): number {
   return base + (rand() * 2 - 1) * spread;
 }
 
-export type RoomTier = 'small' | 'medium' | 'large';
-
-/** The live-agent tier (rulebook §2): not room size, there is only one, but how many desks are busy. */
-export function tierFor(liveDeskAgents: number): RoomTier {
-  if (liveDeskAgents >= 6) return 'large';
-  if (liveDeskAgents >= 4) return 'medium';
-  return 'small';
-}
+/** Edge offsets from the room's own open (door) edge — see this file's own doc comment. */
+const DESK_EDGE = 1;
+const DEBUG_EDGE = 5;
+const WHITEBOARD_EDGE = 2;
+const BOOKSHELF_EDGE = 4;
 
 /**
- * Issue #193: a war room's door-wall width, moderately wider than a generic room's
- * `ROOM_SIZE` (12, which stays the war room's own depth — unchanged, so every `d` position
- * below still lines up with the meeting table, the far wall and the tombstone strip exactly
- * as before). The extra 6 m of width is what fits the two new desk columns below.
+ * Up to 6 desk-like slots (down from the old rect room's 8: a smaller room needs a smaller
+ * cap). Two dedicated slots each on the desk and debug walls, plus one overflow slot each on
+ * the whiteboard and bookshelf walls (clear of those pieces themselves, placed further along
+ * the same wall) — so a busy room can still seat 6 concurrent desk-like/debugging agents
+ * without crowding a 7th or 8th piece onto an already-furnished wall.
  */
-export const WAR_ROOM_WIDTH = 18;
-
-/**
- * Up to 8 desk slots (rulebook §3's physical-fit cap, issue #193 review: was 4, at
- * `ROOM_SIZE`-wide rooms). Round 7 feedback (#214) dropped the two middle-column slots
- * (`a = -2.4`, `a = 2.4`) that used to sit right beside the door: "the worst place to put
- * a desk... everybody from the corridor is going to see" (Gabriel, verbatim). Every slot
- * now lives in one of three side-wall lanes instead, each turned to face the room center
- * ("looking from the wall to the center") rather than the door:
- * - `a = -4.6` is still out: the ended-session tombstone strip runs along the left side
- *   wall at `a` from about -5.3 to -4.25, the same reason the original grid (12-wide
- *   rooms) had only 3 columns instead of 4.
- * - `a = 4.6` sits clear of the tombstone strip and of the meeting table's standing ring
- *   (radius 3.0 around the room center at `d = 6.2`; `a = 4.6` is already past that
- *   radius, so every depth in the room is clear, not just the original two rows) — it
- *   gets a third row.
- * - `a = -7.0` and `a = 7.0` are the wider room's own outer pair (issue #193): clear of
- *   the tombstone strip (anchored on `ROOM_SIZE`, not `WAR_ROOM_WIDTH`, so it never
- *   moved), clear of the meeting ring for the same reason as `a = 4.6`, and clear of the
- *   near-wall furniture (the water cooler and TV, both anchored off `nearWall`, over 1.5
- *   m further out than this lane). `a = 7.0` gets the third row too; `a = -7.0` stays at
- *   two, since the gap to the left wall (bounded by the tombstone strip on one side) does
- *   not fit a second lane there.
- */
-const DESK_SLOTS: ReadonlyArray<{ a: number; d: number }> = [
-  { a: 4.6, d: 1.4 }, { a: 4.6, d: 3.6 }, { a: 4.6, d: 5.8 },
-  { a: -7.0, d: 1.4 }, { a: -7.0, d: 3.6 },
-  { a: 7.0, d: 1.4 }, { a: 7.0, d: 3.6 }, { a: 7.0, d: 5.8 },
+const DESK_SLOTS: ReadonlyArray<{ edge: number; a: number; d: number }> = [
+  { edge: DEBUG_EDGE, a: -1.3, d: 1.2 },
+  { edge: DEBUG_EDGE, a: 1.3, d: 1.2 },
+  { edge: DESK_EDGE, a: -1.3, d: 1.2 },
+  { edge: DESK_EDGE, a: 1.3, d: 1.2 },
+  { edge: WHITEBOARD_EDGE, a: -2.0, d: 1.2 },
+  { edge: BOOKSHELF_EDGE, a: -2.0, d: 1.2 },
 ];
 export const MAX_DESK_SLOTS = DESK_SLOTS.length;
 
-/** Faces a piece toward the room center (`a = 0`) from whichever side wall it stands on. */
-function faceCenterTurn(a: number): number {
-  return a < 0 ? Math.PI / 2 : -Math.PI / 2;
-}
+const JITTER_POS = 0.06;
+const JITTER_ROT = (6 * Math.PI) / 180;
+/** How far into the room a seated station sits from its desk/debug station (its own chair is
+ * built into the piece at this same offset, round 7 #214's own fix, carried over to the edge
+ * frame's native "into the room" axis instead of a rect room's lateral one). */
+const SEAT_INSET = 0.75;
 
-const JITTER_POS = 0.12;
-const JITTER_ROT = (8 * Math.PI) / 180;
-
-/**
- * Half the door's physical lane, plus a desk or debug station's own worst-case
- * half-width (0.9 m) and the grid's own jitter (0.12 m), rounded up with a small margin.
- */
-export const DOOR_PATH_CLEARANCE = DOOR_WIDTH / 2 + 1.1;
-
-/**
- * The real door is not always centered on the room's door wall (missionSlot's first ring
- * has two wing columns, each with its own door offset). A column whose footprint would
- * sit inside the door's real lane is dropped from the grid rather than assumed clear,
- * the way the rest of the grid assumes a centered door. A room with an off-center door
- * loses the slot, not the door path.
- */
-function clearsDoor(a: number, doorAlong: number): boolean {
-  return Math.abs(a - doorAlong) >= DOOR_PATH_CLEARANCE;
-}
-
-export function furnishWarRoom(missionId: string, counts: WarRoomCounts, doorAlong = 0): WarRoomPlan {
+export function furnishWarRoom(missionId: string, counts: WarRoomCounts): WarRoomPlan {
   const rand = mulberry32(seedFromMission(missionId));
-  const roomTier = tierFor(counts.deskLike + counts.debugging);
   const pieces: Placement[] = [];
   const stations: SpotPlan[] = [];
 
   // --- Desk grid: debug stations fill first, so a room with a debugger shows it even at low
   // headcount. Issue #209: the base work set keeps at least one of each, even in a fresh room
   // with no agents yet; the peak counts (which only ever grow) take over past that floor. ---
-  const slots = DESK_SLOTS.filter((slot) => clearsDoor(slot.a, doorAlong));
   const baseDebugging = Math.max(counts.debugging, 1);
   const baseDeskLike = Math.max(counts.deskLike, 1);
-  const deskSlotCount = Math.min(baseDeskLike + baseDebugging, MAX_DESK_SLOTS, slots.length);
-  // The base set guarantees one of each (the floors above), but the room's own slot cap
-  // (MAX_DESK_SLOTS, or fewer near an off-center door) can still fit less than the floors'
-  // own sum once real debugging headcount grows past it — debug stations fill first (below),
-  // so an uncapped debug count here would then leave zero desks (issue #209 review: a debugger
-  // headcount of 8 or more, the room's own full cap, silently dropped the base desk). Reserve
-  // at least one slot for the desk whenever the cap actually bites.
+  const deskSlotCount = Math.min(baseDeskLike + baseDebugging, MAX_DESK_SLOTS);
+  // The base set guarantees one of each (the floors above), but the room's own slot cap can
+  // still fit less than the floors' own sum once real debugging headcount grows past it —
+  // debug stations fill first (below), so an uncapped debug count here would then leave zero
+  // desks. Reserve at least one slot for the desk whenever the cap actually bites.
   const debugSlotCount = Math.min(baseDebugging, Math.max(deskSlotCount - 1, 0));
   for (let i = 0; i < deskSlotCount; i++) {
-    const { a, d } = slots[i];
+    const { edge, a, d } = DESK_SLOTS[i];
     const ja = jitter(rand, a, JITTER_POS);
     const jd = jitter(rand, d, JITTER_POS);
-    const turn = faceCenterTurn(a) + jitter(rand, 0, JITTER_ROT);
+    const turn = jitter(rand, 0, JITTER_ROT);
     const isDebug = i < debugSlotCount;
-    pieces.push({ piece: isDebug ? PIECES.debugStation() : PIECES.desk(), a: ja, d: jd, turn });
-    // Round 7 (#214) review fix: `faceCenterTurn` rotates the piece's built-in chair (local
-    // z = +0.7 in Desk.ts) toward the center side of the desk, not the wall side — an agent
-    // placed on the wall side the way the first pass had it stands about 1.6 m from the chair
-    // it is supposed to be sitting in. Seat the station on the same side the chair actually
-    // lands on, so the agent sits in the chair.
-    const seatA = ja + (a < 0 ? 0.9 : -0.9);
-    stations.push({ type: isDebug ? 'debugging' : 'implementing', a: seatA, d: jd, look: [ja, jd, 1.2], posture: 'seated' });
+    pieces.push({ piece: isDebug ? PIECES.debugStation() : PIECES.desk(), edge, a: ja, d: jd, turn });
+    stations.push({ type: isDebug ? 'debugging' : 'implementing', edge, a: ja, d: jd - SEAT_INSET, look: [ja, jd, 1.2], posture: 'seated' });
   }
 
-  // --- Must-haves: a clock, plants, a bookshelf, a whiteboard. Issue #209: no sofa, no low
-  // table — a war room is a work space, not a place to relax; an idle mission agent goes to
-  // the main room's lounge instead (`BuildingLayout.ts`'s routing). ---
-  const nearWall = WAR_ROOM_WIDTH / 2 - 0.1; // just inside the side walls (a = ±9)
-  // Issue #223: Gabriel named the clock, the whiteboard and the bookshelf as the pieces
-  // standing in front of the far wall's display boards ("the library shelf, the clock and the
-  // whiteboard should not be in front of those"). All three still stand against the far wall
-  // (the same reasoning as before: the side walls are already spoken for, tombstones and
-  // kanban), but out past the board row's own span (statement/docs/issues tile a = -4.8 to
-  // 4.8, `missionRooms.ts`), clear of `missionRooms.ts`'s new sessions board too (a = 5.3 to
-  // 7.9, on the kanban side wall, not this one, but kept this far out anyway for the hex
-  // rebuild's sake). Checked clear of the plant spots below and of the desk grid (a different
-  // depth entirely) by hand; `tests/war-room-furnishing.test.ts` guards the no-overlap rule.
-  pieces.push({ piece: PIECES.clock(), a: jitter(rand, -7.6, 0.1), d: jitter(rand, ROOM_SIZE - 0.15, 0.05), y: 2.3 });
-  const whiteboardA = jitter(rand, -6.8, 0.08);
-  const whiteboardD = jitter(rand, ROOM_SIZE - 0.6, 0.08);
-  // Facing the door (no turn), the same as before.
-  pieces.push({ piece: PIECES.whiteboard(), a: whiteboardA, d: whiteboardD });
-  // Issue #126: a planning agent stands at this board, facing it (a = same, standing closer to
-  // the room, since the board now faces the door rather than the side wall it used to).
-  stations.push({ type: 'planning', a: whiteboardA, d: whiteboardD - 0.9, look: [whiteboardA, whiteboardD, 1.5], posture: 'standing' });
+  // --- Must-haves: one whiteboard, one small bookshelf. No sofa, no table (issue #209/round
+  // 6): a war room is a work space only, sized for exactly this set. ---
+  const whiteboardA = jitter(rand, 1.2, 0.06);
+  const whiteboardD = jitter(rand, 1.0, 0.05);
+  pieces.push({ piece: PIECES.whiteboard(), edge: WHITEBOARD_EDGE, a: whiteboardA, d: whiteboardD });
+  // Issue #126: a planning agent stands at this board, facing it.
+  stations.push({ type: 'planning', edge: WHITEBOARD_EDGE, a: whiteboardA, d: whiteboardD + SEAT_INSET, look: [whiteboardA, whiteboardD, 1.5], posture: 'standing' });
 
-  const bookshelfA = jitter(rand, 6.8, 0.08);
-  const bookshelfD = jitter(rand, ROOM_SIZE - 0.6, 0.08);
-  pieces.push({ piece: PIECES.bookshelf(undefined, rand, BOOKSHELF_COLORS), a: bookshelfA, d: bookshelfD });
+  const bookshelfA = jitter(rand, 1.2, 0.06);
+  const bookshelfD = jitter(rand, 0.9, 0.05);
+  pieces.push({ piece: PIECES.bookshelf(undefined, rand, BOOKSHELF_COLORS), edge: BOOKSHELF_EDGE, a: bookshelfA, d: bookshelfD });
   // Issue #126: a researching agent stands at the mission's own shelf, not the library
-  stations.push({ type: 'researching', a: bookshelfA, d: bookshelfD - 0.9, look: [bookshelfA, bookshelfD, 1.2], posture: 'standing' });
-
-  const plantCount = roomTier === 'small' ? 3 : roomTier === 'medium' ? 4 : 5;
-  // Every spot is at a >= 0 or dead center: the whole -a wall carries the ended-session
-  // tombstone strip (`missionRooms.ts`), which can grow the full depth of the room, and
-  // the near-door corners are where the desk grid's first row already stands (a debug
-  // station or desk, chair included). Five distinct spots, not a shorter list cycled: two
-  // plants jittered around the same base position land on top of each other.
-  const plantSpots: Array<[number, number]> = [
-    [nearWall - 0.4, ROOM_SIZE - 1.4], [0, 9.2], [1.8, 9.2], [3.5, 9.6], [4.2, ROOM_SIZE - 1.1],
-  ];
-  for (let i = 0; i < plantCount; i++) {
-    const [a, d] = plantSpots[i % plantSpots.length];
-    pieces.push({ piece: rand() > 0.5 ? PIECES.tallPlant() : PIECES.plant(), a: jitter(rand, a, 0.15), d: jitter(rand, d, 0.15) });
-  }
-  pieces.push({ piece: PIECES.rug(2.6, 2.6, 0x2c3e50), a: 0, d: 6.2 });
-
-  // --- Could-haves, gated by tier (rulebook §2) ---
-  if (roomTier !== 'small') pieces.push({ piece: PIECES.waterCooler(), a: jitter(rand, nearWall - 0.7, 0.1), d: jitter(rand, 8.6, 0.3) });
-  if (roomTier === 'large') {
-    pieces.push({ piece: PIECES.tv(), a: jitter(rand, nearWall, 0.05), d: jitter(rand, 9.5, 0.3), y: 2.2, turn: -Math.PI / 2 });
-    // Turned, so its long side runs along `d` (depth) and its thin side along `a`: it fits
-    // the one lane clear of everything else in the room, between the ended-session
-    // tombstone strip (its right edge near a = -4.25) and the meeting table's own ring of
-    // seats and standing spots (its left-most point near a = -2.9), for the room's full
-    // depth. A centered, untouched lane (a first pass tried d = 4.4, a = 0) lands on the
-    // door-facing meeting seat at (0, 4.3) and, with the desk grid's row depth below, on
-    // the standing ring too; this lane has neither.
-    if (rand() > 0.5) pieces.push({ piece: PIECES.lowDivider(2.2), a: jitter(rand, -3.8, 0.05), d: jitter(rand, 5.5, 0.3), turn: Math.PI / 2 });
-  }
+  stations.push({ type: 'researching', edge: BOOKSHELF_EDGE, a: bookshelfA, d: bookshelfD + SEAT_INSET, look: [bookshelfA, bookshelfD, 1.2], posture: 'standing' });
 
   return { pieces, stations };
 }

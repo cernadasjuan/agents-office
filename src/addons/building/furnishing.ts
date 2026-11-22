@@ -12,7 +12,11 @@ import type { RoomKind } from './rooms.js';
  * a plan into objects. No geometry is built here.
  */
 
-/** A piece in a room. `turn` is added to the rotation that faces the door: 0 faces the door, PI faces away. */
+/** A piece in a room. `turn` is added to the rotation that faces the door: 0 faces the door, PI faces away.
+ * `edge` (issue #259 review round 2): a hex war room's own edge offset from its open (door)
+ * edge — `missionRooms.ts` resolves `(openEdge + edge) % 6` against the real room and builds a
+ * `HexFrame` for that edge instead of the room's own door frame. Undefined (every rect room's
+ * own plan, `roomFurnishing`) keeps using the room's one door frame, unchanged. */
 export interface Placement {
   piece: PieceSpec;
   a: number;
@@ -20,6 +24,7 @@ export interface Placement {
   /** Height for a piece that hangs on a wall. */
   y?: number;
   turn?: number;
+  edge?: number;
 }
 
 export interface SpotPlan {
@@ -29,6 +34,8 @@ export interface SpotPlan {
   /** The point the agent looks at: a, d and height. */
   look: [number, number, number];
   posture?: Posture;
+  /** See `Placement.edge`. */
+  edge?: number;
 }
 
 export interface SignPlan {
